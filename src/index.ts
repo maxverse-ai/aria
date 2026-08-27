@@ -100,6 +100,30 @@ export type {
   ChannelRuntimeSnapshot,
   ChannelStreamingMode,
 } from './channel/plugin/types';
+export { WechatKfCallbackHandler } from './channel/wechat-kf/callback';
+export type {
+  WechatKfCallbackHandlerOptions,
+  WechatKfCallbackRequest,
+  WechatKfCallbackResponse,
+} from './channel/wechat-kf/callback';
+export { WechatKfApiClient, WechatKfApiError } from './channel/wechat-kf/client';
+export type {
+  WechatKfAccessTokenProvider,
+  WechatKfApiClientOptions,
+  WechatKfFetch,
+} from './channel/wechat-kf/client';
+export { WechatKfCrypto } from './channel/wechat-kf/crypto';
+export type { WechatKfCryptoOptions } from './channel/wechat-kf/crypto';
+export { wechatKfActorId, wechatKfScopeId } from './channel/wechat-kf/session';
+export type {
+  WechatKfMessage,
+  WechatKfNotification,
+  WechatKfNotificationSink,
+  WechatKfSendTextInput,
+  WechatKfSendTextResult,
+  WechatKfSyncMessagesInput,
+  WechatKfSyncMessagesResult,
+} from './channel/wechat-kf/types';
 
 // Stable outbound contracts. Aria itself is pass-through; deployments may
 // observe or govern these envelopes without patching the channel SDK.
