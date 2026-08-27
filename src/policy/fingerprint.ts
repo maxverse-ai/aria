@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { ProfileConfig, SandboxMode } from '../config/profile-schema';
+import type { ConversationSource } from '../conversation/types';
 import { canonicalizeJcs } from '../session/jcs';
 
 export interface FingerprintInputV2 {
@@ -13,7 +14,7 @@ export interface FingerprintInputV2 {
 }
 
 export interface ResourceScopeDigestInput {
-  source: 'im' | 'card' | 'comment' | 'meeting';
+  source: ConversationSource;
   chatId?: string;
   threadId?: string;
   commentScopeId?: string;

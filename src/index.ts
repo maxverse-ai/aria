@@ -78,6 +78,29 @@ export type {
   EngineHistoryEntry,
 } from './agent/plugin/types';
 
+// Channel plugins translate protocol-specific ingress/egress around one
+// channel-neutral conversation runtime. Deployments own plugin composition.
+export { ConversationRuntime } from './conversation/runtime';
+export type {
+  ConversationRuntimeDeps,
+  RecordConversationEventInput,
+  StartConversationInput,
+} from './conversation/runtime';
+export type { ConversationSource } from './conversation/types';
+export { ChannelPluginRegistry } from './channel/plugin/registry';
+export type {
+  ChannelCapabilities,
+  ChannelConversationPort,
+  ChannelIngressMode,
+  ChannelMessageKind,
+  ChannelPlugin,
+  ChannelPluginContext,
+  ChannelPluginPackage,
+  ChannelRuntime,
+  ChannelRuntimeSnapshot,
+  ChannelStreamingMode,
+} from './channel/plugin/types';
+
 // Stable outbound contracts. Aria itself is pass-through; deployments may
 // observe or govern these envelopes without patching the channel SDK.
 export { OutboundBroker } from './outbound/broker';

@@ -8,6 +8,7 @@ import {
   type CodexSandboxMode,
 } from '../config/permissions';
 import type { ProfileConfig } from '../config/profile-schema';
+import type { ConversationSource } from '../conversation/types';
 import type { AccessDecision } from './access';
 import {
   accessPolicyDigest,
@@ -17,7 +18,7 @@ import {
 } from './fingerprint';
 
 export interface ScopeContext {
-  source: 'im' | 'card' | 'comment' | 'meeting';
+  source: ConversationSource;
   chatId?: string;
   threadId?: string;
   actorId: string;
