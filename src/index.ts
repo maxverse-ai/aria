@@ -78,6 +78,70 @@ export type {
   EngineHistoryEntry,
 } from './agent/plugin/types';
 
+// Channel plugins translate protocol-specific ingress/egress around one
+// channel-neutral conversation runtime. Deployments own plugin composition.
+export { ConversationRuntime } from './conversation/runtime';
+export type {
+  ConversationRuntimeDeps,
+  RecordConversationEventInput,
+  StartConversationInput,
+} from './conversation/runtime';
+export type { ConversationSource } from './conversation/types';
+export { ChannelPluginRegistry } from './channel/plugin/registry';
+export type {
+  ChannelCapabilities,
+  ChannelConversationPort,
+  ChannelIngressMode,
+  ChannelMessageKind,
+  ChannelPlugin,
+  ChannelPluginContext,
+  ChannelPluginPackage,
+  ChannelRuntime,
+  ChannelRuntimeSnapshot,
+  ChannelStreamingMode,
+} from './channel/plugin/types';
+export { WechatKfCallbackHandler } from './channel/wechat-kf/callback';
+export type {
+  WechatKfCallbackHandlerOptions,
+  WechatKfCallbackRequest,
+  WechatKfCallbackResponse,
+} from './channel/wechat-kf/callback';
+export { WechatKfApiClient, WechatKfApiError } from './channel/wechat-kf/client';
+export type {
+  WechatKfAccessTokenProvider,
+  WechatKfApiClientOptions,
+  WechatKfFetch,
+} from './channel/wechat-kf/client';
+export { WechatKfCrypto } from './channel/wechat-kf/crypto';
+export type { WechatKfCryptoOptions } from './channel/wechat-kf/crypto';
+export { FileWechatKfCursorStore } from './channel/wechat-kf/cursor-store';
+export type {
+  FileWechatKfCursorStoreOptions,
+  WechatKfCursorStore,
+} from './channel/wechat-kf/cursor-store';
+export { startWechatKfCallbackServer } from './channel/wechat-kf/http-server';
+export type {
+  WechatKfCallbackServerHandle,
+  WechatKfCallbackServerOptions,
+} from './channel/wechat-kf/http-server';
+export { FileWechatKfNotificationInbox } from './channel/wechat-kf/inbox';
+export type { FileWechatKfNotificationInboxOptions } from './channel/wechat-kf/inbox';
+export { WechatKfNotificationProcessor } from './channel/wechat-kf/processor';
+export type {
+  WechatKfMessageSink,
+  WechatKfNotificationProcessorOptions,
+} from './channel/wechat-kf/processor';
+export { wechatKfActorId, wechatKfScopeId } from './channel/wechat-kf/session';
+export type {
+  WechatKfMessage,
+  WechatKfNotification,
+  WechatKfNotificationSink,
+  WechatKfSendTextInput,
+  WechatKfSendTextResult,
+  WechatKfSyncMessagesInput,
+  WechatKfSyncMessagesResult,
+} from './channel/wechat-kf/types';
+
 // Stable outbound contracts. Aria itself is pass-through; deployments may
 // observe or govern these envelopes without patching the channel SDK.
 export { OutboundBroker } from './outbound/broker';

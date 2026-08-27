@@ -66,8 +66,7 @@ import { createOwnerRefreshController } from '../policy/owner';
 import { weeklyQuotaFromEngineStatus } from '../run-status/quota';
 import { setRunStatusElapsed } from '../run-status/projector';
 import { getRunStatusItems } from '../run-status/preferences';
-import { RunExecutor } from '../runtime/run-executor';
-import type { RunAuditSink } from '../runtime/run-executor';
+import type { RunAuditSink, RunExecutor } from '../runtime/run-executor';
 import type { MessageAuditSink } from '../runtime/message-audit';
 import type { MessageResourceSink } from '../runtime/message-resource';
 import type { GovernanceAuditSink } from '../runtime/governance-audit';
@@ -79,15 +78,15 @@ import {
 import type { SessionCatalog } from '../session/catalog';
 import type { SessionStore } from '../session/store';
 import type { WorkspaceStore } from '../workspace/store';
-import { ActiveRuns, type RunHandle } from './active-runs';
+import type { ActiveRuns, RunHandle } from './active-runs';
 import { ChatModeCache, type ChatMode } from './chat-mode-cache';
 import { ChatTopologyResolver, isDmLikeTopology } from './chat-topology';
 import { handleCommentMention } from './comments';
-import { recordRunSessionEvent, startRunFlow } from './run-flow';
+import { ConversationRuntime } from '../conversation/runtime';
 import { commandSessionCatalogIdentity } from './session-catalog-identity';
 import { startKeepalive } from './keepalive';
 import { PendingQueue } from './pending-queue';
-import { ProcessPool } from './process-pool';
+import type { ProcessPool } from './process-pool';
 import { fetchQuotedContext, fetchTopicContext, type QuotedContext } from './quote';
 import { lookupMessageThreadId } from './thread-id';
 import { addWorkingReaction, removeReaction } from './reaction';
@@ -254,14 +253,21 @@ export interface StartChannelDeps {
 
 export async function startChannel(deps: StartChannelDeps): Promise<BridgeChannel> {
   const { cfg, agent, sessions, sessionCatalog, workspaces, controls } = deps;
-  const activeRuns = new ActiveRuns();
+  const conversations = new ConversationRuntime({
+    agent,
+    sessions,
+    ...(sessionCatalog ? { sessionCatalog } : {}),
+    workspaces,
+    maxConcurrentRuns: () => getMaxConcurrentRuns(controls.cfg),
+    ...(deps.runAudit ? { runAudit: deps.runAudit } : {}),
+    ...(deps.governanceAudit ? { governanceAudit: deps.governanceAudit } : {}),
+  });
+  const { activeRuns, executor, processPool: pool } = conversations;
   // ChatModeCache stays per-bridge-instance — invalidated on restart along
   // with everything else. Topic-mode chats only need one chat.get() call ever.
   const chatModeCache = new ChatModeCache();
   // Concurrency cap — reads `preferences.maxConcurrentRuns` on each acquire,
   // so /config bumps take effect for the next run.
-  const pool = new ProcessPool(() => getMaxConcurrentRuns(controls.cfg));
-  const executor = new RunExecutor({ agent, pool, activeRuns, ...(deps.runAudit ? { audit: deps.runAudit } : {}) });
   let meetingManager: MeetingManager | undefined;
 
   // Resolve the App Secret to plaintext. The config field can be a literal
@@ -427,10 +433,7 @@ export async function startChannel(deps: StartChannelDeps): Promise<BridgeChanne
           () =>
             runAgentBatch({
               channel,
-              executor,
-              sessions,
-              sessionCatalog,
-              workspaces,
+              conversations,
               media,
               batch,
               controls,
@@ -438,7 +441,6 @@ export async function startChannel(deps: StartChannelDeps): Promise<BridgeChanne
               cotStateFile,
               callbackAuth,
               messageRead: deps.messageRead,
-              governanceAudit: deps.governanceAudit,
               activePolicyFingerprints,
               lastRunModelByScope,
               scope,
@@ -1081,10 +1083,7 @@ async function intakeMessage(deps: IntakeDeps): Promise<void> {
 
 interface RunBatchDeps {
   channel: LarkChannel;
-  executor: RunExecutor;
-  sessions: SessionStore;
-  sessionCatalog?: SessionCatalog;
-  workspaces: WorkspaceStore;
+  conversations: ConversationRuntime;
   media: MediaCache;
   batch: NormalizedMessage[];
   controls: Controls;
@@ -1092,7 +1091,6 @@ interface RunBatchDeps {
   cotStateFile?: string;
   callbackAuth?: CallbackAuth;
   messageRead?: MessageResourceSink;
-  governanceAudit?: GovernanceAuditSink;
   activePolicyFingerprints: Map<string, string>;
   lastRunModelByScope: Map<string, string>;
   scope: string;
@@ -1103,10 +1101,7 @@ interface RunBatchDeps {
 async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
   const {
     channel,
-    executor,
-    sessions,
-    sessionCatalog,
-    workspaces,
+    conversations,
     media,
     batch,
     controls,
@@ -1114,7 +1109,6 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
     cotStateFile,
     callbackAuth,
     messageRead,
-    governanceAudit,
     activePolicyFingerprints,
     lastRunModelByScope,
     scope,
@@ -1178,7 +1172,7 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
   // the user is pointing at. An already-engaged topic keeps that history in its
   // resumed session, so we skip the fetch there.
   let topicContext: QuotedContext[] = [];
-  if (mode === 'topic' && threadId && !sessions.getRaw(scope)) {
+  if (mode === 'topic' && threadId && !conversations.hasStoredSession(scope)) {
     const exclude = new Set([...batchIds, ...quoteTargets]);
     topicContext = await fetchTopicContext(channel, threadId, {
       maxMessages: 40,
@@ -1307,7 +1301,7 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
       reason: reasoning.fallbackReason,
     });
   }
-  const flow = await startRunFlow({
+  const flow = await conversations.start({
     scopeId: scope,
     scope: scopeContext,
     prompt,
@@ -1315,11 +1309,6 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
     access: accessDecision,
     capability,
     profileConfig: controls.profileConfig,
-    sessions,
-    sessionCatalog,
-    workspaces,
-    executor,
-    governanceAudit,
     now: Date.now(),
     reasoningEffort: reasoning.effective ?? null,
     stopGraceMs: getAgentStopGraceMs(controls.cfg),
@@ -1382,10 +1371,8 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
   };
   if (flow.resumeFrom) await bindMessages(flow.resumeFrom);
   const recordSession = async (evt: AgentEvent): Promise<void> => {
-    recordRunSessionEvent({
+    conversations.recordEvent({
       scopeId: scope,
-      sessions,
-      sessionCatalog,
       capability,
       policy: flow.policy,
       event: evt,
@@ -1414,7 +1401,7 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
 
   // Resolve idle-timeout for this run: scope override (on SessionEntry) wins
   // over global default (preferences). 0 / undefined = no watchdog.
-  const scopeOverride = sessions.getIdleTimeoutMinutes(scope);
+  const scopeOverride = conversations.idleTimeoutMinutes(scope);
   const idleTimeoutMs =
     scopeOverride !== undefined
       ? scopeOverride > 0
