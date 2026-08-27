@@ -1,0 +1,119 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: Prepare the next patch PR or publish the version already merged to main
+        required: true
+        type: choice
+        options:
+          - prepare_patch
+          - publish_current
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aria-npm-release
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: Prepare patch release PR
+    if: inputs.operation == 'prepare_patch'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v6
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Setup pinned Node
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: .node-version
+          package-manager-cache: false
+
+      - name: Enable pnpm
+        run: corepack enable
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Prepare exact patch
+        id: prepare
+        run: pnpm release:prepare
+
+      - name: Report version already ready
+        if: steps.prepare.outputs.changed != 'true'
+        run: echo "Version ${{ steps.prepare.outputs.target }} is already ready on main; run publish_current after protected approval." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Create release branch and pull request
+        if: steps.prepare.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET_VERSION: ${{ steps.prepare.outputs.target }}
+        run: |
+          branch="release/v${TARGET_VERSION}-${GITHUB_RUN_ID}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "$branch"
+          git add package.json
+          git commit -m "chore(release): v${TARGET_VERSION}"
+          git push origin "$branch"
+          gh pr create --base main --head "$branch" --title "chore(release): v${TARGET_VERSION}" --body "Automated PATCH release preparation for v${TARGET_VERSION}. Publishing remains restricted to the protected npm-production environment."
+          gh pr merge "$branch" --auto --squash
+
+  publish:
+    name: Publish current main
+    if: inputs.operation == 'publish_current'
+    runs-on: ubuntu-latest
+    environment: npm-production
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - name: Checkout exact main
+        uses: actions/checkout@v6
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Setup pinned Node
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: .node-version
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+
+      - name: Enable pinned package tools
+        run: |
+          corepack enable
+          npm install --global npm@11.5.1
+
+      - name: Install without release cache
+        run: pnpm install --frozen-lockfile
+
+      - name: Fetch release state
+        run: git fetch origin main --tags --force
+
+      - name: Run exact-commit gates
+        run: pnpm ci:local
+
+      - name: Build and verify release candidate
+        run: |
+          pnpm artifact:build
+          pnpm artifact:verify
+
+      - name: Verify release boundary
+        run: pnpm release:gate
+
+      - name: Publish with npm trusted publishing
+        env:
+          ARIA_RELEASE_PUBLISH: "true"
+        run: pnpm release:publish

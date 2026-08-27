@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "stableLine": "0.1",
+  "patchMode": "automatic",
+  "batchWindowMinutes": 30,
+  "securityPatchMode": "immediate",
+  "prereleaseMode": "automatic",
+  "requireHumanForMinor": true,
+  "requireHumanForMajor": true,
+  "requireHumanForStablePromotion": true,
+  "frozen": false
+}

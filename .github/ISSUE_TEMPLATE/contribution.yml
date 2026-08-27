@@ -1,0 +1,90 @@
+name: Contribution proposal
+description: Propose one focused bug fix, feature, documentation change, or refactor.
+title: "[Contribution]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Describe one independently reviewable change. Do not include credentials, tokens, private paths, personal data, or other secrets.
+
+  - type: dropdown
+    id: contribution_type
+    attributes:
+      label: Contribution type
+      options:
+        - Bug fix
+        - Feature
+        - Documentation
+        - Refactor
+        - Test or tooling improvement
+    validations:
+      required: true
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: State the problem or requested change and why it matters.
+      placeholder: A concise description of the problem and its impact.
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Context and current behavior
+      description: Explain the relevant workflow, current behavior, and any reproducible evidence.
+      placeholder: Include reproduction steps, observed output, or relevant code locations when applicable.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: Describe the observable result that would resolve this issue.
+    validations:
+      required: true
+
+  - type: textarea
+    id: scope
+    attributes:
+      label: Proposed scope
+      description: List what should change and what must remain unchanged.
+      placeholder: |
+        In scope:
+        - ...
+
+        Out of scope:
+        - ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: approach
+    attributes:
+      label: Suggested approach
+      description: Optional implementation notes, relevant files, alternatives, or compatibility concerns.
+
+  - type: textarea
+    id: validation
+    attributes:
+      label: Validation plan
+      description: Explain how the change should be tested and what evidence the pull request should provide.
+      placeholder: Tests, typecheck, build, and focused manual verification.
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: readiness
+    attributes:
+      label: Contribution readiness
+      options:
+        - label: I searched for existing issues and found no duplicate.
+          required: true
+        - label: This issue contains one focused and independently reviewable change.
+          required: true
+        - label: I have not included credentials, tokens, private paths, personal data, or other secrets.
+          required: true
+        - label: I am willing to submit a pull request for this issue.
+          required: false
