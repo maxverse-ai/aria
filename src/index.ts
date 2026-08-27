@@ -114,6 +114,23 @@ export type {
 } from './channel/wechat-kf/client';
 export { WechatKfCrypto } from './channel/wechat-kf/crypto';
 export type { WechatKfCryptoOptions } from './channel/wechat-kf/crypto';
+export { FileWechatKfCursorStore } from './channel/wechat-kf/cursor-store';
+export type {
+  FileWechatKfCursorStoreOptions,
+  WechatKfCursorStore,
+} from './channel/wechat-kf/cursor-store';
+export { startWechatKfCallbackServer } from './channel/wechat-kf/http-server';
+export type {
+  WechatKfCallbackServerHandle,
+  WechatKfCallbackServerOptions,
+} from './channel/wechat-kf/http-server';
+export { FileWechatKfNotificationInbox } from './channel/wechat-kf/inbox';
+export type { FileWechatKfNotificationInboxOptions } from './channel/wechat-kf/inbox';
+export { WechatKfNotificationProcessor } from './channel/wechat-kf/processor';
+export type {
+  WechatKfMessageSink,
+  WechatKfNotificationProcessorOptions,
+} from './channel/wechat-kf/processor';
 export { wechatKfActorId, wechatKfScopeId } from './channel/wechat-kf/session';
 export type {
   WechatKfMessage,
