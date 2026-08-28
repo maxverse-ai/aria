@@ -86,6 +86,13 @@ export type {
   RecordConversationEventInput,
   StartConversationInput,
 } from './conversation/runtime';
+export { createProfileConversationHost } from './conversation/profile-host';
+export type {
+  CreateProfileConversationHostOptions,
+  ProfileConversationHost,
+  ProfileTextConversationInput,
+  ProfileTextConversationResult,
+} from './conversation/profile-host';
 export type { ConversationSource } from './conversation/types';
 export { ChannelPluginRegistry } from './channel/plugin/registry';
 export type {
