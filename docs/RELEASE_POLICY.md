@@ -87,9 +87,26 @@ Repository settings must require human review for changes to
 `.release-policy.json` and for the protected environment used by MINOR, MAJOR,
 and stable-promotion releases.
 
-## Trusted release workflow
+## Private internal GitHub snapshots
 
-`.github/workflows/release.yml` is the only supported publication entry point.
+Internal snapshots are private repository records, not npm publications. They
+use the package version already reviewed on `main`, an `internal-v<VERSION>` tag,
+and a GitHub prerelease with a verified tarball, manifest, and checksum file.
+
+`.github/workflows/internal-release.yml` is the only supported entry point. It
+accepts only the exact current `origin/main` commit, reruns all gates, builds and
+verifies the candidate, creates a draft release, verifies all assets, and only
+then publishes it as a prerelease. It has no npm credentials or OIDC permission
+and never invokes `npm publish`.
+
+Internal tags deliberately do not match `v*`, so they remain outside the npm
+tag/registry consistency checks. Internal versions are immutable: corrections
+advance the package PATCH version and create a new internal snapshot rather than
+overwriting a tag or release.
+
+## Trusted npm release workflow
+
+`.github/workflows/release.yml` is the only supported npm publication entry point.
 It exposes two explicit operations:
 
 - `prepare_patch` queries Git tags and npm, calculates exactly one PATCH, updates

@@ -1,0 +1,115 @@
+name: Internal Release
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aria-internal-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Build private GitHub prerelease
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout exact dispatch commit
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - name: Setup pinned Node
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: .node-version
+          package-manager-cache: false
+
+      - name: Enable pnpm
+        run: corepack enable
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Fetch current release state
+        run: git fetch origin main --tags --force
+
+      - name: Verify trusted internal-release context
+        env:
+          ARIA_INTERNAL_RELEASE: "true"
+        run: pnpm internal-release:gate
+
+      - name: Run exact-commit gates
+        run: pnpm ci:platform
+
+      - name: Build and verify candidate
+        run: |
+          pnpm artifact:build
+          pnpm artifact:verify
+
+      - name: Prepare release assets
+        id: internal
+        run: pnpm internal-release:prepare
+
+      - name: Reject an existing GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.internal.outputs.tag }}
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "GitHub release $TAG already exists" >&2
+            exit 1
+          fi
+
+      - name: Create draft release and upload assets
+        id: draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.internal.outputs.tag }}
+          COMMIT: ${{ steps.internal.outputs.commit }}
+          TITLE: ${{ steps.internal.outputs.title }}
+          NOTES: ${{ steps.internal.outputs.notes }}
+          TARBALL: ${{ steps.internal.outputs.tarball }}
+          MANIFEST: ${{ steps.internal.outputs.manifest }}
+          CHECKSUMS: ${{ steps.internal.outputs.checksums }}
+        run: |
+          gh release create "$TAG" "$TARBALL" "$MANIFEST" "$CHECKSUMS" \
+            --target "$COMMIT" \
+            --title "$TITLE" \
+            --notes-file "$NOTES" \
+            --latest=false \
+            --draft
+          echo "created=true" >> "$GITHUB_OUTPUT"
+
+      - name: Verify draft assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.internal.outputs.tag }}
+        run: |
+          test "$(gh release view "$TAG" --json isDraft --jq '.isDraft')" = "true"
+          test "$(gh release view "$TAG" --json assets --jq '.assets | length')" = "3"
+
+      - name: Publish as private prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.internal.outputs.tag }}
+        run: gh release edit "$TAG" --draft=false --prerelease=true --latest=false
+
+      - name: Verify published prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.internal.outputs.tag }}
+        run: |
+          test "$(gh release view "$TAG" --json isDraft --jq '.isDraft')" = "false"
+          test "$(gh release view "$TAG" --json isPrerelease --jq '.isPrerelease')" = "true"
+
+      - name: Remove incomplete release created by this run
+        if: failure() && steps.draft.outputs.created == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.internal.outputs.tag }}
+        run: gh release delete "$TAG" --yes --cleanup-tag
