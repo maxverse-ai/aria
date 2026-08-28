@@ -1,9 +1,8 @@
-import { mkdir, realpath } from 'node:fs/promises';
-import { join } from 'node:path';
 import { getEnginePlugin } from '../agent/plugin/registry';
 import { createDefaultProfileConfig, type AgentKind, type ProfileConfig } from '../config/profile-schema';
 import type { AppConfig } from '../config/schema';
 import { resolveWorkingDirectory } from '../policy/workspace';
+import { initializeManagedWorkspace } from '../workspace/managed';
 
 export interface BootstrapProfileInput {
   agentKind: AgentKind;
@@ -15,7 +14,6 @@ export interface BootstrapProfileInput {
   codexBinaryPath?: string;
   opencodeBinaryPath?: string;
   binaryPath?: string;
-  profileDir?: string;
 }
 
 export async function createBootstrapProfileConfig(
@@ -47,13 +45,6 @@ export async function createBootstrapProfileConfig(
       default: workspace,
     };
   }
-  const configField = enginePlugin?.configField;
-  const engineConfigValue = configField
-    ? (profile as unknown as Record<string, { inheritCodexHome?: boolean } | undefined>)[configField]
-    : undefined;
-  if (input.profileDir && engineConfigValue?.inheritCodexHome === false) {
-    await mkdir(join(input.profileDir, 'codex-home'), { recursive: true });
-  }
   return profile;
 }
 
@@ -64,6 +55,5 @@ export async function resolveBootstrapWorkspace(workspace: string): Promise<stri
 }
 
 async function ensureManagedDefaultWorkspace(path: string): Promise<string> {
-  await mkdir(path, { recursive: true, mode: 0o700 });
-  return realpath(path);
+  return (await initializeManagedWorkspace(path)).root;
 }

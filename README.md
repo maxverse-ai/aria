@@ -54,7 +54,10 @@ The first run opens a QR-code wizard:
 4. If prompted, choose which agent to initialize.
 5. Config is written to `~/.aria/config.json`.
 
-You do not need to choose a project directory up front. The bridge creates a profile-managed default working directory; after startup, send `/cd <path>` in Feishu / Lark to switch to a real project.
+You do not need to choose a project directory up front. The bridge creates a
+profile-managed default working directory with an identity-neutral `AGENTS.md`,
+`README.md`, and `scratch/`; after startup, send `/cd <path>` in Feishu / Lark
+to switch to a real project.
 
 If you already have a PersonalAgent app, pass `--app-id` during initialization to skip app creation. The command prompts for the App Secret.
 
@@ -185,7 +188,10 @@ The default policy is `bot-only`: lark-cli uses the app/bot identity and does no
 
 ## Working directories
 
-Each profile may define a default working directory through `workspaces.default`. New profiles may be created with `--workspace <path>`; if omitted, the bridge creates a profile-managed default working directory.
+Each profile may define a default working directory through `workspaces.default`.
+New profiles may be created with `--workspace <path>`; if omitted, the bridge
+creates a profile-managed default working directory. Explicit user workspaces
+are validated and recorded but are never scaffolded or rewritten.
 
 This is a profile-field snippet. Do not replace the whole `config.json` with it; edit the matching profile's `workspaces` field.
 
@@ -240,7 +246,11 @@ OpenCode permission prompts cannot be answered in the bridge's headless environm
 | `~/.aria/registry/processes.json` | Local process registry |
 | `~/.aria/registry/locks/` | Profile and app locks |
 
-Set `LARK_CHANNEL_HOME=/path/to/state` to move all local bridge state. `LARK_CHANNEL_LOG_DAYS` overrides log retention.
+Set `ARIA_HOME=/path/to/state` and
+`ARIA_WORKSPACE_HOME=/path/to/workspaces` to configure the two roots
+independently. `LARK_CHANNEL_HOME` remains the compatibility state-root
+variable used by existing bridge profiles. `LARK_CHANNEL_LOG_DAYS` overrides
+log retention.
 
 ## Access control
 

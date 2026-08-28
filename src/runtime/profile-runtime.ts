@@ -1,4 +1,4 @@
-import { mkdir, readFile, realpath } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import * as p from '@clack/prompts';
 import { runRegistrationWizard } from '../bot/wizard';
@@ -130,7 +130,7 @@ export async function resolveProfileRuntime(
       profile = rootConfig.activeProfile;
       appPaths = resolveAppPaths({ rootDir, profile });
     }
-    let profileConfig = rootConfig.profiles[profile];
+    const profileConfig = rootConfig.profiles[profile];
     if (!profileConfig) {
       if (opts.allowBootstrap && explicitProfile) {
         return bootstrapProfileIntoExistingRoot({
@@ -145,18 +145,6 @@ export async function resolveProfileRuntime(
       throw new Error(`profile not found: ${profile}`);
     }
     assertRequestedAgentMatchesExistingProfile(profile, profileConfig, requestedAgent);
-    const defaultWorkspaceUpgrade = await ensureProfileDefaultWorkspace(rootConfig, profile, appPaths);
-    if (defaultWorkspaceUpgrade.changed) {
-      rootConfig = defaultWorkspaceUpgrade.rootConfig;
-    }
-    if (defaultWorkspaceUpgrade.changed) {
-      await saveRootConfig(rootConfig, configPath);
-      profileConfig = rootConfig.profiles[profile]!;
-      log.info('profile', 'default-workspace-ensured', {
-        profile,
-        workspace: defaultWorkspaceUpgrade.changed,
-      });
-    }
     assertBootstrapAppMatchesExistingProfile(opts, profile, profileConfig);
     const cfg = await maybeMigrateRootPlaintextSecret(rootConfig, profile, appPaths, configPath);
     return { cfg, profileConfig, configPath, appPaths, profile };
@@ -176,7 +164,6 @@ export async function resolveProfileRuntime(
     secrets: encrypted.secrets,
     workspace,
     defaultWorkspace: appPaths.defaultWorkspaceDir,
-    profileDir: appPaths.profileDir,
   });
   const root = createRootConfig(profile, profileConfig, encrypted.secrets);
   await saveRootConfig(root, configPath);
@@ -205,7 +192,6 @@ async function bootstrapProfileIntoExistingRoot(args: {
     secrets: encrypted.secrets,
     workspace,
     defaultWorkspace: appPaths.defaultWorkspaceDir,
-    profileDir: appPaths.profileDir,
   });
   const nextRoot: RootConfig = {
     ...rootConfig,
@@ -228,38 +214,6 @@ async function bootstrapProfileIntoExistingRoot(args: {
     configPath,
     appPaths,
     profile,
-  };
-}
-
-async function ensureProfileDefaultWorkspace(
-  rootConfig: RootConfig,
-  profile: string,
-  appPaths: AppPaths,
-): Promise<{ rootConfig: RootConfig; changed: boolean }> {
-  const profileConfig = rootConfig.profiles[profile];
-  if (!profileConfig || profileConfig.workspaces.default) {
-    return { rootConfig, changed: false };
-  }
-
-  await mkdir(appPaths.defaultWorkspaceDir, { recursive: true, mode: 0o700 });
-  const defaultWorkspace = await realpath(appPaths.defaultWorkspaceDir);
-  const nextProfile: ProfileConfig = {
-    ...profileConfig,
-    workspaces: {
-      ...profileConfig.workspaces,
-      default: defaultWorkspace,
-    },
-  };
-
-  return {
-    changed: true,
-    rootConfig: {
-      ...rootConfig,
-      profiles: {
-        ...rootConfig.profiles,
-        [profile]: nextProfile,
-      },
-    },
   };
 }
 

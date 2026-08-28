@@ -320,19 +320,24 @@ describe('profile runtime resolver', () => {
     }
   });
 
-  it('creates a managed default workspace for profiles without a default', async () => {
+  it('does not create a managed workspace as an ordinary startup side effect', async () => {
     const root = await tmpRoot();
+    const configFile = join(root, 'config.json');
     const profile = createDefaultProfileConfig({
       agentKind: 'claude',
       accounts: { app },
     });
     profile.workspaces = {};
     await writeProfileRoot(root, 'claude', { claude: profile });
+    const before = await readFile(configFile, 'utf8');
 
-    const runtime = await resolveProfileRuntime({ config: join(root, 'config.json') });
+    const runtime = await resolveProfileRuntime({ config: configFile });
 
-    const managed = await realpath(resolveAppPaths({ rootDir: root, profile: 'claude' }).defaultWorkspaceDir);
-    expect(runtime.profileConfig.workspaces.default).toBe(managed);
+    expect(runtime.profileConfig.workspaces).toEqual({});
+    await expect(realpath(runtime.appPaths.defaultWorkspaceDir)).rejects.toMatchObject({
+      code: 'ENOENT',
+    });
+    await expect(readFile(configFile, 'utf8')).resolves.toBe(before);
   });
 
   it('lets an explicit profile override active-profile', async () => {

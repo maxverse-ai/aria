@@ -54,7 +54,9 @@ aria run
 4. 如果终端提示，选择本次要初始化的 agent。
 5. 成功后配置写入 `~/.aria/config.json`。
 
-没有指定项目目录也可以启动。bridge 会创建一个 profile 托管的默认工作目录；启动后在飞书里发送 `/cd <path>` 切到实际项目。
+没有指定项目目录也可以启动。bridge 会创建一个 profile 托管的默认工作目录，
+其中包含与身份无关的 `AGENTS.md`、`README.md` 和 `scratch/`；启动后在飞书里
+发送 `/cd <path>` 切到实际项目。
 
 如果已经有 PersonalAgent app，可以在初始化时传 `--app-id` 跳过创建应用流程；命令会提示输入 App Secret。
 
@@ -185,7 +187,10 @@ aria profile export <name> --include-secrets --yes
 
 ## 工作目录
 
-每个 profile 都可以有一个默认工作目录：`workspaces.default`。新建 profile 时可以传 `--workspace <path>` 作为初始目录；没传时 bridge 会创建一个 profile 托管的默认工作目录。
+每个 profile 都可以有一个默认工作目录：`workspaces.default`。新建 profile 时
+可以传 `--workspace <path>` 作为初始目录；没传时 bridge 会创建一个 profile
+托管的默认工作目录。用户明确指定的工作目录只会被校验和记录，不会被生成
+scaffold 或改写。
 
 下面只是 profile 里的字段片段，不要整段覆盖 `config.json`；请改对应 profile 下的 `workspaces` 字段。
 
@@ -240,7 +245,10 @@ OpenCode 的权限确认在 bridge 的无头环境下无人应答、会被直接
 | `~/.aria/registry/processes.json` | 本机进程注册表 |
 | `~/.aria/registry/locks/` | profile lock 和 app lock |
 
-设置 `LARK_CHANNEL_HOME=/path/to/state` 可以迁移整棵本地状态目录。`LARK_CHANNEL_LOG_DAYS` 可以调整日志保留天数。
+使用 `ARIA_HOME=/path/to/state` 和
+`ARIA_WORKSPACE_HOME=/path/to/workspaces` 可以分别配置状态根和托管工作区根。
+`LARK_CHANNEL_HOME` 继续作为现有 bridge profile 的兼容状态根变量。
+`LARK_CHANNEL_LOG_DAYS` 可以调整日志保留天数。
 
 ## 访问控制
 
