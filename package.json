@@ -1,6 +1,6 @@
 {
   "name": "@maxverse-ai/aria",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Aria — where your local agent team gathers in Feishu/Lark",
   "type": "module",
   "packageManager": "pnpm@10.33.0",
@@ -53,6 +53,8 @@
     "release:prepare": "node tools/release.mjs prepare-patch",
     "release:gate": "node tools/release.mjs verify",
     "release:publish": "node tools/release.mjs publish",
+    "internal-release:gate": "node tools/internal-release.mjs context-gate",
+    "internal-release:prepare": "node tools/internal-release.mjs prepare",
     "ci:local": "git diff --check && pnpm infra:doctor && pnpm release:check -- --base-ref origin/main && pnpm test && pnpm typecheck && pnpm build",
     "ci:platform": "pnpm infra:doctor && pnpm release:check && pnpm test && pnpm typecheck && pnpm build",
     "prepare": "npm run build",

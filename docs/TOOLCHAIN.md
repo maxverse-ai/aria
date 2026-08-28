@@ -63,6 +63,11 @@ It is not a release. The protected release workflow repeats the exact-commit
 gates, builds this candidate once, verifies it, and passes the same tarball to
 the guarded publisher. It never runs `npm publish` against the source directory.
 
+The private internal-release workflow uses the same candidate format, adds a
+`SHA256SUMS` file, and attaches all three files to a draft GitHub release before
+publishing it as a prerelease. This records an immutable internal snapshot
+without interacting with the npm registry.
+
 ## Release boundary
 
 Version authority remains defined in `docs/RELEASE_POLICY.md`. Candidate
