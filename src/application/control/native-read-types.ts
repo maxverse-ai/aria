@@ -104,6 +104,13 @@ export interface NativeSessionResource extends NativeReadResourceBase {
   lastActivityAt: string;
   title?: string;
   summary?: string;
+  /** Optional provider-owned list summaries. Message bodies remain lazy. */
+  messageCount?: number;
+  toolCallCount?: number;
+  preview?: string;
+  model?: string;
+  inputTokens?: number;
+  outputTokens?: number;
   chatId?: string;
   participantIdentityIds: readonly string[];
 }
