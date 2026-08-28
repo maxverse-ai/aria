@@ -39,7 +39,10 @@ import {
   startRuntimeControlServer,
   type RuntimeControlServerHandle,
 } from './control-server';
-import type { NativeReadProfileRuntime } from './native-read-runtime';
+import type {
+  NativeReadProfileRuntime,
+  NativeReadRuntimeFactory,
+} from './native-read-runtime';
 
 type StartChannelFn = typeof realStartChannel;
 
@@ -53,11 +56,7 @@ export interface SupervisorOptions {
   /** Run lark-cli preflight per profile (default true; tests pass false). */
   runPreflight?: boolean;
   /** Explicit opt-in composition hook. Undefined keeps the native read API off. */
-  createNativeReadRuntime?: (context: {
-    profile: string;
-    appPaths: AppPaths;
-    sessionCatalog: SessionCatalog;
-  }) => NativeReadProfileRuntime | Promise<NativeReadProfileRuntime>;
+  createNativeReadRuntime?: NativeReadRuntimeFactory;
 }
 
 export interface ManagedStatus {
