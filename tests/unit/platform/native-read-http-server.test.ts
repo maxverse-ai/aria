@@ -41,7 +41,10 @@ describe('native read Unix HTTP server', () => {
     const messages = await get(server.endpoint, '/v1/sessions/ses_1/messages', 'secret');
     const allMessages = await get(server.endpoint, '/v1/messages', 'secret');
 
-    expect(sessions.body).toMatchObject({ resourceType: 'session', items: [expect.objectContaining({ id: 'ses_1' })] });
+    expect(sessions.body).toMatchObject({ resourceType: 'session', items: [expect.objectContaining({
+      id: 'ses_1', messageCount: 7, toolCallCount: 2, preview: 'latest answer', model: 'test-model',
+      inputTokens: 120, outputTokens: 45,
+    })] });
     expect(detail.body).toMatchObject({ item: expect.objectContaining({ id: 'ses_1' }) });
     expect(messages.body).toMatchObject({ items: [expect.objectContaining({
       content: { available: false, redacted: true, format: 'unavailable' },
@@ -99,7 +102,9 @@ function base<T extends NativeReadResource['resourceType']>(resourceType: T, id:
 }
 function session(): NativeReadResourceDraft {
   return { ...base('session', 'ses_1'), conversationId: 'cnv_1', agentKind: 'codex', status: 'active',
-    lastActivityAt: '2026-08-27T00:00:00.000Z', participantIdentityIds: [] };
+    lastActivityAt: '2026-08-27T00:00:00.000Z', participantIdentityIds: [],
+    messageCount: 7, toolCallCount: 2, preview: 'latest answer', model: 'test-model',
+    inputTokens: 120, outputTokens: 45 };
 }
 function message(): NativeReadResourceDraft {
   return { ...base('message', 'msg_1'), conversationId: 'cnv_1', sessionId: 'ses_1',
