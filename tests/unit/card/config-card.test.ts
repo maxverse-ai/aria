@@ -56,6 +56,12 @@ describe('configFormCard console URL', () => {
     expect(JSON.stringify(card)).not.toContain('Web 控制台');
   });
 
+  it('labels detailed COT as the default presentation mode', () => {
+    const rendered = JSON.stringify(configFormCard({ ...base, cotMessages: 'detailed' }));
+    expect(rendered).toContain('详细(默认)');
+    expect(rendered).toContain('"name":"cot_messages","initial_option":"detailed"');
+  });
+
   it('renders a plugin-driven default agent picker', () => {
     const rendered = JSON.stringify(configFormCard(base));
     expect(rendered).toContain('agent_kind');
