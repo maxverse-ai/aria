@@ -68,6 +68,11 @@ describe('ReadOnlyControlPlane', () => {
         effectiveLarkCliPreset: 'bot-only',
       },
       workspace: { defaultConfigured: true },
+      presentation: {
+        messageReply: 'markdown',
+        showToolCalls: true,
+        cotMessages: 'detailed',
+      },
       execution: {
         maxConcurrentRuns: 4,
         runIdleTimeoutMs: 120_000,

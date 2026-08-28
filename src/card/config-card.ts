@@ -281,7 +281,7 @@ export function configFormCard(opts: ConfigFormOpts): object {
               options: [
                 { text: { tag: 'plain_text', content: '关闭' }, value: 'off' },
                 { text: { tag: 'plain_text', content: '简略' }, value: 'brief' },
-                { text: { tag: 'plain_text', content: '详细' }, value: 'detailed' },
+                { text: { tag: 'plain_text', content: '详细(默认)' }, value: 'detailed' },
               ],
             },
             { tag: 'hr' },

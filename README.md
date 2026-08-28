@@ -176,9 +176,9 @@ DMs do not require an @ mention. Groups and topic groups require `@bot` by defau
 
 - **Message reply mode**: `message card` streams the final reply; `plain text` sends once after the run finishes.
 - **Tool-call display**: controls whether tool blocks appear in the final card / markdown reply.
-- **COT process message**: `off` sends only the final reply; `brief` first sends a COT message with agent progress text and tool summaries; `detailed` also includes tool args and truncated output.
+- **COT process message**: `detailed` is the default and includes agent progress text, tool arguments, and truncated output; `brief` keeps only progress text and tool summaries; `off` sends only the final reply.
 
-When COT is enabled, the bridge splits the process view and final answer into two messages. The COT message is for tracing what the agent did; the final answer is still generated from the agent's raw text, without heuristic bridge-side filtering. If an agent emits final-answer text as ordinary stream text, that text can also appear in the COT process message.
+When COT is enabled, the bridge splits the process view and final answer into two messages. The COT message is for tracing what the agent did; the final answer is still generated from the agent's raw text, without heuristic bridge-side filtering. If an agent emits final-answer text as ordinary stream text, that text can also appear in the COT process message. Detailed mode may expose sensitive values present in tool arguments or output, so select `brief` or `off` for chats where that visibility is inappropriate.
 
 ## lark-cli identity policy
 

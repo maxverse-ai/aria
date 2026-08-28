@@ -464,7 +464,10 @@ async function createHarness(options: {
     codex: {
       binaryPath: '/usr/local/bin/codex',
     },
-    ...(options.messageReply ? { preferences: { messageReply: options.messageReply } } : {}),
+    preferences: {
+      cotMessages: 'off',
+      ...(options.messageReply ? { messageReply: options.messageReply } : {}),
+    },
   });
   const profileConfig = {
     ...baseProfileConfig,
