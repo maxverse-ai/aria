@@ -90,6 +90,7 @@ export { createProfileConversationHost } from './conversation/profile-host';
 export type {
   CreateProfileConversationHostOptions,
   ProfileConversationHost,
+  ProfileConversationNativeReadOptions,
   ProfileTextConversationInput,
   ProfileTextConversationResult,
 } from './conversation/profile-host';
@@ -190,6 +191,12 @@ export {
   DefaultNativeReadProfileRuntime,
   type NativeReadProfileRuntime,
   type NativeReadProfileRuntimeOptions,
+} from './runtime/native-read-runtime';
+export { nativeReadFactoryFromEnvironment } from './runtime/native-read-config';
+export type { NativeReadEnvironmentOptions } from './runtime/native-read-config';
+export type {
+  NativeReadRuntimeFactory,
+  NativeReadRuntimeFactoryContext,
 } from './runtime/native-read-runtime';
 export type { NativeReadScope } from './platform/native-read-http-server';
 export type { RunAuditEvent, RunAuditSink } from './runtime/run-executor';

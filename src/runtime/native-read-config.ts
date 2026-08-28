@@ -1,8 +1,9 @@
+import pkg from '../../package.json';
 import { readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { NativeReadScope } from '../platform/native-read-http-server';
 import { DefaultNativeReadProfileRuntime } from './native-read-runtime';
-import type { SupervisorOptions } from './supervisor';
+import type { NativeReadRuntimeFactory } from './native-read-runtime';
 
 const ENABLED_VALUES = new Set(['1', 'true', 'yes']);
 const NATIVE_READ_SCOPES = new Set<NativeReadScope>([
@@ -20,7 +21,7 @@ const NATIVE_READ_SCOPES = new Set<NativeReadScope>([
 
 export interface NativeReadEnvironmentOptions {
   rootDir: string;
-  serverVersion: string;
+  serverVersion?: string;
   env?: NodeJS.ProcessEnv;
 }
 
@@ -33,7 +34,7 @@ export interface NativeReadEnvironmentOptions {
  */
 export async function nativeReadFactoryFromEnvironment(
   options: NativeReadEnvironmentOptions,
-): Promise<SupervisorOptions['createNativeReadRuntime'] | undefined> {
+): Promise<NativeReadRuntimeFactory | undefined> {
   const env = options.env ?? process.env;
   if (!ENABLED_VALUES.has((env.ARIA_NATIVE_READ_ENABLED ?? '').trim().toLowerCase())) {
     return undefined;
@@ -58,7 +59,7 @@ export async function nativeReadFactoryFromEnvironment(
     sessionCatalog,
     token,
     scopes,
-    serverVersion: options.serverVersion,
+    serverVersion: options.serverVersion ?? pkg.version,
   });
 }
 

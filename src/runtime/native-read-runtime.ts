@@ -24,6 +24,16 @@ export interface NativeReadProfileRuntime {
   stop(): Promise<void>;
 }
 
+export interface NativeReadRuntimeFactoryContext {
+  profile: string;
+  appPaths: AppPaths;
+  sessionCatalog: SessionCatalog;
+}
+
+export type NativeReadRuntimeFactory = (
+  context: NativeReadRuntimeFactoryContext,
+) => NativeReadProfileRuntime | Promise<NativeReadProfileRuntime>;
+
 export interface NativeReadProfileRuntimeOptions {
   profileId: string;
   appPaths: Pick<
