@@ -23,6 +23,8 @@ describe('resolveAppPaths', () => {
     const paths = resolveAppPaths({ rootDir: root, profile: 'codex-dev' });
 
     expect(paths.rootDir).toBe(root);
+    expect(paths.roots.stateRoot).toBe(root);
+    expect(paths.workspaceRoot).toBe(`${root}-workspaces`);
     expect(paths.profile).toBe('codex-dev');
     expect(paths.configFile).toBe(join(root, 'config.json'));
     expect(paths.activeProfileFile).toBe(join(root, 'active-profile'));
@@ -31,6 +33,16 @@ describe('resolveAppPaths', () => {
     expect(paths.userLockDir).toBe(join(root, 'registry', 'locks'));
     expect(paths.profileLockFile).toBe(join(root, 'registry', 'locks', 'profile', 'codex-dev.lock'));
     expect(paths.appLockFile('cli_app')).toBe(join(root, 'registry', 'locks', 'app', 'cli_app.lock'));
+  });
+
+  it('accepts an independent managed-workspace root', async () => {
+    const root = await tempRoot();
+    const workspaceRoot = join(root, 'separate-workspaces');
+
+    const paths = resolveAppPaths({ rootDir: root, workspaceRoot, profile: 'codex-dev' });
+
+    expect(paths.roots).toEqual({ stateRoot: root, workspaceRoot });
+    expect(paths.defaultWorkspaceDir).toBe(join(workspaceRoot, 'codex-dev', 'default'));
   });
 
   it('places runtime state inside the selected profile directory', async () => {

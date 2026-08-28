@@ -1,7 +1,9 @@
 # Workspace and state layout architecture
 
-> Status: proposal. This document defines the target boundaries and rollout
-> plan. It does not describe a completed migration.
+> Status: implementation in progress. The independent-root resolver, typed
+> target path contracts, and identity-neutral managed-workspace scaffold are
+> implemented. Existing state still uses the compatibility layout; physical
+> migration remains an explicit later phase.
 
 ## Purpose
 
@@ -240,6 +242,11 @@ may continue accepting the existing `rootDir` option while migration is in
 progress, but new code must not introduce further uses of an implicitly derived
 workspace root.
 
+The compatibility `resolveAppPaths({ rootDir })` adapter intentionally preserves
+the historical sibling-workspace behavior for old callers. New code should use
+`resolveAriaRoots` / `resolveAriaLayoutPaths`, or pass both `rootDir` and
+`workspaceRoot` explicitly.
+
 ## Engine extensibility
 
 Core bootstrap code must not create `codex-home` or any other engine-specific
@@ -308,17 +315,17 @@ and explicit migration coverage.
 
 ### Phase 1: contracts and behavior-preserving path refactor
 
-- Introduce `AriaRoots` and the typed path groups.
-- Add explicit workspace-root resolution.
-- Keep all existing physical paths unchanged through compatibility mapping.
-- Add path contract tests for Linux, macOS, and Windows forms.
+- [x] Introduce `AriaRoots` and the typed path groups.
+- [x] Add explicit workspace-root resolution.
+- [x] Keep all existing physical paths unchanged through compatibility mapping.
+- [x] Add path contract tests for Linux, macOS-compatible POSIX, and Windows forms.
 
 ### Phase 2: managed workspace initializer
 
-- Add static, identity-neutral templates to the packaged assets.
-- Add an idempotent initializer with no-overwrite semantics.
-- Invoke it only for newly created Aria-managed default workspaces.
-- Keep explicit user workspaces read-only during bootstrap.
+- [x] Add static, identity-neutral templates to the compiled package.
+- [x] Add an idempotent initializer with no-overwrite semantics.
+- [x] Invoke it only for newly created Aria-managed default workspaces.
+- [x] Keep explicit user workspaces unchanged during bootstrap.
 
 ### Phase 3: lifecycle separation
 

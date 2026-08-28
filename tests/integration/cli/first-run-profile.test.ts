@@ -1,10 +1,11 @@
-import { mkdir, mkdtemp, realpath, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { detectInstalledAgents, resolveExecutablePath } from '../../../src/cli/agent-detection';
 import { createBootstrapProfileConfig } from '../../../src/cli/profile-bootstrap';
 import { writeVersionExecutable } from '../../helpers/fake-executable';
+import { MANAGED_WORKSPACE_AGENTS, MANAGED_WORKSPACE_README } from '../../../src/workspace/managed';
 
 const roots: string[] = [];
 
@@ -31,7 +32,6 @@ describe('first-run profile bootstrap', () => {
       accounts: { app: { id: 'cli_codex', secret: '${APP_SECRET}', tenant: 'feishu' } },
       workspace,
       codexBinaryPath: codex,
-      profileDir,
     });
 
     const workspaceRealpath = await realpath(workspace);
@@ -61,12 +61,18 @@ describe('first-run profile bootstrap', () => {
       agentKind: 'codex',
       accounts: { app: { id: 'cli_codex', secret: '${APP_SECRET}', tenant: 'feishu' } },
       codexBinaryPath: codex,
-      profileDir,
       defaultWorkspace,
     });
 
     const defaultWorkspaceRealpath = await realpath(defaultWorkspace);
     expect(profile.workspaces.default).toBe(defaultWorkspaceRealpath);
+    await expect(readFile(join(defaultWorkspace, 'AGENTS.md'), 'utf8')).resolves.toBe(
+      MANAGED_WORKSPACE_AGENTS,
+    );
+    await expect(readFile(join(defaultWorkspace, 'README.md'), 'utf8')).resolves.toBe(
+      MANAGED_WORKSPACE_README,
+    );
+    await expect(stat(join(defaultWorkspace, 'scratch'))).resolves.toMatchObject({});
   });
 
   it('reports missing Codex bootstrap binaries as agent preflight diagnostics', async () => {

@@ -1,14 +1,17 @@
 import { createHash } from 'node:crypto';
-import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { resolveAriaRoots, type AriaRoots } from './layout-paths';
 
 export interface ResolveAppPathsOptions {
   rootDir?: string;
+  workspaceRoot?: string;
   profile?: string;
 }
 
 export interface AppPaths {
+  roots: AriaRoots;
   rootDir: string;
+  workspaceRoot: string;
   profile: string;
   profileDir: string;
   defaultWorkspaceDir: string;
@@ -51,7 +54,20 @@ export interface AppPaths {
 const DEFAULT_PROFILE = 'claude';
 
 export function resolveAppPaths(opts: ResolveAppPathsOptions = {}): AppPaths {
-  const rootDir = opts.rootDir ?? process.env.LARK_CHANNEL_HOME ?? join(homedir(), '.aria');
+  const independentRoots = resolveAriaRoots();
+  const rootDir = opts.rootDir ?? independentRoots.stateRoot;
+  // `rootDir` is the legacy all-in-one option. Preserve its historical sibling
+  // workspace mapping at this adapter boundary while new callers pass two roots.
+  const compatibilityWorkspaceRoot =
+    opts.workspaceRoot ??
+    process.env.ARIA_WORKSPACE_HOME ??
+    (opts.rootDir || (!process.env.ARIA_HOME && process.env.LARK_CHANNEL_HOME)
+      ? `${rootDir}-workspaces`
+      : independentRoots.workspaceRoot);
+  const roots = resolveAriaRoots({
+    stateRoot: rootDir,
+    ...(compatibilityWorkspaceRoot ? { workspaceRoot: compatibilityWorkspaceRoot } : {}),
+  });
   const profile = normalizeProfileName(opts.profile ?? DEFAULT_PROFILE);
   const profileDir = join(rootDir, 'profiles', profile);
   const registryDir = join(rootDir, 'registry');
@@ -59,10 +75,12 @@ export function resolveAppPaths(opts: ResolveAppPathsOptions = {}): AppPaths {
   const controlId = createHash('sha256').update(rootDir).update('\0').update(profile).digest('hex').slice(0, 20);
 
   return {
+    roots,
     rootDir,
+    workspaceRoot: roots.workspaceRoot,
     profile,
     profileDir,
-    defaultWorkspaceDir: join(`${rootDir}-workspaces`, profile, 'default'),
+    defaultWorkspaceDir: join(roots.workspaceRoot, profile, 'default'),
     configFile: join(rootDir, 'config.json'),
     activeProfileFile: join(rootDir, 'active-profile'),
     sessionsFile: join(profileDir, 'sessions.json'),
