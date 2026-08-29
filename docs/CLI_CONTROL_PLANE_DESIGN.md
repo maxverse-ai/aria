@@ -2,9 +2,10 @@
 
 > Status: approved target architecture, implementation in progress. The
 > read-only surface, low-risk CLI protocol, command registry, config repository
-> port, mutation type, and runtime-effect contract are implemented as recorded
-> in [`CONTROL_PLANE.md`](CONTROL_PLANE.md). This document replaces the earlier
-> CLI-centric runtime-binding and delegation roadmap.
+> port, mutation type, runtime-effect contract, and versioned Management API
+> facade are implemented as recorded in [`CONTROL_PLANE.md`](CONTROL_PLANE.md).
+> This document replaces the earlier CLI-centric runtime-binding and delegation
+> roadmap.
 
 ## Scope
 
@@ -70,7 +71,7 @@ The repository is intentionally in a transitional state:
 
 | Writer | Current path | Target classification |
 | --- | --- | --- |
-| Low-risk CLI settings | `ConfigChangeService` with `plan -> confirm -> apply` | Public Management API |
+| Low-risk CLI settings | `ManagementApi` over `ConfigChangeService` | Public Management API |
 | Feishu `/config` and cards | shared `config-ops.ts`, direct commit plus live refresh | Public adapter to migrate |
 | Local web console | shared `config-ops.ts`, direct commit plus live refresh | Public adapter to migrate |
 | Access and account flows | command/UI handlers through `config-ops.ts` | Public commands to migrate |
@@ -113,11 +114,13 @@ the same versioned DTOs and stable error codes.
 ## Request and actor flow
 
 Every adapter submits a versioned request containing a registered command,
-typed input, target profile, request ID, and trusted actor envelope. The
+typed input, target profile, request ID, and actor context. The
 transport supplies identity evidence; command parameters, prompt text, model
 output, display names, and conversation IDs are never authorization evidence.
 
-The future signed actor envelope contains at least:
+The current functional v1 facade uses the existing lightweight actor context.
+Signing and replay resistance are intentionally deferred. A future signed
+actor envelope may contain at least:
 
 ```text
 version, source, profile, principalFingerprint, requestId,
@@ -230,40 +233,55 @@ Implemented for the low-risk CLI path. Runtime reconciliation is currently a
 contract and a separate commit outcome; no adapter invokes runtime effects
 through it yet.
 
-### Phase 2: trusted actor context
+### Phase 2: versioned Management API
 
-- Add the versioned, instance-bound signed envelope and verifier.
-- Have trusted bridge, card, web, local CLI, and system adapters create their
-  respective contexts.
-- Test tampering, expiry, replay, cross-profile use, and redaction.
+- Add one facade for versioned `plan`, `getPlan`, `confirm`, `commit`, and
+  functional one-call `execute` requests.
+- Carry request ID, actor, command, profile and typed input at this boundary.
+- Route the CLI through the facade while preserving its public output.
 
-### Phase 3: centralized authorization
+Implemented for the low-risk command registry. The facade orchestrates the
+mutation kernel and returns runtime effects; it does not reconcile them yet.
 
-- Attach capability, resource, risk, and confirmation metadata to commands.
-- Move owner/admin/access decisions behind one policy interface.
-- Return stable denial codes and keep high-risk commands unavailable until
-  their policy is explicit.
+### Phase 3: adapter migration
 
-### Phase 4: complete plan lifecycle
+- Migrate `/config` and cards, then web, through the same facade.
+- Preserve existing user behavior while deleting duplicated write decisions.
+- Keep adapter-specific parsing and rendering outside the application layer.
 
-- Add cancellation, rejection, expiry, and conflict terminal states.
-- Require later trusted confirmation for high-risk bridge operations.
-- Introduce resource-scoped revisions and expired-plan collection.
-- Prevent cross-actor, cross-profile, replayed, and same-turn self-approval.
+### Phase 4: runtime reconciliation
 
-### Phase 5: audit integration
+- Consume the committed runtime effect through a dedicated reconciler.
+- Report desired-state commit and applied-state reconciliation independently.
+- Add retryable reconciliation without repeating configuration writes.
 
-- Persist the full management lifecycle through the existing audit boundary.
-- Add safe list, show, and verification queries.
-- Keep audit durable even when Native Read transport is disabled.
+### Phase 5: management command expansion
 
-### Phase 6: adapter migration
+- Register access/account, model/engine, and profile lifecycle commands in
+  bounded slices.
+- Keep bootstrap, repair and migration as named infrastructure operations.
 
-- Migrate CLI, `/config` and cards, web, access/account, engine/model, and
-  profile lifecycle operations in small compatibility-preserving slices.
-- Generate adapter discovery and forms from registry metadata where useful.
-- Remove independent public business rules from `config-ops.ts` after its last
+### Phase 6: practical lifecycle completion
+
+- Add cancellation, rejection, expiry collection and conflict outcomes.
+- Introduce resource-scoped revisions where profile-wide revisions cause
+  avoidable conflicts.
+
+### Phase 7: basic policy, audit and diagnostics
+
+- Centralize the current owner/admin decisions and stable denial codes.
+- Persist the useful management lifecycle through the existing audit boundary.
+- Add operator diagnostics for plans, commits and reconciliation.
+
+### Phase 8: compatibility cleanup
+
+- Remove independent public write rules from `config-ops.ts` after its final
   caller migrates.
+- Remove legacy operation and DTO adapters only under an explicit compatibility
+  decision.
+
+Signed actor envelopes, nonce/replay infrastructure and advanced authorization
+remain deferred until the functional flow and adapter convergence are complete.
 
 ## Explicit non-goals
 

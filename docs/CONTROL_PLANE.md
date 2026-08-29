@@ -7,7 +7,9 @@ runtime effects and audit are documented separately in
 are not shipped behavior unless identified below.
 
 Aria exposes supported management capabilities through one application-layer
-Management API. CLI commands are the currently shipped machine interface.
+`ManagementApi`. Its v1 request envelopes carry `requestId`, actor, command,
+profile and typed input; its plan, commit and execute results are independently
+versioned. CLI commands are the currently shipped machine interface.
 Feishu cards and the local web console still share the older `config-ops.ts`
 write path and have not yet migrated; agent-driven flows can invoke the shipped
 CLI commands. The target is for every public entry point to become an adapter
@@ -54,8 +56,9 @@ All four operations are local and read-only. Their JSON schemas are:
 
 ## Phase 2: change protocol
 
-The shipped CLI change protocol uses `ConfigChangeService` and its versioned
-`plan -> confirm -> apply` workflow. This phase initially registered no
+The shipped CLI change protocol enters through `ManagementApi`, which
+orchestrates `ConfigChangeService` and its versioned
+`plan -> confirm -> commit` workflow. This phase initially registered no
 user-facing mutation operations.
 
 - Operations are explicit, versioned and deterministic; there is no generic
@@ -105,8 +108,11 @@ plan, confirmation, or application steps.
 
 ## Current boundary summary
 
-- `ConfigChangeService` is the shipped application boundary for low-risk CLI
-  mutations.
+- `ManagementApi` is the shipped application boundary for low-risk CLI
+  mutations. It exposes versioned `plan`, `getPlan`, `confirm`, `commit`, and
+  one-call `execute` operations without importing CLI or UI concerns.
+- `ConfigChangeService` is the mutation kernel behind that facade. It owns the
+  durable plan lifecycle and commit invariants, not transport request shapes.
 - `ManagementCommandRegistry` normalizes canonical commands with explicit
   runtime effects. The legacy `restartRequired` operation shape remains a
   compatibility input, while public v1 CLI DTOs remain unchanged.
@@ -114,6 +120,8 @@ plan, confirmation, or application steps.
   lock, and atomic commits. `ConfigChangeService.commitPlan()` reports the
   durable apply result separately from its `none | live | reconnect | restart`
   runtime effect; actual reconciliation is a later phase.
+- The CLI now uses `ManagementApi` while unwrapping its envelopes so existing
+  public CLI JSON and human-readable output remain compatible.
 - `config-ops.ts` is the shared compatibility writer for Feishu and web
   configuration flows, not a second target architecture.
 - Runtime reconnect, restart, activity preflight, and engine replacement
