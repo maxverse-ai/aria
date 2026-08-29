@@ -5,9 +5,9 @@
 > port, mutation type, runtime-effect contract, and versioned Management API
 > facade are implemented. Commit/reconciliation separation and the running
 > profile reconciler are also implemented as recorded in
-> [`CONTROL_PLANE.md`](CONTROL_PLANE.md). The Feishu `/config` preferences form
-> and local web settings form now use that facade and reconciler; the remaining
-> public adapters are still migrating. This document replaces the earlier
+> [`CONTROL_PLANE.md`](CONTROL_PLANE.md). Feishu settings/access/account flows
+> and local web settings/access flows now use that facade and reconciler; model,
+> engine and profile lifecycle commands remain to migrate. This document replaces the earlier
 > CLI-centric runtime-binding and delegation roadmap.
 
 ## Scope
@@ -77,8 +77,8 @@ The repository is intentionally in a transitional state:
 | Low-risk CLI settings | `ManagementApi` over `ConfigChangeService` | Public Management API |
 | Feishu `/config` preferences form | `ManagementApi` aggregate command plus running-profile reconciliation | Public Management API |
 | Local web settings form | `ManagementApi` aggregate command plus live/reconnect or deferred reconciliation | Public Management API |
-| Feishu access and account flows | shared `config-ops.ts`, direct commit plus live refresh | Public commands to migrate |
-| Local web access mutations | shared `config-ops.ts`, direct commit plus live refresh | Public commands to migrate |
+| Feishu access and account flows | `ManagementApi` sensitive commands plus live/reconnect reconciliation | Public Management API |
+| Local web access mutations | `ManagementApi` access command plus live/deferred reconciliation | Public Management API |
 | Engine switch | Supervisor-owned prepare, quiesce, commit, swap, rollback | Runtime effect behind a public command |
 | Profile bootstrap and repair | `profile-runtime.ts` and preflight persistence | Privileged infrastructure path |
 | Secret/material migration | profile bootstrap and keystore helpers | Privileged infrastructure path |
@@ -255,8 +255,9 @@ mutation kernel and returns commit and reconciliation outcomes independently.
 The foundation is implemented. The default reconciler defers effects for an
 adapter with no runtime ownership. A running-profile implementation applies an
 exact desired revision live, reconnects through the Supervisor, and defers a
-process restart. The `/config` preferences card and the web settings form use
-it; remaining access/account writers do not yet.
+process restart. Settings and access adapters use it directly. Account changes
+commit with a deferred reconciler so their success card can render, then retry
+the same applied plan through the running-profile reconciler.
 
 ### Phase 4: adapter migration
 
@@ -265,19 +266,26 @@ it; remaining access/account writers do not yet.
 - Preserve existing user behavior while deleting duplicated write decisions.
 - Keep adapter-specific parsing and rendering outside the application layer.
 
-In progress: `/config` preferences are one atomic
+Implemented for the current config adapters: `/config` preferences are one atomic
 `profile.preferences.update` command. Web settings use the atomic
 `profile.settings.update` contract, selecting its reconnect variant only when
 `meeting.enabled` changes; an offline profile commits the same desired state and
-reports reconciliation as deferred. Form parsing, lark-cli policy application
-and engine switching remain adapter/runtime concerns. Access and account
-mutations remain compatibility writers for later slices.
+reports reconciliation as deferred. Feishu and Web access operations share
+`profile.access.update`; the Feishu account form stages its plaintext secret in
+the profile keystore and commits only an external reference through
+`profile.account.update`. Form parsing, credential validation, lark-cli policy
+application and engine switching remain adapter/runtime concerns.
 
 ### Phase 5: management command expansion
 
 - Register access/account, model/engine, and profile lifecycle commands in
   bounded slices.
 - Keep bootstrap, repair and migration as named infrastructure operations.
+
+Access/account expansion is implemented. Both commands are classified
+`sensitive`, require explicit source-and-command-scoped adapter authorization,
+and publish no raw resource identifiers. Model/engine and profile lifecycle
+commands remain.
 
 ### Phase 6: practical lifecycle completion
 

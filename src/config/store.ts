@@ -87,8 +87,7 @@ export async function ensureSecretsGetterWrapper(
   } = {},
 ): Promise<string> {
   const platform = opts.platform ?? process.platform;
-  const wrapperPath =
-    platform === 'win32' ? `${appPaths.secretsGetterScript}.cmd` : appPaths.secretsGetterScript;
+  const wrapperPath = secretsGetterWrapperPath(appPaths, platform);
   const node = opts.nodePath ?? process.execPath;
   const bridgeEntry = opts.bridgeEntry ?? process.argv[1] ?? '';
   const rootDir = appPaths.rootDir ?? dirname(appPaths.secretsGetterScript);
@@ -114,6 +113,14 @@ export async function ensureSecretsGetterWrapper(
 
   await writeFileAtomic(wrapperPath, content, { mode: 0o700 });
   return wrapperPath;
+}
+
+/** Pure counterpart to {@link ensureSecretsGetterWrapper} for config commands. */
+export function secretsGetterWrapperPath(
+  appPaths: Pick<AppPaths, 'secretsGetterScript'>,
+  platform: NodeJS.Platform = process.platform,
+): string {
+  return platform === 'win32' ? `${appPaths.secretsGetterScript}.cmd` : appPaths.secretsGetterScript;
 }
 
 export async function saveConfig(cfg: AppConfig, path: string = paths.configFile): Promise<void> {

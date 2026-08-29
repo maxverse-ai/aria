@@ -17,6 +17,7 @@ import {
   type ControlChangePlanSnapshot,
   type ControlChangeSummary,
   type ManagementCommandInput,
+  type ManagementCommandDefinition,
   type ControlPlanParameters,
   type StoredControlChangePlan,
 } from './change-types';
@@ -37,7 +38,18 @@ export interface ConfigChangeServiceOptions {
   planTtlMs?: number;
   now?: () => Date;
   createId?: () => string;
+  /** Explicit adapter authorization for non-low-risk registered commands. */
+  authorizeCommand?: ConfigChangeCommandAuthorizer;
 }
+
+export interface ConfigChangeAuthorizationInput {
+  actor: ControlActorContext;
+  command: Pick<ManagementCommandDefinition, 'id' | 'version' | 'risk'>;
+}
+
+export type ConfigChangeCommandAuthorizer = (
+  input: ConfigChangeAuthorizationInput,
+) => boolean;
 
 export interface CreateConfigChangePlanInput {
   profile?: string;
@@ -58,9 +70,12 @@ export class ConfigChangeService {
   private readonly planTtlMs: number;
   private readonly now: () => Date;
   private readonly createId: () => string;
+  private readonly rootDir: string;
+  private readonly authorizeCommand?: ConfigChangeCommandAuthorizer;
 
   constructor(options: ConfigChangeServiceOptions = {}) {
     const rootDir = resolveAppPaths({ rootDir: options.rootDir }).rootDir;
+    this.rootDir = rootDir;
     if (options.registry && options.operations) {
       throw new Error('pass either registry or operations, not both');
     }
@@ -70,12 +85,19 @@ export class ConfigChangeService {
     this.planTtlMs = options.planTtlMs ?? DEFAULT_PLAN_TTL_MS;
     this.now = options.now ?? (() => new Date());
     this.createId = options.createId ?? (() => randomBytes(16).toString('hex'));
+    this.authorizeCommand = options.authorizeCommand;
   }
 
   async createPlan(input: CreateConfigChangePlanInput): Promise<ControlChangePlanSnapshot> {
     validateActor(input.actor);
     const operation = this.requireOperation(input.operationId);
-    if (operation.risk !== 'low') {
+    if (
+      operation.risk !== 'low' &&
+      !this.authorizeCommand?.({
+        actor: input.actor,
+        command: commandAuthorizationView(operation),
+      })
+    ) {
       throw new ControlChangeError(
         'operation-unavailable',
         `risk policy is not available for operation: ${operation.id}`,
@@ -83,10 +105,21 @@ export class ConfigChangeService {
     }
     const { root, profile } = await this.resolveRoot(input.profile);
     const parameters = structuredClone(input.parameters ?? {});
-    validateParameters(parameters);
-    const candidate = operation.prepare({ root: structuredClone(root), profile, parameters });
+    validateParameters(parameters, operation.parameterPrivacy ?? 'ordinary');
+    const candidate = operation.prepare({
+      root: structuredClone(root),
+      profile,
+      parameters,
+      rootDir: this.rootDir,
+    });
     validateCandidate(root, candidate.root, profile, candidate.changes);
-    assertSafePlanPayload(parameters, candidate.changes, root, input.actor);
+    assertSafePlanPayload(
+      parameters,
+      candidate.changes,
+      root,
+      input.actor,
+      operation.parameterPrivacy ?? 'ordinary',
+    );
     const createdAt = this.now();
     const plan: StoredControlChangePlan = {
       schema: 'aria.control.change-plan.v1',
@@ -185,6 +218,7 @@ export class ConfigChangeService {
           root: structuredClone(root),
           profile: plan.profile,
           parameters: structuredClone(plan.parameters),
+          rootDir: this.rootDir,
         });
         validateCandidate(root, candidate.root, plan.profile, candidate.changes);
         const actualTarget = configRevision(candidate.root);
@@ -245,11 +279,15 @@ function validateActor(actor: ControlActorContext): void {
   }
 }
 
-function validateParameters(parameters: ControlPlanParameters): void {
+function validateParameters(
+  parameters: ControlPlanParameters,
+  privacy: 'ordinary' | 'private-identifiers' = 'ordinary',
+): void {
   for (const [key, value] of Object.entries(parameters)) {
     if (
       !key.trim() ||
-      /secret|token|credential|password|authorization|app.?id|user.?id|chat.?id|path|workspace/i.test(key) ||
+      /secret|token|credential|password|authorization|path|workspace/i.test(key) ||
+      (privacy === 'ordinary' && /app.?id|user.?id|chat.?id/i.test(key)) ||
       (value !== null && !['string', 'number', 'boolean'].includes(typeof value))
     ) {
       throw new ControlChangeError('invalid-plan', 'operation parameters must be named JSON scalars');
@@ -262,12 +300,18 @@ function assertSafePlanPayload(
   changes: ControlChangeSummary[],
   root: RootConfig,
   actor: ControlActorContext,
+  privacy: 'ordinary' | 'private-identifiers',
 ): void {
-  const serialized = JSON.stringify({ parameters, changes });
+  validateParameters(parameters, privacy);
+  const publicSerialized = JSON.stringify(changes);
+  const fullSerialized = JSON.stringify({ parameters, changes });
   if (
     changes.some((item) => /secret|token|credential|password|authorization/i.test(item.field)) ||
-    /\b(?:ou|oc|om|cli)_[A-Za-z0-9_-]{6,}\b/.test(serialized) ||
-    /(?:^|[\s"'=])(?:~\/|[A-Za-z]:\\|\/(?:Users|home|tmp|var|private|Volumes|opt|workspace|workspaces|mnt|app|srv|root|data)\/)/.test(serialized)
+    /\b(?:ou|oc|om|cli)_[A-Za-z0-9_-]{6,}\b/.test(publicSerialized) ||
+    /(?:^|[\s"'=])(?:~\/|[A-Za-z]:\\|\/(?:Users|home|tmp|var|private|Volumes|opt|workspace|workspaces|mnt|app|srv|root|data)\/)/.test(publicSerialized) ||
+    (privacy === 'ordinary' &&
+      (/\b(?:ou|oc|om|cli)_[A-Za-z0-9_-]{6,}\b/.test(fullSerialized) ||
+        /(?:^|[\s"'=])(?:~\/|[A-Za-z]:\\|\/(?:Users|home|tmp|var|private|Volumes|opt|workspace|workspaces|mnt|app|srv|root|data)\/)/.test(fullSerialized)))
   ) {
     throw new ControlChangeError('invalid-plan', 'plan parameters or summaries contain sensitive data');
   }
@@ -283,9 +327,16 @@ function assertSafePlanPayload(
     collectStrings(Object.keys(profile.access.chatRequireMention ?? {}), sensitive);
     collectStrings(profile.workspaces, sensitive);
   }
-  if ([...sensitive].some((value) => value.length >= 4 && serialized.includes(value))) {
+  const inspected = privacy === 'ordinary' ? fullSerialized : publicSerialized;
+  if ([...sensitive].some((value) => value.length >= 4 && inspected.includes(value))) {
     throw new ControlChangeError('invalid-plan', 'plan parameters or summaries contain sensitive data');
   }
+}
+
+function commandAuthorizationView(
+  command: ManagementCommandDefinition,
+): Pick<ManagementCommandDefinition, 'id' | 'version' | 'risk'> {
+  return { id: command.id, version: command.version, risk: command.risk };
 }
 
 function collectStrings(value: unknown, output: Set<string>): void {

@@ -195,6 +195,8 @@ export interface ProfileConfig {
   mode: ProfileMode;
   accounts: {
     app: AppCredentials;
+    /** Secret-free revision marker for the external app credential binding. */
+    recordedAt?: string;
   };
   secrets?: SecretsConfig;
   preferences: Omit<AppPreferences, 'access' | 'requireMentionInGroup'>;
@@ -247,6 +249,7 @@ export interface CreateDefaultProfileConfigInput {
   mode?: ProfileMode;
   accounts: {
     app: AppCredentials;
+    recordedAt?: string;
   };
   preferences?: AppPreferences;
   access?: Partial<ProfileAccess>;
@@ -367,7 +370,7 @@ function normalizeAccounts(input: unknown): ProfileConfig['accounts'] {
   if (!input || typeof input !== 'object') {
     throw new Error('accounts.app is required');
   }
-  const accounts = input as { app?: Partial<AppCredentials> };
+  const accounts = input as { app?: Partial<AppCredentials>; recordedAt?: unknown };
   const app = accounts.app;
   if (!app?.id || !app.secret || (app.tenant !== 'feishu' && app.tenant !== 'lark')) {
     throw new Error('accounts.app is incomplete');
@@ -378,6 +381,9 @@ function normalizeAccounts(input: unknown): ProfileConfig['accounts'] {
       secret: app.secret,
       tenant: app.tenant,
     },
+    ...(typeof accounts.recordedAt === 'string' && !Number.isNaN(Date.parse(accounts.recordedAt))
+      ? { recordedAt: new Date(accounts.recordedAt).toISOString() }
+      : {}),
   };
 }
 

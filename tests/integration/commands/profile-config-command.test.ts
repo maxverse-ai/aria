@@ -374,7 +374,8 @@ describe('profile-aware account and config commands', () => {
         id: secretKeyForApp('cli_new'),
       },
     });
-    expect(root.secrets?.providers?.bridge?.command).toContain('secrets-getter');
+    expect(root.profiles.claude?.secrets?.providers?.bridge?.command).toContain('secrets-getter');
+    expect(root.profiles.claude?.accounts.recordedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
     expect((root as unknown as { accounts?: unknown }).accounts).toBeUndefined();
     await expect(
       getSecret(secretKeyForApp('cli_new'), resolveAppPaths({ rootDir: h.rootDir, profile: 'claude' })),

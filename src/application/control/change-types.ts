@@ -4,6 +4,7 @@ import type { ManagementRuntimeEffect } from './runtime-effect';
 export const CONTROL_CHANGE_API_VERSION = 1 as const;
 
 export type ControlChangeRisk = 'low' | 'sensitive' | 'destructive';
+export type ControlParameterPrivacy = 'ordinary' | 'private-identifiers';
 export type ControlChangeSource = 'local-cli' | 'agent' | 'card' | 'web';
 export type ControlChangePlanStatus = 'planned' | 'confirmed' | 'applied';
 export type ControlPlanScalar = string | number | boolean | null;
@@ -31,17 +32,27 @@ export interface ConfigMutation {
   changes: ControlChangeSummary[];
 }
 
+export interface ManagementCommandPrepareInput {
+  root: RootConfig;
+  profile: string;
+  parameters: ControlPlanParameters;
+  /** Private execution context. Never copied into a public plan snapshot. */
+  rootDir?: string;
+}
+
 export interface ManagementCommandDefinition {
   id: string;
   version: 1;
   risk: ControlChangeRisk;
   effect: ManagementRuntimeEffect;
-  /** Pure deterministic transformation. Parameters must be non-secret. */
-  prepare(input: {
-    root: RootConfig;
-    profile: string;
-    parameters: ControlPlanParameters;
-  }): ConfigMutation;
+  /**
+   * `private-identifiers` permits command-validated resource identifiers in
+   * the internal plan record. Credentials remain forbidden and public plan
+   * summaries must stay redacted.
+   */
+  parameterPrivacy?: ControlParameterPrivacy;
+  /** Pure deterministic transformation. Parameters must never contain credentials. */
+  prepare(input: ManagementCommandPrepareInput): ConfigMutation;
 }
 
 /** @deprecated Compatibility input. New commands declare `effect`. */
@@ -50,12 +61,8 @@ export interface ConfigChangeOperation {
   version: 1;
   risk: ControlChangeRisk;
   restartRequired: boolean;
-  /** Pure deterministic transformation. Parameters must be non-secret. */
-  prepare(input: {
-    root: RootConfig;
-    profile: string;
-    parameters: ControlPlanParameters;
-  }): ConfigMutation;
+  /** Pure deterministic transformation. Parameters must never contain credentials. */
+  prepare(input: ManagementCommandPrepareInput): ConfigMutation;
 }
 
 export type ManagementCommandInput = ManagementCommandDefinition | ConfigChangeOperation;

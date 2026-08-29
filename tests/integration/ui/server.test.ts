@@ -200,6 +200,21 @@ describe('ui server (supervisor-backed)', () => {
     expect(removed.allowedUsers).not.toContain('ou_alice');
   });
 
+  it('persists offline-profile access through the same deferred command path', async () => {
+    const added = await json(
+      await post('/api/access?profile=work', handle.token, {
+        action: 'add',
+        kind: 'admin',
+        id: 'ou_work_admin',
+      }),
+    );
+    expect(added.admins).toContain('ou_work_admin');
+    expect(online.has('work')).toBe(false);
+    const disk = JSON.parse(await readFile(configPath, 'utf8'));
+    expect(disk.profiles.work.access.admins).toContain('ou_work_admin');
+    expect(disk.profiles.claude.access.admins).not.toContain('ou_work_admin');
+  });
+
   it('sets and clears a per-chat @-mention override, and drops it when the chat is removed', async () => {
     await json(await post('/api/access', handle.token, { action: 'add', kind: 'chat', id: 'oc_grp' }));
 

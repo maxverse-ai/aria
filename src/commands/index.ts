@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, isAbsolute } from 'node:path';
+import { isDeepStrictEqual } from 'node:util';
 import type { LarkChannel, NormalizedMessage } from '@larksuite/channel';
 import { capabilityFor, requireEnginePlugin } from '../agent/plugin/registry';
 import { probeEngineStatus, snapshotEngineStatus } from '../agent/plugin/probe';
@@ -21,15 +22,24 @@ import type { AgentAdapter } from '../agent/types';
 import type { EngineStatusSnapshot } from '../agent/runtime/types';
 import {
   ConfigChangeService,
+  ControlChangeError,
   MANAGEMENT_API_VERSION,
   ManagementApi,
+  PROFILE_ACCESS_UPDATE_COMMAND,
+  PROFILE_ACCOUNT_UPDATE_COMMAND,
   PROFILE_PREFERENCES_UPDATE_COMMAND,
   SERVICE_TIER_SET_COMMAND,
+  applyProfileAccessUpdate,
+  authorizeAdapterCommands,
   configRevision,
   managementCommandRegistry,
+  nextAccountRecordedAt,
   nextLarkCliRecordedAt,
+  profileAccessUpdateParameters,
+  profileAccountUpdateParameters,
   profilePreferencesUpdateParameters,
   type ControlActorContext,
+  type ProfileAccessUpdateInput,
 } from '../application/control';
 import {
   decodeServiceTierSelection,
@@ -78,6 +88,7 @@ import {
   getRequireMentionInGroup,
   getRunIdleTimeoutMs,
   getShowToolCalls,
+  secretKeyForApp,
 } from '../config/schema';
 import type {
   LarkCliIdentityPreset,
@@ -93,8 +104,9 @@ import {
   canUseGroup,
   type OwnerRefreshState,
 } from '../policy/access';
-import { buildEncryptedAccountConfig } from '../config/store';
-import { loadRootConfig, saveRootConfig } from '../config/profile-store';
+import { ensureSecretsGetterWrapper } from '../config/store';
+import { setSecret } from '../config/keystore';
+import { loadRootConfig, runtimeProfileConfig, saveRootConfig } from '../config/profile-store';
 import * as configOps from '../config/config-ops';
 import { log, reportMetric } from '../core/logger';
 import { renderCard } from '../card/run-renderer';
@@ -2268,7 +2280,6 @@ async function submitAccount(ctx: CommandContext): Promise<void> {
 
   const formMsgId = ctx.msg.messageId;
   const channel = ctx.channel;
-  const restart = ctx.controls.restart;
   const retryReplyOptions = commandReplyOptions(ctx);
 
   // The shared Card Action Executor releases Lark's callback before this
@@ -2332,15 +2343,12 @@ async function submitAccount(ctx: CommandContext): Promise<void> {
     // raw secret. lark-cli's `config bind --source lark-channel` reads the
     // same SecretRef and goes through the exec protocol to retrieve the
     // plaintext into its own OS keychain — no plaintext on disk.
+  let accountPlanId: string;
   try {
     const appPaths = commandProfilePaths(ctx);
-    const newCfg = await buildEncryptedAccountConfig(
-      appId,
-      tenant,
-      ctx.controls.cfg.preferences,
-      appPaths,
-    );
-    await saveAccountConfig(ctx, newCfg, appSecret);
+    await ensureSecretsGetterWrapper(appPaths);
+    await setSecret(secretKeyForApp(appId), appSecret, appPaths);
+    accountPlanId = await commitAccountConfig(ctx, appId, tenant);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     await finishFailure(`保存凭据失败：${msg}`);
@@ -2349,14 +2357,11 @@ async function submitAccount(ctx: CommandContext): Promise<void> {
 
   await finishSuccess(accountSuccessCard({ appId, botName: result.botName, tenant }));
 
-    // Give the user 1.5s to read the success state before we tear down the
-    // WS and reconnect with new credentials.
-  setTimeout(() => {
-    void restart().catch((err) => {
-      console.error('[account] restart failed:', err);
-      process.exit(1);
-    });
-  }, 1500);
+  // The callback was already released by the shared action executor. Keep the
+  // background task alive long enough to render success, then retry the
+  // already-committed plan through the running-profile reconciler.
+  await new Promise<void>((resolve) => setTimeout(resolve, 1500));
+  await reconcileAccountConfig(ctx, accountPlanId);
 }
 
 async function recallMessage(ctx: CommandContext, messageId: string): Promise<void> {
@@ -2373,33 +2378,23 @@ async function handleInvite(args: string, ctx: CommandContext): Promise<void> {
   const tokens = args.trim().split(/\s+/).filter(Boolean).map((token) => token.toLowerCase());
 
   if (tokens.includes('all') && tokens.includes('group')) {
-    const list = new Set(ctx.controls.profileConfig.access.allowedChats);
+    const previous = new Set(ctx.controls.profileConfig.access.allowedChats);
     let knownChats = ctx.controls.knownChats ?? [];
     if (knownChats.length === 0) {
       knownChats = await fetchKnownChats(ctx.channel);
       ctx.controls.knownChats = knownChats;
     }
-    let added = 0;
-    let total = list.size;
-    await saveAccessConfig(ctx, (current) => {
-      list.clear();
-      for (const chatId of current.allowedChats) list.add(chatId);
-      added = 0;
-      for (const chat of knownChats) {
-        if (!list.has(chat.id)) {
-          list.add(chat.id);
-          added += 1;
-        }
-      }
-      total = list.size;
-      return {
-        ...current,
-        allowedChats: [...list],
-      };
-    });
     if (knownChats.length === 0) {
       await reply(ctx, '当前 bot 还不在任何群里，没有可加入的群。');
     } else {
+      const access = await commitAccessConfig(ctx, {
+        action: 'add',
+        kind: 'chat',
+        targets: knownChats.map((chat) => chat.id),
+        requireMention: null,
+      });
+      const added = knownChats.filter((chat) => !previous.has(chat.id)).length;
+      const total = access.allowedChats.length;
       await reply(ctx, `✅ 已把 bot 所在的 ${added} 个群加入响应群名单（共 ${total} 个）。`);
     }
     return;
@@ -2428,15 +2423,12 @@ async function handleInvite(args: string, ctx: CommandContext): Promise<void> {
       return;
     }
     const chatId = ctx.msg.chatId;
-    let already = false;
-    await saveAccessConfig(ctx, (current) => {
-      const list = new Set(current.allowedChats);
-      already = list.has(chatId);
-      if (!already) list.add(chatId);
-      return {
-        ...current,
-        allowedChats: [...list],
-      };
+    const already = ctx.controls.profileConfig.access.allowedChats.includes(chatId);
+    await commitAccessConfig(ctx, {
+      action: 'add',
+      kind: 'chat',
+      targets: [chatId],
+      requireMention: null,
     });
     if (already) {
       await reply(ctx, '✅ 当前群已在白名单里，无需重复添加。');
@@ -2458,22 +2450,19 @@ async function handleInvite(args: string, ctx: CommandContext): Promise<void> {
   const listKey = kind === 'user' ? 'allowedUsers' : 'admins';
   const added: string[] = [];
   const already: string[] = [];
-  await saveAccessConfig(ctx, (current) => {
-    const list = new Set(current[listKey]);
-    added.length = 0;
-    already.length = 0;
-    for (const target of targets) {
-      if (list.has(target.openId)) {
-        already.push(target.name ?? target.openId);
-      } else {
-        list.add(target.openId);
-        added.push(target.name ?? target.openId);
-      }
+  const current = new Set(ctx.controls.profileConfig.access[listKey]);
+  for (const target of targets) {
+    if (current.has(target.openId)) {
+      already.push(target.name ?? target.openId);
+    } else {
+      added.push(target.name ?? target.openId);
     }
-    return {
-      ...current,
-      [listKey]: [...list],
-    };
+  }
+  await commitAccessConfig(ctx, {
+    action: 'add',
+    kind,
+    targets: targets.map((target) => target.openId),
+    requireMention: null,
   });
   const label = kind === 'user' ? '用户白名单' : '管理员';
   const parts: string[] = [];
@@ -2506,15 +2495,12 @@ async function handleRemove(args: string, ctx: CommandContext): Promise<void> {
       return;
     }
     const chatId = ctx.msg.chatId;
-    let missing = false;
-    await saveAccessConfig(ctx, (current) => {
-      const list = new Set(current.allowedChats);
-      missing = !list.has(chatId);
-      list.delete(chatId);
-      return {
-        ...current,
-        allowedChats: [...list],
-      };
+    const missing = !ctx.controls.profileConfig.access.allowedChats.includes(chatId);
+    await commitAccessConfig(ctx, {
+      action: 'remove',
+      kind: 'chat',
+      targets: [chatId],
+      requireMention: null,
     });
     if (missing) {
       await reply(ctx, '✅ 当前群本来就不在响应名单里，无需移除。');
@@ -2533,22 +2519,19 @@ async function handleRemove(args: string, ctx: CommandContext): Promise<void> {
   const listKey = kind === 'user' ? 'allowedUsers' : 'admins';
   const removed: string[] = [];
   const notThere: string[] = [];
-  await saveAccessConfig(ctx, (current) => {
-    const list = new Set(current[listKey]);
-    removed.length = 0;
-    notThere.length = 0;
-    for (const target of targets) {
-      if (list.has(target.openId)) {
-        list.delete(target.openId);
-        removed.push(target.name ?? target.openId);
-      } else {
-        notThere.push(target.name ?? target.openId);
-      }
+  const current = new Set(ctx.controls.profileConfig.access[listKey]);
+  for (const target of targets) {
+    if (current.has(target.openId)) {
+      removed.push(target.name ?? target.openId);
+    } else {
+      notThere.push(target.name ?? target.openId);
     }
-    return {
-      ...current,
-      [listKey]: [...list],
-    };
+  }
+  await commitAccessConfig(ctx, {
+    action: 'remove',
+    kind,
+    targets: targets.map((target) => target.openId),
+    requireMention: null,
   });
   const label = kind === 'user' ? '用户白名单' : '管理员';
   const parts: string[] = [];
@@ -2566,11 +2549,64 @@ function mentionTargets(ctx: CommandContext): Array<{ openId: string; name?: str
     }));
 }
 
-async function saveAccessConfig(
+async function commitAccessConfig(
   ctx: CommandContext,
-  mutate: (access: ProfileAccess) => ProfileAccess,
+  input: ProfileAccessUpdateInput,
 ): Promise<ProfileAccess> {
-  return configOps.saveAccessConfig(ctx.controls, mutate);
+  const actor = { source: 'card' as const, principal: ctx.msg.senderId };
+  const api = new ManagementApi(
+    new ConfigChangeService({
+      rootDir: dirname(ctx.controls.configPath),
+      registry: managementCommandRegistry,
+      authorizeCommand: authorizeAdapterCommands('card', [PROFILE_ACCESS_UPDATE_COMMAND]),
+    }),
+    new ProfileRuntimeReconciler(ctx.controls),
+  );
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      const result = await api.execute({
+        schema: 'aria.management.execute.request.v1',
+        apiVersion: MANAGEMENT_API_VERSION,
+        requestId: randomUUID(),
+        actor,
+        profile: ctx.controls.profile,
+        command: PROFILE_ACCESS_UPDATE_COMMAND,
+        input: profileAccessUpdateParameters(input),
+      });
+      if (result.reconciliation.status !== 'applied') {
+        const retry = await api.commit({
+          schema: 'aria.management.commit.request.v1',
+          apiVersion: MANAGEMENT_API_VERSION,
+          requestId: randomUUID(),
+          actor,
+          planId: result.planId,
+        });
+        if (retry.reconciliation.status !== 'applied') {
+          log.warn('command', 'access-runtime-reconcile-incomplete', {
+            profile: ctx.controls.profile,
+            status: retry.reconciliation.status,
+            effect: retry.reconciliation.effect,
+          });
+        }
+      }
+      return ctx.controls.profileConfig.access;
+    } catch (err) {
+      if (err instanceof ControlChangeError && err.code === 'revision-conflict' && attempt < 2) {
+        continue;
+      }
+      if (err instanceof ControlChangeError && err.code === 'invalid-plan') {
+        const root = await loadRootConfig(ctx.controls.configPath);
+        const current = root?.profiles[ctx.controls.profile]?.access;
+        if (current && isDeepStrictEqual(current, applyProfileAccessUpdate(current, input))) {
+          ctx.controls.profileConfig = root!.profiles[ctx.controls.profile]!;
+          ctx.controls.cfg = runtimeProfileConfig(root!, ctx.controls.profile);
+          return current;
+        }
+      }
+      throw err;
+    }
+  }
+  throw new ControlChangeError('revision-conflict', 'access config changed concurrently');
 }
 
 // ────────────── /config — preferences form ──────────────
@@ -3077,12 +3113,54 @@ async function applyConfigLarkCliIdentityPolicy(
   return configOps.applyProfileLarkCliIdentity(ctx.controls, larkCliIdentity);
 }
 
-async function saveAccountConfig(
+async function commitAccountConfig(
   ctx: CommandContext,
-  newCfg: AppConfig,
-  plaintextSecret: string,
-): Promise<void> {
-  return configOps.saveAccountConfig(ctx.controls, newCfg, plaintextSecret);
+  application: string,
+  tenant: TenantBrand,
+): Promise<string> {
+  const actor = { source: 'card' as const, principal: ctx.msg.senderId };
+  const api = new ManagementApi(
+    new ConfigChangeService({
+      rootDir: dirname(ctx.controls.configPath),
+      registry: managementCommandRegistry,
+      authorizeCommand: authorizeAdapterCommands('card', [PROFILE_ACCOUNT_UPDATE_COMMAND]),
+    }),
+  );
+  const result = await api.execute({
+    schema: 'aria.management.execute.request.v1',
+    apiVersion: MANAGEMENT_API_VERSION,
+    requestId: randomUUID(),
+    actor,
+    profile: ctx.controls.profile,
+    command: PROFILE_ACCOUNT_UPDATE_COMMAND,
+    input: profileAccountUpdateParameters({
+      application,
+      tenant,
+      recordedAt: nextAccountRecordedAt(ctx.controls.profileConfig.accounts.recordedAt),
+    }),
+  });
+  return result.planId;
+}
+
+async function reconcileAccountConfig(ctx: CommandContext, planId: string): Promise<void> {
+  const actor = { source: 'card' as const, principal: ctx.msg.senderId };
+  const api = new ManagementApi(
+    new ConfigChangeService({
+      rootDir: dirname(ctx.controls.configPath),
+      registry: managementCommandRegistry,
+    }),
+    new ProfileRuntimeReconciler(ctx.controls),
+  );
+  const result = await api.commit({
+    schema: 'aria.management.commit.request.v1',
+    apiVersion: MANAGEMENT_API_VERSION,
+    requestId: randomUUID(),
+    actor,
+    planId,
+  });
+  if (result.reconciliation.status !== 'applied') {
+    throw new Error(`account reconnect failed: ${result.reconciliation.status}`);
+  }
 }
 
 async function commitPreferencesConfig(

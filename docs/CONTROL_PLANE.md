@@ -10,17 +10,17 @@ Aria exposes supported management capabilities through one application-layer
 `ManagementApi`. Its v1 request envelopes carry `requestId`, actor, command,
 profile and typed input; its plan, commit and execute results are independently
 versioned. CLI commands are the currently shipped machine interface. The
-Feishu `/config` preferences form and local web settings form are in-process
-adapters over the same boundary. Remaining Feishu and web access/account
-writers still use the older `config-ops.ts` compatibility path; agent-driven
-flows can invoke the shipped CLI commands. The target is for every public entry
-point to become an adapter over the same registered commands.
+Feishu `/config`, `/invite`, `/remove`, and `/account` flows plus local web
+settings/access mutations are in-process adapters over the same boundary.
+Agent-driven flows can invoke the shipped CLI commands. The target remains for
+every public entry point to use registered commands rather than stored-config
+paths.
 
 ```text
 CLI ----------------------+--> Management API --> Config repository
 /config preferences card -+                         |
 Web settings form ---------+                         +--> Runtime reconciler
-Access/account (remaining) -+ (target)
+Access/account adapters ----+
 Agent + CLI ---------------+
 
 Runtime Admin IPC -----------------------------> Runtime lifecycle
@@ -77,8 +77,14 @@ user-facing mutation operations.
   returned, and the same actor must confirm and apply the plan.
 - Public plan snapshots omit operation parameters, secrets, raw actor IDs and
   filesystem paths.
-- Protocol v1 fails closed for `sensitive` and `destructive` operations until
-  a stronger authorization and confirmation policy is introduced.
+- Protocol v1 fails closed for `sensitive` and `destructive` operations by
+  default. Shipped in-process access/account adapters install an explicit
+  source-and-command-scoped authorizer after their existing admin/local-console
+  gate; there is no generic sensitive-operation switch.
+- Commands may mark inputs as `private-identifiers`. Those identifiers are
+  retained only in the mode-0600 internal plan needed for deterministic replay;
+  public plans expose redacted count/value summaries. Credentials remain
+  forbidden from command parameters and plan summaries.
 - A profile-scoped operation cannot change root identity fields, root secrets,
   the profile set or any other profile.
 
@@ -111,15 +117,20 @@ The web settings form uses one larger aggregate contract so a form submission
 is still one atomic commit. Its live variant rejects `meeting.enabled` changes;
 the adapter selects the reconnect variant for those transitions. Offline
 profiles use the same command and explicitly defer runtime reconciliation.
-Access/account adapters must migrate incrementally without changing current
-user behavior. Agent flows may use the staged CLI service and cannot bypass its
+Access mutations use `profile.access.update`, retry revision conflicts, apply
+live for the hosting profile, and defer for offline profiles. Account changes
+stage plaintext only in the profile keystore, commit an external SecretRef via
+`profile.account.update`, and retry the committed reconnect after the success
+card renders. A secret-free `recordedAt` marker versions same-App credential
+rotations. Agent flows may use the staged CLI service and cannot bypass its
 plan, confirmation, or application steps.
 
 ## Current boundary summary
 
-- `ManagementApi` is the shipped application boundary for low-risk CLI
-  mutations. It exposes versioned `plan`, `getPlan`, `confirm`, `commit`, and
-  one-call `execute` operations without importing CLI or UI concerns.
+- `ManagementApi` is the shipped application boundary for CLI and trusted
+  in-process adapter mutations. It exposes versioned `plan`, `getPlan`,
+  `confirm`, `commit`, and one-call `execute` operations without importing CLI
+  or UI concerns.
 - `ConfigChangeService` is the mutation kernel behind that facade. It owns the
   durable plan lifecycle and commit invariants, not transport request shapes.
 - `ManagementCommandRegistry` normalizes canonical commands with explicit
@@ -136,14 +147,17 @@ plan, confirmation, or application steps.
   reconciliation without repeating the write.
 - `ProfileRuntimeReconciler` can reload an exact committed revision into a
   running profile for `live`, invoke its connect-before-disconnect path for
-  `reconnect`, and defer process-level `restart`. The `/config` preferences and
-  web settings adapters use this implementation and retry reconciliation
-  separately from an already-completed commit.
+  `reconnect`, and defer process-level `restart`. Settings and access adapters
+  use this implementation directly; `/account` deliberately defers its first
+  reconcile until the success card is visible, then retries the already-applied
+  plan without repeating the config write.
 - The CLI now uses `ManagementApi` while unwrapping its envelopes so existing
   public CLI JSON and human-readable output remain compatible.
-- `config-ops.ts` remains the compatibility writer for Feishu/web
-  access/account flows, not a second target architecture. Its independent
-  preferences writer has been removed.
+- `config-ops.ts` no longer contains public config writers. It retains only the
+  lark-cli identity side effect and the shared mutable runtime projection type.
+- Plaintext App Secrets never enter Management API requests or plans. The
+  adapter writes the encrypted profile keystore first; the command persists
+  only a profile-scoped provider and SecretRef.
 - Runtime reconnect, restart, activity preflight, and engine replacement
   belong to Runtime Admin IPC and the Supervisor.
 - Native Read is a scoped read/query transport and never a configuration

@@ -1,16 +1,23 @@
 import { randomUUID } from 'node:crypto';
 import { dirname } from 'node:path';
+import { isDeepStrictEqual } from 'node:util';
 import type { LarkChannel } from '@larksuite/channel';
 import {
   ConfigChangeService,
+  ControlChangeError,
   MANAGEMENT_API_VERSION,
   ManagementApi,
+  PROFILE_ACCESS_UPDATE_COMMAND,
   PROFILE_SETTINGS_RECONNECT_COMMAND,
   PROFILE_SETTINGS_UPDATE_COMMAND,
+  applyProfileAccessUpdate,
+  authorizeAdapterCommands,
   configRevision,
   managementCommandRegistry,
   nextLarkCliRecordedAt,
+  profileAccessUpdateParameters,
   profileSettingsUpdateParameters,
+  type ProfileAccessUpdateInput,
 } from '../application/control';
 import { fetchKnownChats } from '../bot/lark-info';
 import {
@@ -32,7 +39,6 @@ import { resolveAppPaths } from '../config/app-paths';
 import { loadRootConfig, runtimeProfileConfig } from '../config/profile-store';
 import {
   applyProfileLarkCliIdentity,
-  saveAccessConfig,
   type MutableProfileState,
 } from '../config/config-ops';
 import {
@@ -423,13 +429,6 @@ async function refreshConfigProjection(state: MutableProfileState): Promise<void
   state.cfg = runtimeProfileConfig(root, state.profile);
 }
 
-type AccessKind = 'user' | 'admin' | 'chat';
-const ACCESS_LIST: Record<AccessKind, 'allowedUsers' | 'admins' | 'allowedChats'> = {
-  user: 'allowedUsers',
-  admin: 'admins',
-  chat: 'allowedChats',
-};
-
 /**
  * Mutate the profile's access. Two operations:
  *  - `add`/`remove` a single id from a list (user/admin/chat) — mirrors
@@ -440,6 +439,7 @@ const ACCESS_LIST: Record<AccessKind, 'allowedUsers' | 'admins' | 'allowedChats'
 export async function mutateAccess(
   state: MutableProfileState,
   body: unknown,
+  runtime?: UiRuntime,
 ): Promise<ConfigView['access']> {
   const fv = asRecord(body);
   const action = fv.action;
@@ -456,12 +456,11 @@ export async function mutateAccess(
       throw new ApiError(400, 'requireMention must be boolean or null');
     }
     const requireMention = typeof fv.requireMention === 'boolean' ? fv.requireMention : null;
-    const access = await saveAccessConfig(state, (current) => {
-      const map = { ...(current.chatRequireMention ?? {}) };
-      if (requireMention === null) delete map[id];
-      else map[id] = requireMention;
-      return { ...current, chatRequireMention: map };
-    });
+    const access = await commitAccessUpdate(
+      state,
+      { action: 'set-mention', kind: 'chat', targets: [id], requireMention },
+      runtime,
+    );
     return accessView(access);
   }
 
@@ -472,22 +471,70 @@ export async function mutateAccess(
     throw new ApiError(400, 'kind must be user|admin|chat');
   }
   if (!id) throw new ApiError(400, 'id is required');
-  const listKey = ACCESS_LIST[kind];
-
-  const access = await saveAccessConfig(state, (current) => {
-    const set = new Set(current[listKey]);
-    if (action === 'add') set.add(id);
-    else set.delete(id);
-    const next = { ...current, [listKey]: [...set] };
-    // Dropping a chat also drops its @-mention override so it can't linger.
-    if (action === 'remove' && kind === 'chat' && next.chatRequireMention?.[id] !== undefined) {
-      const map = { ...next.chatRequireMention };
-      delete map[id];
-      next.chatRequireMention = map;
-    }
-    return next;
-  });
+  const access = await commitAccessUpdate(
+    state,
+    { action, kind, targets: [id], requireMention: null },
+    runtime,
+  );
   return accessView(access);
+}
+
+async function commitAccessUpdate(
+  state: MutableProfileState,
+  input: ProfileAccessUpdateInput,
+  runtime?: UiRuntime,
+): Promise<ProfileAccess> {
+  const actor = { source: 'web' as const, principal: 'local-console' };
+  const api = new ManagementApi(
+    new ConfigChangeService({
+      rootDir: dirname(state.configPath),
+      registry: managementCommandRegistry,
+      authorizeCommand: authorizeAdapterCommands('web', [PROFILE_ACCESS_UPDATE_COMMAND]),
+    }),
+    runtime ? new ProfileRuntimeReconciler(runtime) : undefined,
+  );
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      const result = await api.execute({
+        schema: 'aria.management.execute.request.v1',
+        apiVersion: MANAGEMENT_API_VERSION,
+        requestId: randomUUID(),
+        actor,
+        profile: state.profile,
+        command: PROFILE_ACCESS_UPDATE_COMMAND,
+        input: profileAccessUpdateParameters(input),
+      });
+      if (runtime && result.reconciliation.status !== 'applied') {
+        const retry = await api.commit({
+          schema: 'aria.management.commit.request.v1',
+          apiVersion: MANAGEMENT_API_VERSION,
+          requestId: randomUUID(),
+          actor,
+          planId: result.planId,
+        });
+        if (retry.reconciliation.status !== 'applied') {
+          log.warn('ui', 'access-runtime-reconcile-incomplete', {
+            profile: state.profile,
+            status: retry.reconciliation.status,
+            effect: retry.reconciliation.effect,
+          });
+        }
+      }
+      await refreshConfigProjection(state);
+      return state.profileConfig.access;
+    } catch (err) {
+      if (err instanceof ControlChangeError && err.code === 'revision-conflict' && attempt < 2) {
+        continue;
+      }
+      if (err instanceof ControlChangeError && err.code === 'invalid-plan') {
+        await refreshConfigProjection(state);
+        const current = state.profileConfig.access;
+        if (isDeepStrictEqual(current, applyProfileAccessUpdate(current, input))) return current;
+      }
+      throw new ApiError(500, `保存失败：${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+  throw new ApiError(409, '配置并发更新，请重试');
 }
 
 function accessView(access: ProfileAccess): ConfigView['access'] {
