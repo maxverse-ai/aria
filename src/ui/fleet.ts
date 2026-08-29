@@ -1,10 +1,4 @@
-import { resolveAppPaths } from '../config/app-paths';
-import {
-  loadRootConfig,
-  saveRootConfig,
-  withConfigFileLock,
-  writeActiveProfile,
-} from '../config/profile-store';
+import { ControlChangeError, ProfileLifecycleService } from '../application/control';
 import { listAllProfiles } from '../runtime/profile-discovery';
 import type { AgentKind } from '../config/profile-schema';
 import { HttpError } from './http';
@@ -64,13 +58,19 @@ export async function activateProfile(
   name: string,
   rootDir?: string,
 ): Promise<{ ok: true; active: string }> {
-  const appPaths = resolveAppPaths({ rootDir });
-  await withConfigFileLock(appPaths.configFile, async () => {
-    const root = await loadRootConfig(appPaths.configFile);
-    if (!root?.profiles[name]) throw new HttpError(404, `profile not found: ${name}`);
-    root.activeProfile = name;
-    await saveRootConfig(root, appPaths.configFile);
-  });
-  await writeActiveProfile(appPaths.rootDir, name);
+  try {
+    await new ProfileLifecycleService({ rootDir }).activate(name, {
+      source: 'web',
+      principal: 'local-console',
+    });
+  } catch (error) {
+    if (error instanceof ControlChangeError && error.code === 'profile-not-found') {
+      throw new HttpError(404, error.message);
+    }
+    if (error instanceof ControlChangeError && error.code === 'revision-conflict') {
+      throw new HttpError(409, error.message);
+    }
+    throw error;
+  }
   return { ok: true, active: name };
 }

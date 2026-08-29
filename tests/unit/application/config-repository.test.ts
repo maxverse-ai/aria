@@ -30,7 +30,6 @@ describe('FileConfigRepository', () => {
 
     expect(result).toEqual({ revision: 'next' });
     expect((await repository.readRoot())?.profiles.primary?.preferences.showToolCalls).toBe(false);
-    expect(await repository.readActiveProfile()).toBe('primary');
   });
 
   it('does not persist a read-only transaction', async () => {

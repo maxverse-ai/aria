@@ -7,8 +7,13 @@ export type ControlChangeRisk = 'low' | 'sensitive' | 'destructive';
 export type ControlParameterPrivacy = 'ordinary' | 'private-identifiers';
 export type ControlChangeSource = 'local-cli' | 'agent' | 'card' | 'web';
 export type ControlChangePlanStatus = 'planned' | 'confirmed' | 'applied';
+export type ManagementResourceScope = 'profile' | 'root';
 export type ControlPlanScalar = string | number | boolean | null;
 export type ControlPlanParameters = Record<string, ControlPlanScalar>;
+
+export type ControlChangeResource =
+  | { kind: 'root' }
+  | { kind: 'profile'; profile: string };
 
 export interface ControlActorContext {
   source: ControlChangeSource;
@@ -35,6 +40,8 @@ export interface ConfigMutation {
 export interface ManagementCommandPrepareInput {
   root: RootConfig;
   profile: string;
+  /** Always supplied by the mutation kernel; optional for direct legacy command tests/callers. */
+  resource?: ControlChangeResource;
   parameters: ControlPlanParameters;
   /** Private execution context. Never copied into a public plan snapshot. */
   rootDir?: string;
@@ -45,6 +52,8 @@ export interface ManagementCommandDefinition {
   version: 1;
   risk: ControlChangeRisk;
   effect: ManagementRuntimeEffect;
+  /** Defaults to `profile` for commands registered before resource scoping. */
+  resourceScope?: ManagementResourceScope;
   /**
    * `private-identifiers` permits command-validated resource identifiers in
    * the internal plan record. Credentials remain forbidden and public plan
@@ -80,6 +89,8 @@ export interface ControlChangePlanSnapshot {
   apiVersion: typeof CONTROL_CHANGE_API_VERSION;
   id: string;
   profile: string;
+  /** Missing only on v1 plans persisted before resource scoping shipped. */
+  resource?: ControlChangeResource;
   operation: {
     id: string;
     version: 1;

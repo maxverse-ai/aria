@@ -259,6 +259,22 @@ describe('ui server (supervisor-backed)', () => {
     expect(online.has('claude')).toBe(false);
   });
 
+  it('activates an offline profile through the root-scoped management command', async () => {
+    const response = await post('/api/profiles/activate', handle.token, { profile: 'work' });
+
+    expect(response.status).toBe(200);
+    await expect(json(response)).resolves.toEqual({ ok: true, active: 'work' });
+    expect((await loadRootConfig(configPath))?.activeProfile).toBe('work');
+    await expect(readFile(join(rootDir, 'active-profile'), 'utf8')).resolves.toBe('work\n');
+  });
+
+  it('returns 404 when activating an unknown profile', async () => {
+    const response = await post('/api/profiles/activate', handle.token, { profile: 'missing' });
+
+    expect(response.status).toBe(404);
+    expect(await json(response)).toEqual({ error: 'profile not found: missing' });
+  });
+
   it('returns 404 for an unknown QR registration session', async () => {
     const res = await get('/api/profiles/qr/status?sessionId=nope', handle.token);
     expect(res.status).toBe(404);

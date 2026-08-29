@@ -39,15 +39,15 @@ describe('listAllProfiles', () => {
 
     const profiles = await listAllProfiles(root);
 
-    expect(profiles.map((item) => item.name)).toEqual(['codex-dev', 'claude', 'zeta']);
+    expect(profiles.map((item) => item.name)).toEqual(['claude', 'codex-dev', 'zeta']);
     expect(profiles.map((item) => item.active)).toEqual([true, false, false]);
     expect(profiles[0]).toMatchObject({
-      agentKind: 'codex',
-      profileDir: join(root, 'profiles', 'codex-dev'),
+      agentKind: 'claude',
+      profileDir: join(root, 'profiles', 'claude'),
     });
   });
 
-  it('fails when active-profile points at a missing profile', async () => {
+  it('ignores a stale compatibility projection when config.json selects a valid profile', async () => {
     const root = await makeRoot();
     await writeRootConfig(root, {
       activeProfile: 'claude',
@@ -58,7 +58,9 @@ describe('listAllProfiles', () => {
     await writeFile(join(root, 'active-profile'), 'missing\n', 'utf8');
     await mkdir(join(root, 'profiles', 'claude'), { recursive: true });
 
-    await expect(listAllProfiles(root)).rejects.toThrow('active profile not found: missing');
+    await expect(listAllProfiles(root)).resolves.toEqual([
+      expect.objectContaining({ name: 'claude', active: true }),
+    ]);
   });
 
   it('fails when config profiles are missing state directories', async () => {

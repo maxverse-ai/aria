@@ -20,6 +20,8 @@ import { acquireProfileRuntimeLock, checkRuntimeLock } from '../../runtime/locks
 import { readAndPrune } from '../../runtime/registry';
 import { listAllProfiles } from '../../runtime/profile-discovery';
 import { resolveProfileRuntime } from '../../runtime/profile-runtime';
+import { ProfileLifecycleService } from '../../application/control';
+import { localCliActor } from '../control-actor';
 
 export interface ProfileCommandOptions {
   rootDir?: string;
@@ -139,15 +141,14 @@ export async function runProfileUse(
   opts: ProfileCommandOptions = {},
 ): Promise<void> {
   const rootDir = opts.rootDir ?? paths.rootDir;
-  const configFile = resolveAppPaths({ rootDir }).configFile;
-  await withConfigFileLock(configFile, async () => {
-    const root = await loadRootConfig(configFile);
-    if (!root?.profiles[name]) throw new Error(`profile not found: ${name}`);
-    root.activeProfile = name;
-    await saveRootConfig(root, configFile);
-    await writeActiveProfile(rootDir, name);
-  });
+  const result = await new ProfileLifecycleService({ rootDir }).activate(
+    name,
+    localCliActor(rootDir),
+  );
   console.log(`已切换到 profile: ${name}`);
+  if (result.projection.status === 'failed') {
+    console.warn('⚠ active-profile 兼容投影写入失败；config.json 已完成切换');
+  }
 }
 
 export async function runProfileRemove(

@@ -133,6 +133,14 @@ export async function withConfigFileLock<T>(configPath: string, fn: () => Promis
 }
 
 export async function readActiveProfile(rootDir?: string): Promise<string | undefined> {
+  const resolvedRootDir = rootDir ?? process.env.LARK_CHANNEL_HOME ?? resolveAppPaths().rootDir;
+  const root = await loadRootConfig(resolveAppPaths({ rootDir: resolvedRootDir }).configFile);
+  if (root) return root.activeProfile || undefined;
+  return readActiveProfileProjection(resolvedRootDir);
+}
+
+/** Raw compatibility projection. Normal profile selection must use config.json. */
+export async function readActiveProfileProjection(rootDir?: string): Promise<string | undefined> {
   const activeProfileFile = join(
     rootDir ?? process.env.LARK_CHANNEL_HOME ?? resolveAppPaths().rootDir,
     'active-profile',
