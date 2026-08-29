@@ -154,6 +154,7 @@ aria profile export <name> --include-secrets --yes
 | `/resume` | 恢复同 agent、工作目录、权限模式兼容的历史会话 |
 | `/status` | 查看 profile、agent、工作目录、会话、lark-cli 身份和运行状态 |
 | `/config` | 调整展示偏好、访问控制和 lark-cli 身份策略 |
+| `/fast [on\|off\|status\|reset]` | 管理 Codex Fast 模式；仅支持服务档位的模型显示（管理员） |
 | `/invite user @某人` | 允许用户私聊使用 bot |
 | `/invite admin @某人` | 添加访问控制管理员 |
 | `/invite group` | 允许当前群使用 bot |
@@ -168,6 +169,8 @@ aria profile export <name> --include-secrets --yes
 | `/help` | 帮助卡片 |
 
 私聊不需要 @。群和话题群默认必须 `@bot`；但只有一名用户和当前 bot 的私有群会像私聊一样直接回复，除非该群显式开启了严格 @ 模式。接收群里的非 @ 消息需要应用具备 `im:message.group_msg` 权限；`@all` 会被忽略。支持的云文档评论里 @bot 就会触发回复。
+
+Codex Fast 使用动态模型能力探测：`/fast on` 开启，`/fast off` 显式使用标准档位，`/fast reset` 恢复跟随 Codex 自身配置。回复底部状态栏显示 App Server 实际接受的 `Fast on/off`；其他 Agent 或未上报服务档位的旧版 Codex 不显示这一项。
 
 ## 回复展示与 COT
 

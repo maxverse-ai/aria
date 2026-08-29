@@ -26,6 +26,8 @@ export const PROFILE_PREFERENCES_UPDATE_COMMAND = 'profile.preferences.update';
 export interface ProfilePreferencesUpdateInput {
   mode: ProfileMode;
   model?: string;
+  /** Encoded by agent/service-tier so inherit and explicit standard stay distinct. */
+  serviceTier: string;
   messageReply: MessageReplyMode;
   showToolCalls: boolean;
   cotMessages: CotMessagesMode;
@@ -42,6 +44,7 @@ export interface ProfilePreferencesUpdateInput {
 const PARAMETER_KEYS = [
   'mode',
   'model',
+  'serviceTier',
   'messageReply',
   'showToolCalls',
   'cotMessages',
@@ -60,6 +63,7 @@ export function profilePreferencesUpdateParameters(
   return {
     mode: input.mode,
     model: input.model ?? null,
+    serviceTier: input.serviceTier,
     messageReply: input.messageReply,
     showToolCalls: input.showToolCalls,
     cotMessages: input.cotMessages,
@@ -106,6 +110,7 @@ export const profilePreferencesUpdateCommand: ManagementCommandDefinition = {
       ['config.cot-messages.set', input.cotMessages],
       ['config.max-concurrent-runs.set', input.maxConcurrentRuns],
       ['config.run-idle-timeout.set', input.runIdleTimeoutMinutes],
+      ['config.service-tier.set', input.serviceTier],
     ] as const) {
       const operation = lowRiskConfigCommandRegistry.get(command);
       if (!operation) {
@@ -194,6 +199,7 @@ function parseInput(parameters: ControlPlanParameters): ParsedProfilePreferences
   return {
     mode: enumValue(parameters.mode, ['personal', 'team'] as const, 'mode'),
     model: optionalString(parameters.model, 'model'),
+    serviceTier: requiredString(parameters.serviceTier, 'serviceTier'),
     messageReply: enumValue(
       parameters.messageReply,
       ['card', 'markdown', 'text'] as const,
@@ -275,6 +281,13 @@ function optionalString(value: ControlPlanScalar | undefined, field: string): st
   if (value === null) return null;
   if (typeof value !== 'string' || !value.trim()) {
     throw new ControlChangeError('invalid-plan', `${field} must be a non-empty string or null`);
+  }
+  return value;
+}
+
+function requiredString(value: ControlPlanScalar | undefined, field: string): string {
+  if (typeof value !== 'string' || !value.trim()) {
+    throw new ControlChangeError('invalid-plan', `${field} must be a non-empty string`);
   }
   return value;
 }

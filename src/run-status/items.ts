@@ -3,6 +3,7 @@ import type { RunStatusState } from './types';
 export type RunStatusItemId =
   | 'agent'
   | 'model'
+  | 'service-tier'
   | 'reasoning'
   | 'weekly-limit'
   | 'context'
@@ -26,6 +27,7 @@ export interface RunStatusItemOption {
 export const RUN_STATUS_ITEM_OPTIONS: readonly RunStatusItemOption[] = [
   { id: 'agent', icon: '⬢', label: 'Agent', description: '本次运行使用的 Agent' },
   { id: 'model', icon: '◈', label: '模型', description: '实际或请求的模型' },
+  { id: 'service-tier', icon: '⚡', label: 'Fast 模式', description: '引擎实际使用的速度档位' },
   { id: 'reasoning', icon: '✦', label: '推理强度', description: '本次运行的推理配置' },
   { id: 'weekly-limit', icon: '◉', label: '周额度', description: '账号周额度剩余比例' },
   { id: 'context', icon: '◎', label: '上下文', description: '当前上下文窗口剩余比例' },
@@ -76,6 +78,17 @@ const DEFINITIONS: Readonly<Record<RunStatusItemId, RunStatusItemDefinition>> = 
     select: (status) => status.reasoningEffort
       ? item('reasoning', status.reasoningEffort)
       : undefined,
+  },
+  'service-tier': {
+    id: 'service-tier',
+    select: (status) => {
+      if (status.serviceTier === undefined) return undefined;
+      if (status.serviceTier === null || status.serviceTier === 'default') {
+        return item('service-tier', 'Fast off');
+      }
+      if (status.serviceTier === 'fast') return item('service-tier', 'Fast on');
+      return item('service-tier', `tier · ${status.serviceTier}`);
+    },
   },
   'weekly-limit': {
     id: 'weekly-limit',

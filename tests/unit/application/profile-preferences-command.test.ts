@@ -12,6 +12,10 @@ import {
   type RootConfig,
 } from '../../../src/config/profile-schema';
 import { createRootConfig } from '../../../src/config/profile-store';
+import {
+  SERVICE_TIER_INHERIT,
+  SERVICE_TIER_STANDARD,
+} from '../../../src/agent/service-tier';
 
 describe('profile preferences management command', () => {
   it('updates the full card payload atomically and deterministically', () => {
@@ -19,6 +23,7 @@ describe('profile preferences management command', () => {
     const input = profilePreferencesUpdateParameters({
       mode: 'team',
       model: 'claude-opus-4-8',
+      serviceTier: SERVICE_TIER_STANDARD,
       messageReply: 'text',
       showToolCalls: false,
       cotMessages: 'brief',
@@ -54,6 +59,7 @@ describe('profile preferences management command', () => {
       preferences: {
         reasoningEffort: 'high',
         model: 'claude-opus-4-8',
+        serviceTier: null,
         messageReply: 'text',
         messageReplyMigrated: true,
         showToolCalls: false,
@@ -79,6 +85,7 @@ describe('profile preferences management command', () => {
     expect(first.changes.map((change) => change.field)).toEqual(
       expect.arrayContaining([
         'preferences.model',
+        'preferences.serviceTier',
         'preferences.messageReply',
         'preferences.runStatusItems',
         'access.requireMentionInGroup',
@@ -95,6 +102,7 @@ describe('profile preferences management command', () => {
       profile: 'primary',
       parameters: profilePreferencesUpdateParameters({
         mode: 'personal',
+        serviceTier: SERVICE_TIER_INHERIT,
         messageReply: 'markdown',
         showToolCalls: true,
         cotMessages: 'detailed',
@@ -118,6 +126,7 @@ describe('profile preferences management command', () => {
     const root = normalizedRoundTrip(fixtureRoot());
     const input = profilePreferencesUpdateParameters({
       mode: 'personal',
+      serviceTier: SERVICE_TIER_INHERIT,
       messageReply: 'markdown',
       showToolCalls: true,
       cotMessages: 'detailed',

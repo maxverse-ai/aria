@@ -1,12 +1,16 @@
 import { modelLabel, supportedModels } from '../agent/models';
 import type { ModelOption } from '../agent/models';
+import type { ServiceTierOption } from '../agent/models';
+import {
+  SERVICE_TIER_INHERIT,
+  SERVICE_TIER_STANDARD,
+} from '../agent/service-tier';
 import type { KnownChat } from '../bot/lark-info';
 import type { AgentKind, LarkCliIdentityPreset, ProfileMode } from '../config/profile-schema';
 import type { CotMessagesMode, MessageReplyMode } from '../config/schema';
 import type { EngineProbeStatus } from '../agent/plugin/probe';
 import { agentCatalogMarkdown, agentCatalogSummary } from './agent-catalog';
 import {
-  DEFAULT_RUN_STATUS_ITEMS,
   RUN_STATUS_ITEM_OPTIONS,
   type RunStatusItemId,
 } from '../run-status/items';
@@ -22,6 +26,11 @@ export interface ConfigFormOpts {
   model: string;
   /** Dynamic model picker options; falls back to the static catalog. */
   modelOptions?: ModelOption[];
+  /** Present only when the selected engine declares generic service-tier support. */
+  serviceTier?: {
+    selection: string;
+    options: ServiceTierOption[];
+  };
   messageReply: MessageReplyMode;
   showToolCalls: boolean;
   cotMessages: CotMessagesMode;
@@ -83,6 +92,16 @@ function chatList(chatIds: string[], knownChats: KnownChat[]): string {
 /** Form card for `/config`. */
 export function configFormCard(opts: ConfigFormOpts): object {
   const teamMode = opts.mode === 'team';
+  const showServiceTierPicker = Boolean(
+    opts.serviceTier
+    && (
+      opts.serviceTier.options.length > 0
+      || opts.serviceTier.selection !== SERVICE_TIER_INHERIT
+    ),
+  );
+  const runStatusOptions = opts.serviceTier
+    ? RUN_STATUS_ITEM_OPTIONS
+    : RUN_STATUS_ITEM_OPTIONS.filter((item) => item.id !== 'service-tier');
   const agentOptions =
     opts.agentOptions && opts.agentOptions.length > 0
       ? opts.agentOptions
@@ -134,7 +153,7 @@ export function configFormCard(opts: ConfigFormOpts): object {
       content:
         `**管理员**（共 ${opts.admins.length} 人）\n` +
         `${atMentionLine(opts.admins)}\n\n` +
-        '_可以跑敏感命令：`/account` `/config` `/exit` `/reconnect` `/doctor` `/cd` `/ws` `/invite` `/remove`。管理员也自动获得私聊权限，并可在未白名单群里管理访问控制。_\n\n' +
+        '_可以跑敏感命令：`/account` `/config` `/fast` `/exit` `/reconnect` `/doctor` `/cd` `/ws` `/invite` `/remove`。管理员也自动获得私聊权限，并可在未白名单群里管理访问控制。_\n\n' +
         '_加 / 删：_ `/invite admin @某人`  `/remove admin @某人`',
     },
   ];
@@ -229,6 +248,29 @@ export function configFormCard(opts: ConfigFormOpts): object {
                 value: m.value,
               })),
             },
+            ...(opts.serviceTier
+              ? [
+                  { tag: 'hr' },
+                  {
+                    tag: 'markdown',
+                    content:
+                      '**运行速度档位**\n' +
+                      (opts.serviceTier.options.length > 0
+                        ? '_Fast 会消耗更多额度；选择「标准」会显式关闭，选择「跟随」则沿用 Agent 自身配置。_'
+                        : '_当前模型没有声明可切换的速度档位；可用 `/fast refresh` 重新探测。_'),
+                  },
+                  ...(showServiceTierPicker
+                    ? [
+                        {
+                          tag: 'select_static',
+                          name: 'service_tier',
+                          initial_option: opts.serviceTier.selection,
+                          options: serviceTierCardOptions(opts.serviceTier),
+                        },
+                      ]
+                    : []),
+                ]
+              : []),
             { tag: 'hr' },
             {
               tag: 'markdown',
@@ -290,11 +332,11 @@ export function configFormCard(opts: ConfigFormOpts): object {
               content:
                 '**底部运行状态**\n' +
                 '_逐项控制回复底部状态栏；默认全部显示。关闭只影响展示，不影响日志、监控或状态采集。_\n\n' +
-                RUN_STATUS_ITEM_OPTIONS.map(
+                runStatusOptions.map(
                   (item) => `${item.icon} **${item.label}**：${item.description}`,
                 ).join('\n'),
             },
-            ...RUN_STATUS_ITEM_OPTIONS.map((item) => {
+            ...runStatusOptions.map((item) => {
               const visible = opts.runStatusItems.includes(item.id);
               return {
                 tag: 'select_static',
@@ -426,12 +468,17 @@ export function configSavedCard(opts: ConfigFormOpts): object {
   const summarize = (list: string[]): string =>
     list.length === 0 ? '_(空)_' : `${list.length} 项`;
   const cotLabel = cotMessagesLabel(opts.cotMessages);
-  const runStatusLabel = opts.runStatusItems.length === DEFAULT_RUN_STATUS_ITEMS.length
+  const runStatusOptions = opts.serviceTier
+    ? RUN_STATUS_ITEM_OPTIONS
+    : RUN_STATUS_ITEM_OPTIONS.filter((item) => item.id !== 'service-tier');
+  const visibleRunStatusItems = opts.runStatusItems.filter((id) =>
+    runStatusOptions.some((item) => item.id === id));
+  const runStatusLabel = visibleRunStatusItems.length === runStatusOptions.length
     ? '全部显示'
-    : opts.runStatusItems.length === 0
+    : visibleRunStatusItems.length === 0
       ? '全部关闭'
-      : RUN_STATUS_ITEM_OPTIONS
-          .filter((item) => opts.runStatusItems.includes(item.id))
+      : runStatusOptions
+          .filter((item) => visibleRunStatusItems.includes(item.id))
           .map((item) => item.label)
           .join('、');
   return {
@@ -446,6 +493,9 @@ export function configSavedCard(opts: ConfigFormOpts): object {
             `**运行模式**:\`${opts.mode === 'team' ? '团队版' : '个人版'}\`\n` +
             `**默认 Agent**:\`${opts.agentKind}\`\n` +
             `**模型**:\`${modelLabel(opts.agentKind, opts.model)}\`\n` +
+            (opts.serviceTier
+              ? `**运行速度档位**:\`${serviceTierSelectionLabel(opts.serviceTier.selection, opts.serviceTier.options)}\`\n`
+              : '') +
             `**消息回复方式**:${replyLabel}\n` +
             `**工具调用显示**:\`${opts.showToolCalls ? 'show' : 'hide'}\`\n` +
             `**COT 过程消息**:\`${cotLabel}\`\n` +
@@ -465,6 +515,27 @@ export function configSavedCard(opts: ConfigFormOpts): object {
       ],
     },
   };
+}
+
+function serviceTierCardOptions(input: NonNullable<ConfigFormOpts['serviceTier']>): object[] {
+  const options = [
+    { value: SERVICE_TIER_INHERIT, label: '跟随 Agent 配置' },
+    { value: SERVICE_TIER_STANDARD, label: '标准速度（Fast off）' },
+    ...input.options.map((option) => ({ value: option.value, label: option.label })),
+  ];
+  if (!options.some((option) => option.value === input.selection)) {
+    options.push({ value: input.selection, label: `${input.selection}（当前配置，模型未声明）` });
+  }
+  return options.map((option) => ({
+    text: { tag: 'plain_text', content: option.label },
+    value: option.value,
+  }));
+}
+
+function serviceTierSelectionLabel(selection: string, options: ServiceTierOption[]): string {
+  if (selection === SERVICE_TIER_INHERIT) return '跟随 Agent 配置';
+  if (selection === SERVICE_TIER_STANDARD) return '标准速度（Fast off）';
+  return options.find((option) => option.value === selection)?.label ?? selection;
 }
 
 function cotMessagesLabel(value: CotMessagesMode): string {

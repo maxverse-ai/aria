@@ -35,6 +35,28 @@ unsupported server-initiated requests fail explicitly instead of hanging.
 the model, plan, context usage, and remaining limit windows. Account email is
 intentionally not rendered in chat.
 
+## Service tiers and Fast mode
+
+Service tiers are modeled as an optional engine/model capability, not as a
+global `AgentCapability.fast` flag. Codex discovers tier ids from `model/list`
+(`serviceTiers`) and currently exposes the `fast` tier through `/fast` and the
+Feishu `/config` card. Engines and models that do not declare service tiers do
+not render the control.
+
+The profile preference has three intentional states:
+
+- property absent: inherit the Codex configuration;
+- `null`: explicitly use the standard tier (`Fast off`);
+- a string such as `"fast"`: request that engine-native tier.
+
+Aria sends the resolved value on `thread/start`, `thread/resume`, and
+`turn/start`. A named tier not declared by the selected model is standardized
+instead of being sent as an invalid request. The run status line is projected
+from `ThreadStartResponse.serviceTier` / `ThreadResumeResponse.serviceTier`, so
+it shows the tier the App Server actually accepted rather than the saved
+preference. Older App Server versions that omit the field simply omit this
+status item.
+
 ## Protocol compatibility
 
 The local Codex binary is the protocol authority. The implementation targets

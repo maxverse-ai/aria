@@ -13,6 +13,7 @@ import {
   DEFAULT_MODEL,
   includeConfiguredModel,
   normalizeModelSelection,
+  selectedModelDescriptor,
   supportedModels,
   type ModelOption,
 } from '../agent/models';
@@ -23,11 +24,20 @@ import {
   MANAGEMENT_API_VERSION,
   ManagementApi,
   PROFILE_PREFERENCES_UPDATE_COMMAND,
+  SERVICE_TIER_SET_COMMAND,
   configRevision,
   managementCommandRegistry,
   nextLarkCliRecordedAt,
   profilePreferencesUpdateParameters,
+  type ControlActorContext,
 } from '../application/control';
+import {
+  decodeServiceTierSelection,
+  encodeServiceTierSelection,
+  resolveServiceTier,
+  SERVICE_TIER_INHERIT,
+  SERVICE_TIER_STANDARD,
+} from '../agent/service-tier';
 import type { ActiveRuns } from '../bot/active-runs';
 import {
   accountCurrentCard,
@@ -51,6 +61,7 @@ import { cardKitActionState } from '../card/cardkit';
 import {
   agentCard,
   effortCard,
+  fastModeCard,
   helpCard,
   modelSwitchSuccessCard,
   modelsCard,
@@ -246,6 +257,7 @@ const handlers: Record<string, Handler> = {
   '/agent': handleAgent,
   '/models': handleModels,
   '/effort': handleEffort,
+  '/fast': handleFast,
   '/status': handleStatus,
   '/help': handleHelp,
   '/account': handleAccount,
@@ -270,6 +282,7 @@ const handlers: Record<string, Handler> = {
 const ADMIN_COMMANDS = new Set([
   '/account',
   '/config',
+  '/fast',
   '/ps',
   '/exit',
   '/reconnect',
@@ -1097,6 +1110,165 @@ async function setReasoningPreference(
   }
   ctx.controls.profileConfig.preferences.reasoningEffort = value;
   ctx.controls.profileConfig.preferences.reasoningEffortByModel = nextMap;
+}
+
+async function handleFast(args: string, ctx: CommandContext): Promise<void> {
+  if (!capabilityFor(
+    ctx.controls.profileConfig.agentKind,
+    ctx.controls.profileConfig,
+  ).supportsServiceTiers) {
+    await reply(ctx, '当前 Agent 没有可切换的服务档位；Fast 目前仅由支持该能力的 Codex Runtime 提供。');
+    return;
+  }
+
+  const tokens = args.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const action = tokens[0] === 'refresh' ? 'refresh' : tokens[0] === 'set' ? 'set' : undefined;
+  const requested = action === 'set' ? tokens[1] : action ? undefined : tokens[0];
+  const choice = requested === 'reset' ? 'inherit' : requested;
+
+  if (ctx.fromCardAction && (action === 'set' || action === 'refresh')) {
+    await runFastCardFlow(ctx, action, choice);
+    return;
+  }
+
+  if (choice === 'on' || choice === 'off' || choice === 'inherit') {
+    if (choice === 'on') {
+      const state = await fastStateForContext(ctx);
+      if (!state.card.fastOption) {
+        await reply(
+          ctx,
+          '当前模型没有声明 Fast 能力。请先执行 `/fast refresh`；若仍不可用，请切换到 Codex 支持 Fast 的模型。',
+        );
+        return;
+      }
+    }
+    await setFastPreference(ctx, choice);
+    const label = choice === 'on' ? 'Fast on' : choice === 'off' ? 'Fast off' : '跟随 Codex 配置';
+    await reply(ctx, `已设置：\`${label}\`（下一次运行生效，状态栏会显示实际结果）。`);
+    return;
+  }
+
+  if (choice && choice !== 'status') {
+    await reply(ctx, '用法：`/fast [on|off|status|refresh|reset]`');
+    return;
+  }
+
+  const state = await fastStateForContext(ctx, choice === 'refresh');
+  await presentCommandCard(ctx, fastModeCard(state.card));
+}
+
+async function runFastCardFlow(
+  ctx: CommandContext,
+  action: 'set' | 'refresh',
+  choice?: string,
+): Promise<void> {
+  const flow = managedCardFlowContext(ctx);
+  const carrierMessageId = await openManagedFlowCard(
+    flow,
+    cardKitActionState(
+      '⚡ Fast 模式',
+      'loading',
+      action === 'refresh' ? '正在刷新当前模型的 Fast 能力…' : '正在更新 Fast 配置…',
+    ),
+    { allowReplacement: false },
+  );
+  try {
+    let state = await fastStateForContext(ctx, action === 'refresh');
+    if (action === 'set') {
+      if (choice !== 'on' && choice !== 'off' && choice !== 'inherit') {
+        throw new Error(`未知 Fast 配置：${choice ?? '(空)'}`);
+      }
+      if (choice === 'on' && !state.card.fastOption) {
+        throw new Error('当前模型没有声明 Fast 能力，请刷新或切换模型');
+      }
+      await setFastPreference(ctx, choice);
+      state = await fastStateForContext(ctx);
+    }
+    await finishManagedFlowCard(
+      flow,
+      carrierMessageId,
+      fastModeCard({
+        ...state.card,
+        notice: action === 'set' ? '✅ 配置已更新，下一次运行生效。' : '✅ Fast 能力已刷新。',
+      }),
+      'success',
+      { allowReplacement: false },
+    );
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    await finishManagedFlowCard(
+      flow,
+      carrierMessageId,
+      cardKitActionState('⚡ Fast 模式', 'failure', `操作失败：${message}`),
+      'failure',
+      { allowReplacement: false },
+    ).catch((updateErr) => log.fail('cardAction', updateErr, { step: 'fast-failure-card' }));
+  }
+}
+
+async function fastStateForContext(ctx: CommandContext, force = false) {
+  const model = ctx.controls.profileConfig.preferences.model ?? DEFAULT_MODEL;
+  const models = await listModelsForContext(ctx, force);
+  const snapshot = getEngineModelCatalog(
+    ctx.controls.profileConfig.agentKind,
+    ctx.controls.profileConfig,
+    {
+      profileId: ctx.controls.profile,
+      runtimeGeneration: ctx.controls.engineGeneration?.(),
+      runtimeModels: ctx.controls.engineModels,
+    },
+  );
+  const resolution = resolveServiceTier(
+    models,
+    model,
+    ctx.controls.profileConfig.preferences.serviceTier,
+  );
+  const descriptor = selectedModelDescriptor(models, model);
+  const source =
+    snapshot.source === 'runtime'
+      ? '实时 Agent Runtime'
+      : snapshot.source === 'plugin'
+        ? 'Agent Plugin'
+        : snapshot.source === 'cache'
+          ? '运行时缓存'
+          : '静态降级';
+  const current = resolution.configured === 'fast'
+    ? 'on' as const
+    : resolution.configured === undefined
+      ? 'inherit' as const
+      : 'off' as const;
+  return {
+    resolution,
+    card: {
+      agent: ctx.controls.profileConfig.agentKind,
+      model,
+      ...(descriptor?.value ? { resolvedModel: descriptor.value } : {}),
+      current,
+      configuredTier: resolution.configured,
+      fastOption: resolution.options.find((option) => option.value === 'fast'),
+      source,
+      stale: snapshot.stale,
+      ...(resolution.unsupportedConfiguredTier
+        ? {
+            notice:
+              `⚠️ 已保存的档位 \`${resolution.unsupportedConfiguredTier}\` 不被当前模型声明；` +
+              '本次运行会回退为标准档位。',
+          }
+        : {}),
+    },
+  };
+}
+
+async function setFastPreference(
+  ctx: CommandContext,
+  choice: 'on' | 'off' | 'inherit',
+): Promise<void> {
+  const value = choice === 'on'
+    ? 'fast'
+    : choice === 'off'
+      ? SERVICE_TIER_STANDARD
+      : SERVICE_TIER_INHERIT;
+  await executeManagementCommand(ctx, SERVICE_TIER_SET_COMMAND, { value });
 }
 
 async function setProfilePreference(
@@ -2443,15 +2615,22 @@ async function showConfigForm(ctx: CommandContext): Promise<void> {
     listModelsForContext(ctx),
     probeEngineStatus(),
   ]);
+  const modelSelection = normalizeModelSelection(
+    ctx.controls.profileConfig.agentKind,
+    ctx.controls.cfg.preferences?.model,
+  );
   const card = configFormCard({
     agentKind: ctx.controls.profileConfig.agentKind,
     agentOptions: engineStatuses,
     mode: ctx.controls.profileConfig.mode,
-    model: normalizeModelSelection(
-      ctx.controls.profileConfig.agentKind,
-      ctx.controls.cfg.preferences?.model,
-    ),
+    model: modelSelection,
     modelOptions: includeConfiguredModel(modelOptions, ctx.controls.cfg.preferences?.model),
+    serviceTier: configServiceTierControl(
+      ctx.controls.profileConfig.agentKind,
+      ctx.controls.profileConfig,
+      modelOptions,
+      modelSelection,
+    ),
     messageReply: getMessageReplyMode(ctx.controls.cfg),
     showToolCalls: getShowToolCalls(ctx.controls.cfg),
     cotMessages: getCotMessages(ctx.controls.cfg),
@@ -2468,6 +2647,20 @@ async function showConfigForm(ctx: CommandContext): Promise<void> {
   });
   if (ctx.fromCardAction) await recallMessage(ctx, ctx.msg.messageId);
   await sendManagedCard(ctx.channel, ctx.msg.chatId, card, commandReplyOptions(ctx));
+}
+
+function configServiceTierControl(
+  agentKind: string,
+  profileConfig: ProfileConfig,
+  models: ModelOption[],
+  model: string | undefined,
+  preference = profileConfig.preferences.serviceTier,
+) {
+  if (!capabilityFor(agentKind, profileConfig).supportsServiceTiers) return undefined;
+  return {
+    selection: encodeServiceTierSelection(preference),
+    options: resolveServiceTier(models, model, preference).options,
+  };
 }
 
 async function showResultCardInPlace(
@@ -2528,6 +2721,21 @@ async function submitConfig(ctx: CommandContext): Promise<void> {
     ? rawModel
     : normalizeModelSelection(agentKind, ctx.controls.cfg.preferences?.model);
   const model = modelSelection === DEFAULT_MODEL ? undefined : modelSelection;
+  const previousServiceTier = ctx.controls.profileConfig.preferences.serviceTier;
+  const tierOptions = resolveServiceTier(modelOptions, modelSelection, previousServiceTier).options;
+  const rawServiceTier = String(fv.service_tier ?? '').trim();
+  let serviceTier = previousServiceTier;
+  if (!agentChanged && capabilityFor(agentKind, ctx.controls.profileConfig).supportsServiceTiers) {
+    if (rawServiceTier === SERVICE_TIER_INHERIT || rawServiceTier === SERVICE_TIER_STANDARD) {
+      serviceTier = decodeServiceTierSelection(rawServiceTier);
+    } else if (tierOptions.some((option) => option.value === rawServiceTier)) {
+      serviceTier = rawServiceTier;
+    } else if (rawServiceTier) {
+      // A model can be changed in the same form while the tier picker still
+      // reflects the previous model. Do not persist an invalid named tier.
+      serviceTier = null;
+    }
+  }
   const rawCotMessages = String(fv.cot_messages ?? '').trim();
   const cotMessages =
     rawCotMessages === 'brief'
@@ -2607,6 +2815,7 @@ async function submitConfig(ctx: CommandContext): Promise<void> {
     const nextPreferences: AppPreferences = {
       ...(ctx.controls.cfg.preferences ?? {}),
       model,
+      serviceTier,
       messageReply,
       // Mark the messageReply value as living in the new (post-0.1.27)
       // semantic — `text` now means real plain text, not the lightweight
@@ -2738,6 +2947,13 @@ async function submitConfig(ctx: CommandContext): Promise<void> {
         agentKind,
         mode,
         model: modelSelection,
+        serviceTier: configServiceTierControl(
+          agentKind,
+          ctx.controls.profileConfig,
+          agentChanged ? [] : modelOptions,
+          modelSelection,
+          serviceTier,
+        ),
         messageReply,
         showToolCalls,
         cotMessages,
@@ -2877,24 +3093,13 @@ async function commitPreferencesConfig(
   mode: ProfileMode,
   runStatusTouched: boolean,
 ): Promise<void> {
-  const actor = { source: 'card' as const, principal: ctx.msg.senderId };
-  const api = new ManagementApi(
-    new ConfigChangeService({
-      rootDir: dirname(ctx.controls.configPath),
-      registry: managementCommandRegistry,
-    }),
-    new ProfileRuntimeReconciler(ctx.controls),
-  );
-  const result = await api.execute({
-    schema: 'aria.management.execute.request.v1',
-    apiVersion: MANAGEMENT_API_VERSION,
-    requestId: randomUUID(),
-    actor,
-    profile: ctx.controls.profile,
-    command: PROFILE_PREFERENCES_UPDATE_COMMAND,
-    input: profilePreferencesUpdateParameters({
+  await executeManagementCommand(
+    ctx,
+    PROFILE_PREFERENCES_UPDATE_COMMAND,
+    profilePreferencesUpdateParameters({
       mode,
       model: preferences.model,
+      serviceTier: encodeServiceTierSelection(preferences.serviceTier),
       messageReply: getMessageReplyMode({ ...ctx.controls.cfg, preferences }),
       showToolCalls: getShowToolCalls({ ...ctx.controls.cfg, preferences }),
       cotMessages: getCotMessages({ ...ctx.controls.cfg, preferences }),
@@ -2909,6 +3114,33 @@ async function commitPreferencesConfig(
         ctx.controls.profileConfig.larkCli.localUserImport?.attemptedAt,
       ),
     }),
+  );
+}
+
+async function executeManagementCommand(
+  ctx: CommandContext,
+  command: string,
+  input: Record<string, string | number | boolean | null>,
+): Promise<void> {
+  const actor: ControlActorContext = {
+    source: ctx.fromCardAction ? 'card' : 'agent',
+    principal: ctx.msg.senderId,
+  };
+  const api = new ManagementApi(
+    new ConfigChangeService({
+      rootDir: dirname(ctx.controls.configPath),
+      registry: managementCommandRegistry,
+    }),
+    new ProfileRuntimeReconciler(ctx.controls),
+  );
+  const result = await api.execute({
+    schema: 'aria.management.execute.request.v1',
+    apiVersion: MANAGEMENT_API_VERSION,
+    requestId: randomUUID(),
+    actor,
+    profile: ctx.controls.profile,
+    command,
+    input,
   });
   if (result.reconciliation.status === 'applied') return;
 

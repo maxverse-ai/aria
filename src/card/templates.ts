@@ -1,4 +1,4 @@
-import type { ModelOption, ReasoningOption } from '../agent/models';
+import type { ModelOption, ReasoningOption, ServiceTierOption } from '../agent/models';
 import type { EngineProbeStatus } from '../agent/plugin/probe';
 import type { OutboundPolicyStatus } from '../outbound/plugin';
 import type { EngineStatusSnapshot, EngineUsageWindow } from '../agent/runtime/types';
@@ -349,6 +349,68 @@ export function effortCard(info: EffortCardInfo): object {
   return shell('⚡ 推理强度', elements);
 }
 
+export interface FastModeCardInfo {
+  agent: string;
+  model: string;
+  resolvedModel?: string;
+  current: 'on' | 'off' | 'inherit';
+  configuredTier?: string | null;
+  fastOption?: ServiceTierOption;
+  source: string;
+  stale?: boolean;
+  notice?: string;
+}
+
+export function fastModeCard(info: FastModeCardInfo): object {
+  const elements: object[] = [];
+  if (info.notice) elements.push(divMd(info.notice));
+  const configured = info.current === 'on'
+    ? 'Fast on'
+    : info.configuredTier && info.configuredTier !== 'fast'
+      ? `${info.configuredTier}（Fast off）`
+      : info.current === 'off'
+      ? 'Fast off（标准速度）'
+      : '跟随 Codex 配置';
+  elements.push(
+    divMd([
+      `Agent：\`${escapeCode(info.agent)}\``,
+      `模型：\`${escapeCode(info.model)}\``,
+      ...(info.resolvedModel && info.resolvedModel !== info.model
+        ? [`实际默认模型：\`${escapeCode(info.resolvedModel)}\``]
+        : []),
+      `当前配置：\`${escapeCode(configured)}\``,
+      `模型能力：${info.fastOption ? `支持 ${escapeMd(info.fastOption.label)}` : '未声明 Fast'}`,
+      `能力来源：${escapeMd(info.source)}${info.stale ? '（缓存/降级）' : ''}`,
+    ].join('\n')),
+  );
+  if (info.fastOption?.description) {
+    elements.push(divMd(`_${escapeMd(info.fastOption.description)}_`));
+  }
+  elements.push(divMd('_Fast 会提高执行速度，但会消耗更多额度；新配置从下一次运行开始生效。_'));
+  elements.push(HR);
+  elements.push(actions([
+    {
+      text: info.current === 'on' ? '开启 Fast ←' : '开启 Fast',
+      value: { cmd: 'fast.set', arg: 'on' },
+      style: info.current === 'on' ? 'primary' : 'default',
+      disabled: !info.fastOption,
+    },
+    {
+      text: info.current === 'off' ? '关闭 Fast ←' : '关闭 Fast',
+      value: { cmd: 'fast.set', arg: 'off' },
+      style: info.current === 'off' ? 'primary' : 'default',
+    },
+    {
+      text: info.current === 'inherit' ? '跟随配置 ←' : '跟随配置',
+      value: { cmd: 'fast.set', arg: 'inherit' },
+      style: info.current === 'inherit' ? 'primary' : 'default',
+    },
+  ]));
+  elements.push(HR);
+  elements.push(actions([{ text: '刷新 Fast 能力', value: { cmd: 'fast.refresh' } }]));
+  return shell('⚡ Fast 模式', elements);
+}
+
 export function helpCard(agentName = 'Agent'): object {
   const escapedAgentName = escapeMd(agentName);
   return shell('💡 使用帮助', [
@@ -363,6 +425,7 @@ export function helpCard(agentName = 'Agent'): object {
         '- `/ws list|save <name>|use <name>|remove <name>` — 工作目录',
         '- `/account` — 查看当前应用；`/account change` 换 appId/secret 并重连',
         '- `/config` — 调整偏好、访问控制和 lark-cli 身份策略',
+        '- `/fast [on|off|status]` — 管理 Codex Fast 模式（管理员）',
         '- `/status` — 当前状态',
         '- `/stop` — 结束当前正在跑的任务（也可点卡片底部 ⏹ 终止 按钮）',
         '- `/stop comment:<scopeHash>` — 管理员停止云文档评论任务',

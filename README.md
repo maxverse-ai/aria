@@ -155,6 +155,7 @@ If a profile was created with the wrong agent kind, stop or unregister any match
 | `/resume` | Resume compatible history for the same agent, working directory, and permission mode |
 | `/status` | Show profile, agent, working directory, session, lark-cli identity, and run state |
 | `/config` | Adjust presentation preferences, access settings, and lark-cli identity policy |
+| `/fast [on\|off\|status\|reset]` | Manage Codex Fast for models that expose service tiers (admin only) |
 | `/invite user @name` | Allow a user to use the bot in DMs |
 | `/invite admin @name` | Add an access-control admin |
 | `/invite group` | Allow the current group to use the bot |
@@ -169,6 +170,8 @@ If a profile was created with the wrong agent kind, stop or unregister any match
 | `/help` | Help card |
 
 DMs do not require an @ mention. Groups and topic groups require `@bot` by default, except a private group containing exactly one human and this bot behaves like a DM unless that chat explicitly enables strict mention mode. Receiving unmentioned group messages requires the app scope `im:message.group_msg`; `@all` is ignored. Cloud-doc comments in supported document types run when the bot is mentioned.
+
+Codex Fast uses the live model capability catalog: `/fast on` enables it, `/fast off` explicitly selects the standard tier, and `/fast reset` follows Codex's own configuration again. The reply status line shows the `Fast on/off` value actually accepted by App Server. Other agents, and older Codex versions that do not report service tiers, omit the item.
 
 ## Reply Display and COT
 

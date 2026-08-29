@@ -67,7 +67,7 @@ export function formatConfigSnapshot(snapshot: ConfigSnapshot): string {
   return [
     `Aria config · ${snapshot.profile.name}${snapshot.profile.active ? ' (active)' : ''}`,
     `revision: ${snapshot.revision}`,
-    `agent: ${snapshot.agent.kind} · model ${snapshot.agent.model} · reasoning ${snapshot.agent.reasoningEffort ?? 'default'}`,
+    `agent: ${snapshot.agent.kind} · model ${snapshot.agent.model} · reasoning ${snapshot.agent.reasoningEffort ?? 'default'} · tier ${snapshot.agent.serviceTier}`,
     `deployment: ${snapshot.deployment.mode}`,
     `access: ${snapshot.access.allowedUsers} users · ${snapshot.access.allowedChats} chats · ${snapshot.access.admins} admins`,
     `group mention: ${snapshot.access.requireMentionInGroup ? 'required' : 'not required'} · ${snapshot.access.chatMentionOverrides} override(s)`,

@@ -12,7 +12,9 @@ export function projectRunStatus(state: RunStatusState, event: AgentEvent): RunS
       event.reasoningEffort
       && state.reasoningEffort !== event.reasoningEffort,
     );
-    if (!modelChanged && !reasoningChanged) return state;
+    const hasServiceTier = Object.prototype.hasOwnProperty.call(event, 'serviceTier');
+    const serviceTierChanged = hasServiceTier && state.serviceTier !== event.serviceTier;
+    if (!modelChanged && !reasoningChanged && !serviceTierChanged) return state;
     return {
       ...state,
       ...(modelChanged && event.model
@@ -21,6 +23,7 @@ export function projectRunStatus(state: RunStatusState, event: AgentEvent): RunS
       ...(reasoningChanged && event.reasoningEffort
         ? { reasoningEffort: event.reasoningEffort }
         : {}),
+      ...(serviceTierChanged ? { serviceTier: event.serviceTier ?? null } : {}),
     };
   }
 

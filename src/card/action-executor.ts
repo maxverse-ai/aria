@@ -18,6 +18,8 @@ export const CARD_ACTION_MODES = {
   'config.submit': 'background',
   'effort.refresh': 'background',
   'effort.set': 'background',
+  'fast.refresh': 'background',
+  'fast.set': 'background',
   help: 'immediate',
   'models.refresh': 'background',
   'models.use': 'background',

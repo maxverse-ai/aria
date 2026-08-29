@@ -41,6 +41,7 @@ describe('Codex App Server runtime', () => {
       threadId: 'thread-1',
       model: 'gpt-test',
       reasoningEffort: 'max',
+      serviceTier: null,
     }));
     expect(events).not.toContainEqual({
       type: 'text',
@@ -84,6 +85,12 @@ describe('Codex App Server runtime', () => {
               description: 'Proactive multi-agent',
               semantics: 'multi-agent',
             },
+          ],
+        },
+        serviceTiers: {
+          defaultValue: 'fast',
+          options: [
+            { value: 'fast', label: 'Fast', description: 'Lower latency' },
           ],
         },
       },
@@ -271,6 +278,64 @@ describe('Codex App Server runtime', () => {
     await runtime.dispose();
   });
 
+  it('passes an explicit Fast tier to thread and turn requests and reports the actual tier', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'aria-codex-app-server-fast-'));
+    roots.push(root);
+    const runtime = new CodexAppServerRuntime({
+      binary: await writeFakeCodex(root),
+      profileStateDir: root,
+      inheritCodexHome: true,
+      sandbox: 'workspace-write',
+    });
+    const run = runtime.execution.run({
+      runId: 'run-fast',
+      prompt: 'hello',
+      cwd: root,
+      serviceTier: 'fast',
+    });
+    const events: AgentEvent[] = [];
+    for await (const event of run.events) events.push(event);
+
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'system',
+      serviceTier: 'fast',
+    }));
+    expect(await serviceTierRequestLines(root)).toEqual([
+      'thread/start "fast"',
+      'turn/start "fast"',
+    ]);
+    await runtime.dispose();
+  });
+
+  it('preserves explicit standard as JSON null instead of inheriting Codex config', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'aria-codex-app-server-standard-'));
+    roots.push(root);
+    const runtime = new CodexAppServerRuntime({
+      binary: await writeFakeCodex(root),
+      profileStateDir: root,
+      inheritCodexHome: true,
+      sandbox: 'workspace-write',
+    });
+    const run = runtime.execution.run({
+      runId: 'run-standard',
+      prompt: 'hello',
+      cwd: root,
+      serviceTier: null,
+    });
+    const events: AgentEvent[] = [];
+    for await (const event of run.events) events.push(event);
+
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'system',
+      serviceTier: null,
+    }));
+    expect(await serviceTierRequestLines(root)).toEqual([
+      'thread/start null',
+      'turn/start null',
+    ]);
+    await runtime.dispose();
+  });
+
   it('restarts a dead app server on the next run and resumes the existing thread', async () => {
     const root = await mkdtemp(join(tmpdir(), 'aria-codex-app-server-restart-'));
     roots.push(root);
@@ -355,6 +420,11 @@ async function lifecycleLines(root: string): Promise<string[]> {
   return value.trim().split('\n').filter(Boolean);
 }
 
+async function serviceTierRequestLines(root: string): Promise<string[]> {
+  const value = await readFile(join(root, 'service-tier-requests.log'), 'utf8');
+  return value.trim().split('\n').filter(Boolean);
+}
+
 async function writeFakeCodex(root: string, options: { failFirstInitialize?: boolean } = {}): Promise<string> {
   const path = join(root, 'codex');
   const lifecyclePath = join(root, 'lifecycle.log');
@@ -369,6 +439,7 @@ if (process.argv.includes('--version')) {
 const fs = require('node:fs');
 const lifecyclePath = ${JSON.stringify(lifecyclePath)};
 const initializeFailurePath = ${JSON.stringify(initializeFailurePath)};
+const serviceTierRequestPath = ${JSON.stringify(join(root, 'service-tier-requests.log'))};
 const failFirstInitialize = ${JSON.stringify(options.failFirstInitialize === true)};
 fs.appendFileSync(lifecyclePath, 'spawn\\n');
 const readline = require('node:readline');
@@ -420,12 +491,15 @@ rl.on('line', (line) => {
     send({ id: msg.id, result: { userAgent: 'fake', codexHome: '/tmp', platformFamily: 'unix', platformOs: 'linux' } });
   } else if (msg.method === 'thread/start') {
     currentThreadId = 'thread-1';
-    send({ id: msg.id, result: { thread: { id: currentThreadId }, model: 'gpt-test', reasoningEffort: 'max' } });
+    if (Object.prototype.hasOwnProperty.call(msg.params, 'serviceTier')) fs.appendFileSync(serviceTierRequestPath, 'thread/start ' + JSON.stringify(msg.params.serviceTier) + '\\n');
+    send({ id: msg.id, result: { thread: { id: currentThreadId }, model: 'gpt-test', reasoningEffort: 'max', serviceTier: Object.prototype.hasOwnProperty.call(msg.params, 'serviceTier') ? msg.params.serviceTier : null } });
   } else if (msg.method === 'thread/resume') {
     currentThreadId = msg.params.threadId;
     fs.appendFileSync(lifecyclePath, 'resume ' + msg.params.threadId + '\\n');
-    send({ id: msg.id, result: { thread: { id: currentThreadId }, model: 'gpt-test', reasoningEffort: 'max' } });
+    if (Object.prototype.hasOwnProperty.call(msg.params, 'serviceTier')) fs.appendFileSync(serviceTierRequestPath, 'thread/resume ' + JSON.stringify(msg.params.serviceTier) + '\\n');
+    send({ id: msg.id, result: { thread: { id: currentThreadId }, model: 'gpt-test', reasoningEffort: 'max', serviceTier: Object.prototype.hasOwnProperty.call(msg.params, 'serviceTier') ? msg.params.serviceTier : null } });
   } else if (msg.method === 'turn/start') {
+    if (Object.prototype.hasOwnProperty.call(msg.params, 'serviceTier')) fs.appendFileSync(serviceTierRequestPath, 'turn/start ' + JSON.stringify(msg.params.serviceTier) + '\\n');
     send({ id: msg.id, result: { turn: { id: 'turn-1' } } });
     const prompt = msg.params.input[0].text;
     fs.appendFileSync(lifecyclePath, 'identity ' + String(prompt.includes('ou_bot_self')) + '\\n');
@@ -449,7 +523,7 @@ rl.on('line', (line) => {
     if (msg.params.cursor === 'page-2') {
       send({ id: msg.id, result: { data: [{ id: 'gpt-next', model: 'gpt-next', displayName: 'GPT Next', isDefault: false }], nextCursor: null } });
     } else {
-      send({ id: msg.id, result: { data: [{ id: 'gpt-test', model: 'gpt-test', displayName: 'GPT Test', isDefault: true, defaultReasoningEffort: 'medium', supportedReasoningEfforts: [{ reasoningEffort: 'medium', description: 'Balanced' }, { reasoningEffort: 'ultra', description: 'Proactive multi-agent' }] }], nextCursor: 'page-2' } });
+      send({ id: msg.id, result: { data: [{ id: 'gpt-test', model: 'gpt-test', displayName: 'GPT Test', isDefault: true, defaultReasoningEffort: 'medium', supportedReasoningEfforts: [{ reasoningEffort: 'medium', description: 'Balanced' }, { reasoningEffort: 'ultra', description: 'Proactive multi-agent' }], serviceTiers: [{ id: 'fast', name: 'Fast', description: 'Lower latency' }], defaultServiceTier: 'fast' }], nextCursor: 'page-2' } });
     }
   } else if (msg.method === 'turn/interrupt') {
     send({ id: msg.id, result: {} });

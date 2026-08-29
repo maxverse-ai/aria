@@ -27,6 +27,7 @@ const base: ConfigFormOpts = {
   runStatusItems: [
     'agent',
     'model',
+    'service-tier',
     'reasoning',
     'weekly-limit',
     'context',
@@ -89,5 +90,23 @@ describe('configFormCard console URL', () => {
       expect(rendered).toContain(`"name":"${field}"`);
     }
     expect(rendered.match(/"initial_option":"show"/g)).toHaveLength(7);
+    expect(rendered).not.toContain('run_status_service_tier');
+  });
+
+  it('renders the generic service-tier picker only when the engine exposes it', () => {
+    expect(JSON.stringify(configFormCard(base))).not.toContain('"name":"service_tier"');
+
+    const rendered = JSON.stringify(configFormCard({
+      ...base,
+      agentKind: 'codex',
+      serviceTier: {
+        selection: 'fast',
+        options: [{ value: 'fast', label: 'Fast', description: 'Lower latency' }],
+      },
+    }));
+    expect(rendered).toContain('"name":"service_tier"');
+    expect(rendered).toContain('run_status_service_tier');
+    expect(rendered).toContain('Fast 会消耗更多额度');
+    expect(rendered).toContain('"initial_option":"fast"');
   });
 });

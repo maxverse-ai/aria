@@ -41,6 +41,8 @@ export interface StartRunFlowInput {
   now: number;
   /** Pre-validated engine-native effort; null explicitly means omit it. */
   reasoningEffort?: string | null;
+  /** Pre-validated service tier; null explicitly selects the standard tier. */
+  serviceTier?: string | null;
   stopGraceMs?: number;
   observability?: {
     profile: string;
@@ -179,6 +181,11 @@ export async function startRunFlow(input: StartRunFlowInput): Promise<StartRunFl
         input.reasoningEffort === null
           ? undefined
           : input.reasoningEffort ?? input.profileConfig.preferences.reasoningEffort,
+      serviceTier: input.capability.supportsServiceTiers
+        ? Object.prototype.hasOwnProperty.call(input, 'serviceTier')
+          ? input.serviceTier
+          : input.profileConfig.preferences.serviceTier
+        : undefined,
       images:
         input.capability.supportsImages === true
           ? policy.attachments

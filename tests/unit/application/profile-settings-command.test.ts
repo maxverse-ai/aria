@@ -15,6 +15,10 @@ import {
   type MeetingConfig,
   type RootConfig,
 } from '../../../src/config/profile-schema';
+import {
+  SERVICE_TIER_INHERIT,
+  SERVICE_TIER_STANDARD,
+} from '../../../src/agent/service-tier';
 import { createRootConfig } from '../../../src/config/profile-store';
 
 describe('profile settings management commands', () => {
@@ -23,6 +27,7 @@ describe('profile settings management commands', () => {
     const input = profileSettingsUpdateParameters({
       mode: 'team',
       model: 'claude-opus-4-8',
+      serviceTier: SERVICE_TIER_STANDARD,
       messageReply: 'text',
       showToolCalls: false,
       cotMessages: 'brief',
@@ -56,6 +61,7 @@ describe('profile settings management commands', () => {
       mode: 'team',
       preferences: {
         model: 'claude-opus-4-8',
+        serviceTier: null,
         messageReply: 'text',
         maxConcurrentRuns: 7,
       },
@@ -78,6 +84,7 @@ describe('profile settings management commands', () => {
     const root = normalizedRoundTrip(fixtureRoot());
     const input = profileSettingsUpdateParameters({
       mode: 'personal',
+      serviceTier: SERVICE_TIER_INHERIT,
       messageReply: 'markdown',
       showToolCalls: true,
       cotMessages: 'detailed',
@@ -113,6 +120,7 @@ describe('profile settings management commands', () => {
     const root = normalizedRoundTrip(fixtureRoot());
     const input = profileSettingsUpdateParameters({
       mode: 'personal',
+      serviceTier: SERVICE_TIER_INHERIT,
       messageReply: 'markdown',
       showToolCalls: true,
       cotMessages: 'detailed',

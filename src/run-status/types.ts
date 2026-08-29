@@ -10,6 +10,8 @@ export interface RunStatusState {
     state: 'resolving' | 'resolved' | 'unavailable';
   };
   reasoningEffort?: string;
+  /** Actual engine-reported service tier; null means standard/default. */
+  serviceTier?: string | null;
   quota: {
     weekly?: {
       remainingPercent: number;

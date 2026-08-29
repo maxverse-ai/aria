@@ -59,6 +59,7 @@ import {
   normalizeModelSelection,
   supportedModels,
 } from '../agent/models';
+import { encodeServiceTierSelection } from '../agent/service-tier';
 import { log } from '../core/logger';
 import { getRunStatusItems } from '../run-status/preferences';
 import { ProfileRuntimeReconciler } from '../runtime/profile-runtime-reconciler';
@@ -375,6 +376,7 @@ async function commitProfileSettings(
     input: profileSettingsUpdateParameters({
       mode: parsed.mode,
       model: parsed.nextPreferences.model,
+      serviceTier: encodeServiceTierSelection(parsed.nextPreferences.serviceTier),
       messageReply: getMessageReplyMode(nextCfg),
       showToolCalls: getShowToolCalls(nextCfg),
       cotMessages: getCotMessages(nextCfg),

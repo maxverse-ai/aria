@@ -102,6 +102,11 @@ export class ReadOnlyControlPlane {
         kind: cfg.agentKind,
         model: cfg.preferences.model ?? 'default',
         reasoningEffort: cfg.preferences.reasoningEffort ?? null,
+        serviceTier: cfg.preferences.serviceTier === undefined
+          ? 'inherit'
+          : cfg.preferences.serviceTier === null
+            ? 'standard'
+            : cfg.preferences.serviceTier,
         plugins: [...(cfg.plugins ?? [])],
       },
       deployment: { mode: cfg.mode },

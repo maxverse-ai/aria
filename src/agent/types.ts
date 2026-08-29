@@ -11,6 +11,8 @@ export type AgentEvent =
       cwd?: string;
       model?: string;
       reasoningEffort?: string;
+      /** Actual tier reported by the engine; null means standard/default. */
+      serviceTier?: string | null;
     }
   /** A complete, non-final assistant progress message. Never a token fragment. */
   | { type: 'text'; delta: string }
@@ -59,6 +61,8 @@ export interface AgentRunOptions {
   model?: string;
   /** Engine reasoning effort: 'default' | 'low' | 'medium' | 'high' | 'max'. */
   reasoningEffort?: string;
+  /** Engine-native execution tier; null explicitly selects standard/default. */
+  serviceTier?: string | null;
   images?: readonly string[];
   sandbox?: CodexSandboxMode;
   permissionMode?: ClaudePermissionMode;

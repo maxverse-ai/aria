@@ -63,6 +63,8 @@ export interface ConfigSnapshot {
     kind: AgentKind;
     model: string;
     reasoningEffort: string | null;
+    /** `inherit`, `standard`, or an engine-native tier id such as `fast`. */
+    serviceTier: string;
     plugins: string[];
   };
   deployment: {

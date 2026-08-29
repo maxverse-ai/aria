@@ -20,6 +20,19 @@ export interface ModelReasoningCapability {
   defaultValue?: string;
 }
 
+export interface ServiceTierOption {
+  /** Engine-native service tier id (for example Codex `fast`). */
+  value: string;
+  label: string;
+  description?: string;
+}
+
+export interface ModelServiceTierCapability {
+  options: ServiceTierOption[];
+  /** Runtime-declared default tier; absent/null means the standard tier. */
+  defaultValue?: string;
+}
+
 export interface ModelOption {
   /**
    * Stored in `preferences.model` and forwarded to the agent's `--model`
@@ -32,6 +45,8 @@ export interface ModelOption {
   isDefault?: boolean;
   /** Model-specific reasoning controls, when the engine can prove them. */
   reasoning?: ModelReasoningCapability;
+  /** Model-specific execution service tiers, when the engine can prove them. */
+  serviceTiers?: ModelServiceTierCapability;
 }
 
 /**
@@ -174,4 +189,11 @@ export function reasoningOptionsForModel(
   selected: string | undefined,
 ): ReasoningOption[] {
   return selectedModelDescriptor(options, selected)?.reasoning?.options ?? [];
+}
+
+export function serviceTierOptionsForModel(
+  options: ModelOption[],
+  selected: string | undefined,
+): ServiceTierOption[] {
+  return selectedModelDescriptor(options, selected)?.serviceTiers?.options ?? [];
 }
