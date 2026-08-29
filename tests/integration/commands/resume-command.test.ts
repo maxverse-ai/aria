@@ -329,45 +329,15 @@ describe('agent-aware resume commands', () => {
     expect(h.controls.profileConfig.preferences.serviceTier).toBeUndefined();
   });
 
-  it('controls steering from Feishu and shows capability in status', async () => {
+  it('keeps automatic follow-up routing out of user-facing commands and status', async () => {
     const h = await createHarness('codex');
-
-    await expect(h.run('/steer status')).resolves.toBe(true);
-    expect(JSON.stringify(lastContent(h.channel))).toContain('Steering');
-    expect(JSON.stringify(lastContent(h.channel))).toContain('`direct`');
-
-    await expect(h.run('/steer auto')).resolves.toBe(true);
-    expect(h.controls.profileConfig.coordination.steering).toBe('auto');
-    expect(lastMarkdown(h.channel)).toContain('立即生效');
-
-    await expect(
-      h.dispatchCard({ cmd: 'steer.set', arg: 'on' }, 'om_fake_1'),
-    ).resolves.toBeUndefined();
-    await vi.waitFor(() => {
-      expect(h.controls.profileConfig.coordination.steering).toBe('on');
-      expect(h.channel.rawClient.requests.filter(
-        (request) => request.method === 'cardkit.v1.card.update',
-      )).toHaveLength(2);
-    });
-    const updates = h.channel.rawClient.requests.filter(
-      (request) => request.method === 'cardkit.v1.card.update',
-    );
-    expect(JSON.stringify(updates[0])).toContain('正在更新运行中转向策略');
-    expect(JSON.stringify(updates[1])).toContain('策略已更新并立即生效');
 
     await expect(h.run('/status')).resolves.toBe(true);
     const status = JSON.stringify(lastContent(h.channel));
-    expect(status).toContain('**steering**');
-    expect(status).toContain('on · direct');
-  });
+    expect(status.toLowerCase()).not.toContain('steering');
 
-  it('keeps the steering control visible with a safe fallback on unsupported agents', async () => {
-    const h = await createHarness('claude');
-
-    await expect(h.run('/steer status')).resolves.toBe(true);
-    const card = JSON.stringify(lastContent(h.channel));
-    expect(card).toContain('`unsupported`');
-    expect(card).toContain('消息会安全进入下一轮');
+    await expect(h.run('/help')).resolves.toBe(true);
+    expect(JSON.stringify(lastContent(h.channel))).not.toContain('/steer');
   });
 
   it('routes Aria-owned model and effort cards through the inspected control channel', async () => {

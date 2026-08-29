@@ -75,8 +75,7 @@ export function requireMentionForChat(
   return groupMentionPolicyForChat(profile, cfg, chatId).requireMention;
 }
 
-/** Resolve both the value and its source so automatic exceptions never
- * override an administrator's explicit per-chat choice. */
+/** Resolve both the value and its source for status and configuration flows. */
 export function groupMentionPolicyForChat(
   profile: ProfileConfig,
   cfg: AppConfig,
@@ -89,16 +88,15 @@ export function groupMentionPolicyForChat(
 }
 
 /**
- * DM-like groups (one human plus one bot) inherit direct-message ergonomics,
- * but only when the chat has not explicitly opted into strict mention mode.
+ * The mention setting controls ambient group messages. A message already
+ * addressed by conversation shape (P2P, exclusive human-agent group, or a
+ * structured mention) does not become unaddressed because of storage policy.
  */
 export function shouldRequireMentionForGroup(
   policy: GroupMentionPolicy,
-  isDmLike: boolean,
+  addressedToAgent: boolean,
 ): boolean {
-  if (!policy.requireMention) return false;
-  if (policy.source === 'chat-override') return true;
-  return !isDmLike;
+  return policy.requireMention && !addressedToAgent;
 }
 
 export function canRunAdminCommand(

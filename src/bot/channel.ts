@@ -80,11 +80,12 @@ import type { SessionCatalog } from '../session/catalog';
 import type { SessionStore } from '../session/store';
 import type { WorkspaceStore } from '../workspace/store';
 import type { ActiveRuns, RunHandle } from './active-runs';
+import { resolveAddressingContext } from './addressing';
 import { ChatModeCache, type ChatMode } from './chat-mode-cache';
-import { ChatTopologyResolver, isDmLikeTopology } from './chat-topology';
+import { ChatTopologyResolver } from './chat-topology';
 import { handleCommentMention } from './comments';
 import { ConversationRuntime } from '../conversation/runtime';
-import { decideSteering } from '../conversation/steering-policy';
+import { decideLiveFollowup } from '../conversation/live-followup-policy';
 import { commandSessionCatalogIdentity } from './session-catalog-identity';
 import { startKeepalive } from './keepalive';
 import { PendingQueue } from './pending-queue';
@@ -998,36 +999,41 @@ async function intakeMessage(deps: IntakeDeps): Promise<void> {
     return;
   }
 
-  // Keep membership I/O out of the policy layer and only pay for it on the
-  // strict, unmentioned group slow path. A one-human + one-bot group behaves
-  // like a DM unless an administrator explicitly configured that chat as
-  // @-only. Lookup failures fail closed and preserve the normal @ requirement.
+  let addressing = resolveAddressingContext({
+    chatType: msg.chatType,
+    mentionedBot: msg.mentionedBot,
+  });
+
+  // Resolve the roster for every unmentioned group. Conversation shape is the
+  // single addressing truth used by both intake and active-run routing; lookup
+  // failures never guess that group chatter was directed at the agent.
   if (msg.chatType !== 'p2p' && !msg.mentionedBot) {
     const mentionPolicy = groupMentionPolicyForChat(
       controls.profileConfig,
       controls.cfg,
       msg.chatId,
     );
-    let isDmLike = false;
-    if (mentionPolicy.requireMention && mentionPolicy.source === 'global') {
-      try {
-        const topology = await chatTopology.resolve(msg.chatId);
-        isDmLike = isDmLikeTopology(topology);
-        if (isDmLike) {
-          log.info('intake', 'solo-group-bypass', {
-            scope,
-            humanCount: topology.humanCount,
-            botCount: topology.botCount,
-          });
-        }
-      } catch (err) {
-        log.warn('intake', 'solo-group-check-failed', {
+    try {
+      const topology = await chatTopology.resolve(msg.chatId);
+      addressing = resolveAddressingContext({
+        chatType: msg.chatType,
+        mentionedBot: msg.mentionedBot,
+        topology,
+      });
+      if (addressing.kind === 'exclusive-group') {
+        log.info('intake', 'solo-group-bypass', {
           scope,
-          err: err instanceof Error ? err.message : String(err),
+          humanCount: topology.humanCount,
+          botCount: topology.botCount,
         });
       }
+    } catch (err) {
+      log.warn('intake', 'solo-group-check-failed', {
+        scope,
+        err: err instanceof Error ? err.message : String(err),
+      });
     }
-    if (shouldRequireMentionForGroup(mentionPolicy, isDmLike)) {
+    if (shouldRequireMentionForGroup(mentionPolicy, addressing.addressedToAgent)) {
       log.info('intake', 'skip-no-mention', { scope, chatType: msg.chatType });
       return;
     }
@@ -1050,6 +1056,7 @@ async function intakeMessage(deps: IntakeDeps): Promise<void> {
     return;
   }
 
+  let newTaskContent: string | undefined;
   const handled = await tryHandleCommand({
     channel,
     msg: emsg,
@@ -1075,85 +1082,94 @@ async function intakeMessage(deps: IntakeDeps): Promise<void> {
     deferOutbound,
     outboundFinalOnly,
     outboundControlChannel,
+    onNewTask: (content) => {
+      newTaskContent = content;
+    },
   });
   if (handled) {
     const dropped = pending.cancel(scope);
     log.info('intake', 'command', { scope, droppedPending: dropped.length });
+    if (newTaskContent) {
+      const taskMessage = { ...emsg, content: newTaskContent };
+      const size = pending.push(scope, taskMessage);
+      log.info('intake', 'new-task-queued', {
+        scope,
+        queueSize: size,
+        debounceMs: DEBOUNCE_MS,
+      });
+    }
     return;
   }
 
   const size = pending.push(scope, emsg);
   log.info('intake', 'queued', { scope, queueSize: size, debounceMs: DEBOUNCE_MS });
-  await trySteerQueuedMessage({
+  await tryMergeLiveFollowup({
     conversations,
     activeRuns,
     pending,
-    controls,
     scope,
     msg: emsg,
+    addressedToAgent: addressing.addressedToAgent,
     botIdentity: channel.botIdentity,
   });
 }
 
-async function trySteerQueuedMessage(input: {
+async function tryMergeLiveFollowup(input: {
   conversations: ConversationRuntime;
   activeRuns: ActiveRuns;
   pending: PendingQueue;
-  controls: Controls;
   scope: string;
   msg: NormalizedMessage;
+  addressedToAgent: boolean;
   botIdentity?: { openId: string; name?: string };
 }): Promise<void> {
-  const preference = input.controls.profileConfig.coordination.steering;
-  if (preference === 'off') return;
   const activeRun = input.activeRuns.get(input.scope)?.run;
   if (!activeRun) return;
   const senderType = senderTypeOf(input.msg);
-  const decision = decideSteering({
-    preference,
+  const decision = decideLiveFollowup({
     ...(activeRun.steering ? { support: activeRun.steering } : {}),
-    chatType: input.msg.chatType,
+    addressedToAgent: input.addressedToAgent,
     ...(senderType ? { senderType } : {}),
-    mentionedBot: input.msg.mentionedBot,
     text: input.msg.content,
     attachmentCount: input.msg.resources.length,
     ...(input.msg.rawContentType ? { rawContentType: input.msg.rawContentType } : {}),
   });
   if (decision.kind !== 'attempt') {
-    const outcome = decision.kind === 'shadow' ? 'shadow' : 'queued';
-    const reason = decision.kind === 'queue' ? decision.reason : 'eligible';
-    log.info('steering', outcome, { scope: input.scope, reason });
-    reportMetric('steering_message', 1, { outcome, reason });
+    log.info('followup', 'queued', { scope: input.scope, reason: decision.reason });
+    reportMetric('live_followup_message', 1, {
+      outcome: 'queued',
+      reason: decision.reason,
+    });
     return;
   }
 
   const requestId = `im:${input.msg.messageId}`;
   const claim = input.pending.claim(input.scope, [input.msg], requestId);
   if (!claim) {
-    log.info('steering', 'claim-missed', { scope: input.scope });
-    reportMetric('steering_message', 1, { outcome: 'queued', reason: 'claim-missed' });
+    log.info('followup', 'claim-missed', { scope: input.scope });
+    reportMetric('live_followup_message', 1, { outcome: 'queued', reason: 'claim-missed' });
     return;
   }
 
   const result = await input.conversations.trySteer({
     scopeId: input.scope,
     requestId,
-    prompt: buildSteeringPrompt(input.msg, input.botIdentity),
+    prompt: buildLiveFollowupPrompt(input.msg, input.botIdentity),
   });
   if (result.kind === 'accepted') {
     input.pending.acknowledge(claim);
-    log.info('steering', 'accepted', { scope: input.scope, runId: result.runId });
-    reportMetric('steering_message', 1, { outcome: 'accepted' });
+    log.info('followup', 'accepted', { scope: input.scope, runId: result.runId });
+    reportMetric('live_followup_message', 1, { outcome: 'accepted' });
     return;
   }
 
   input.pending.release(claim);
-  log.info('steering', result.kind, {
+  log.info('followup', result.kind, {
     scope: input.scope,
     reason: result.reason,
     ...(result.kind === 'rejected' && result.message ? { message: result.message } : {}),
   });
-  reportMetric('steering_message', 1, { outcome: result.kind, reason: result.reason });
+  reportMetric('live_followup_message', 1, { outcome: result.kind, reason: result.reason });
 }
 
 interface RunBatchDeps {
@@ -2436,7 +2452,7 @@ function buildPrompt(
 }
 
 /** Build only the new user envelope; the active turn already has bridge instructions. */
-function buildSteeringPrompt(
+function buildLiveFollowupPrompt(
   msg: NormalizedMessage,
   botIdentity?: { openId: string; name?: string },
 ): string {

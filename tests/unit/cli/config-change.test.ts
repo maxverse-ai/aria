@@ -36,11 +36,9 @@ describe('config change CLI handlers', () => {
     await runConfigSettings({ json: true });
     const settings = JSON.parse(output.pop()!);
     expect(settings.schema).toBe('aria.control.config-settings.v1');
-    expect(settings.settings).toHaveLength(9);
-    expect(settings.settings).toContainEqual(expect.objectContaining({
+    expect(settings.settings).toHaveLength(8);
+    expect(settings.settings).not.toContainEqual(expect.objectContaining({
       setting: 'steering',
-      operationId: 'config.steering.set',
-      acceptedValues: 'off|shadow|auto|on',
     }));
 
     await runConfigPlan('show-tool-calls', 'false', {

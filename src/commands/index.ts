@@ -31,7 +31,6 @@ import {
   PROFILE_PREFERENCES_UPDATE_COMMAND,
   PROFILE_REASONING_UPDATE_COMMAND,
   SERVICE_TIER_SET_COMMAND,
-  STEERING_SET_COMMAND,
   applyProfileAccessUpdate,
   authorizeAdapterCommands,
   configRevision,
@@ -77,7 +76,6 @@ import {
   agentCard,
   effortCard,
   fastModeCard,
-  steeringCard,
   helpCard,
   modelSwitchSuccessCard,
   modelsCard,
@@ -101,7 +99,6 @@ import type {
   ProfileAccess,
   ProfileConfig,
   ProfileMode,
-  SteeringPreference,
 } from '../config/profile-schema';
 import { effectiveLarkCliIdentity } from '../config/profile-schema';
 import { resolveAppPaths } from '../config/app-paths';
@@ -251,6 +248,8 @@ export interface CommandContext {
    * text command. Determines whether to update the existing card vs send a
    * new one. */
   fromCardAction?: boolean;
+  /** Intake hook used by `/new <task>` after the old session is cleared. */
+  onNewTask?: (content: string) => void;
 }
 
 type Handler = (args: string, ctx: CommandContext) => Promise<void>;
@@ -280,7 +279,6 @@ const handlers: Record<string, Handler> = {
   '/models': handleModels,
   '/effort': handleEffort,
   '/fast': handleFast,
-  '/steer': handleSteer,
   '/status': handleStatus,
   '/help': handleHelp,
   '/account': handleAccount,
@@ -306,7 +304,6 @@ const ADMIN_COMMANDS = new Set([
   '/account',
   '/config',
   '/fast',
-  '/steer',
   '/ps',
   '/exit',
   '/reconnect',
@@ -502,6 +499,7 @@ async function handleNew(args: string, ctx: CommandContext): Promise<void> {
     return handleNewChat(rawName, ctx);
   }
 
+  const taskContent = trimmed || undefined;
   const wasRunning = ctx.activeRuns.interrupt(ctx.scope);
   if (ctx.sessionCatalog && ctx.sessionCatalogIdentity) {
     ctx.sessionCatalog.archiveActive({
@@ -510,7 +508,17 @@ async function handleNew(args: string, ctx: CommandContext): Promise<void> {
     });
   }
   ctx.sessions.clear(ctx.scope);
-  await reply(ctx, wasRunning ? '已中断当前任务并开始新会话。' : '已开始新会话。');
+  if (taskContent) ctx.onNewTask?.(taskContent);
+  await reply(
+    ctx,
+    taskContent
+      ? wasRunning
+        ? '已中断当前任务，并在新会话中提交新任务。'
+        : '已在新会话中提交新任务。'
+      : wasRunning
+        ? '已中断当前任务并开始新会话。'
+        : '已开始新会话。',
+  );
 }
 
 async function handleNewChat(rawName: string, ctx: CommandContext): Promise<void> {
@@ -1295,84 +1303,6 @@ async function setFastPreference(
   await executeManagementCommand(ctx, SERVICE_TIER_SET_COMMAND, { value });
 }
 
-async function handleSteer(args: string, ctx: CommandContext): Promise<void> {
-  const tokens = args.trim().toLowerCase().split(/\s+/).filter(Boolean);
-  const action = tokens[0] === 'set' ? 'set' : undefined;
-  const choice = (action ? tokens[1] : tokens[0]) as SteeringPreference | 'status' | undefined;
-
-  if (ctx.fromCardAction && action === 'set') {
-    await runSteeringCardFlow(ctx, choice);
-    return;
-  }
-
-  if (choice === 'off' || choice === 'shadow' || choice === 'auto' || choice === 'on') {
-    await setSteeringPreference(ctx, choice);
-    await reply(ctx, `已设置 Steering：\`${choice}\`（立即生效）。`);
-    return;
-  }
-  if (choice && choice !== 'status') {
-    await reply(ctx, '用法：`/steer [off|shadow|auto|on|status]`');
-    return;
-  }
-  await presentCommandCard(ctx, steeringCard(steeringStateForContext(ctx)));
-}
-
-async function runSteeringCardFlow(
-  ctx: CommandContext,
-  choice: SteeringPreference | 'status' | undefined,
-): Promise<void> {
-  const flow = managedCardFlowContext(ctx);
-  const carrierMessageId = await openManagedFlowCard(
-    flow,
-    cardKitActionState('🎛 Steering', 'loading', '正在更新运行中转向策略…'),
-    { allowReplacement: false },
-  );
-  try {
-    if (choice !== 'off' && choice !== 'shadow' && choice !== 'auto' && choice !== 'on') {
-      throw new Error(`未知 Steering 策略：${choice ?? '(空)'}`);
-    }
-    await setSteeringPreference(ctx, choice);
-    await finishManagedFlowCard(
-      flow,
-      carrierMessageId,
-      steeringCard({
-        ...steeringStateForContext(ctx),
-        notice: '✅ 策略已更新并立即生效。',
-      }),
-      'success',
-      { allowReplacement: false },
-    );
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    await finishManagedFlowCard(
-      flow,
-      carrierMessageId,
-      cardKitActionState('🎛 Steering', 'failure', `操作失败：${message}`),
-      'failure',
-      { allowReplacement: false },
-    ).catch((updateErr) => log.fail('cardAction', updateErr, { step: 'steering-failure-card' }));
-  }
-}
-
-function steeringStateForContext(ctx: CommandContext) {
-  const capability = capabilityFor(
-    ctx.controls.profileConfig.agentKind,
-    ctx.controls.profileConfig,
-  );
-  return {
-    agent: ctx.controls.profileConfig.agentKind,
-    current: ctx.controls.profileConfig.coordination.steering,
-    capability: capability.steering?.mode ?? ('unsupported' as const),
-  };
-}
-
-async function setSteeringPreference(
-  ctx: CommandContext,
-  choice: SteeringPreference,
-): Promise<void> {
-  await executeManagementCommand(ctx, STEERING_SET_COMMAND, { value: choice });
-}
-
 async function setModelPreference(ctx: CommandContext, value: string): Promise<void> {
   const legacyReasoning = ctx.controls.profileConfig.preferences.reasoningEffort;
   const needsLegacyMigration =
@@ -1760,11 +1690,6 @@ async function renderStatus(ctx: CommandContext): Promise<void> {
     sessionStale: !isThread && Boolean(cwd && sess && sess.cwd !== cwd),
     agentName: ctx.agent.displayName,
     engineStatus,
-    steering: {
-      preference: ctx.controls.profileConfig.coordination.steering,
-      capability: capability.steering?.mode ?? 'unsupported',
-      activeRun: Boolean(ctx.activeRuns.get(ctx.scope)),
-    },
     runtimeAccess: runtimeAccessStatus(ctx.controls.profileConfig),
     larkCliStatus: await larkCliStatus(ctx),
     activeRun: Boolean(ctx.activeRuns.get(ctx.scope)),
