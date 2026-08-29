@@ -16,6 +16,7 @@ export interface ArtifactManifest {
 }
 
 export function sha256File(path: string): string;
+export function verifyStandaloneNodeAsset(assetPath: string, expectedOutput?: string): string;
 export function validatePackageInventory(files: Array<string | { path: string }>): string[];
 export function validatePackageName(packageName: string): string;
 export function validateManifest(manifest: ArtifactManifest): ArtifactManifest;

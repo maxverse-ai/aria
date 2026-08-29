@@ -58,7 +58,10 @@ the following ignored outputs under `artifacts/`:
 The build refuses a dirty worktree by default. This protects the commit-to-bits
 relationship. `artifact:verify` checks the manifest and digest, installs the
 tarball into an isolated temporary directory, and runs the packaged `aria
---version` command. It never reads credentials or modifies an installed Aria.
+--version` command. It also copies the release installer into a dependency-free
+temporary directory and executes `--help`, so a supposedly standalone asset
+cannot pass by resolving packages from the repository's `node_modules` tree.
+It never reads credentials or modifies an installed Aria.
 
 CI uploads this as a candidate artifact only after the platform matrix passes.
 It is not a release. The protected release workflow repeats the exact-commit
@@ -68,9 +71,11 @@ the guarded publisher. It never runs `npm publish` against the source directory.
 The private internal-release workflow uses the same candidate format and adds
 `SHA256SUMS`, a machine-readable `release.json`, and the standalone
 `aria-install.mjs` bootstrapper. It attaches all five assets to a draft GitHub
-release before publishing it as an immutable prerelease. The workflow fails
-closed unless repository-level GitHub Release immutability is enabled. It never
-interacts with the npm registry for the Aria package.
+release before publishing it as an immutable prerelease. Release preparation
+repeats the dependency-free execution check on the exact installer bytes that
+will be uploaded. The workflow fails closed unless repository-level GitHub
+Release immutability is enabled. It never interacts with the npm registry for
+the Aria package.
 
 ## Release boundary
 
