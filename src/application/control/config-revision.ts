@@ -3,8 +3,10 @@ import type { RootConfig } from '../../config/profile-schema';
 import { formatRootConfig } from '../../config/profile-store';
 
 /** Semantic revision of the normalized serializable root configuration. */
-export function configRevision(root: RootConfig): string {
-  const serializable = JSON.parse(formatRootConfig(root)) as unknown;
+export function configRevision(root: RootConfig | undefined): string {
+  const serializable = root
+    ? JSON.parse(formatRootConfig(root)) as unknown
+    : null;
   const canonical = JSON.stringify(sortObjectKeys(serializable));
   return `sha256:${createHash('sha256').update(canonical).digest('hex')}`;
 }

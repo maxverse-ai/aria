@@ -35,6 +35,12 @@ export interface ControlChangeSummary {
 export interface ConfigMutation {
   root: RootConfig;
   changes: ControlChangeSummary[];
+  /**
+   * Explicit root teardown. The mutation kernel deletes config.json instead of
+   * persisting `root`; only root-scoped commands that declare this capability
+   * may return it.
+   */
+  deleteRoot?: boolean;
 }
 
 export interface ManagementCommandPrepareInput {
@@ -54,6 +60,8 @@ export interface ManagementCommandDefinition {
   effect: ManagementRuntimeEffect;
   /** Defaults to `profile` for commands registered before resource scoping. */
   resourceScope?: ManagementResourceScope;
+  /** Allows this root-scoped command to remove the root configuration. */
+  allowsRootDeletion?: boolean;
   /**
    * `private-identifiers` permits command-validated resource identifiers in
    * the internal plan record. Credentials remain forbidden and public plan
@@ -127,6 +135,7 @@ export type ControlChangeErrorCode =
   | 'not-confirmed'
   | 'operation-unavailable'
   | 'plan-not-found'
+  | 'profile-already-exists'
   | 'profile-not-found'
   | 'revision-conflict'
   | 'transformation-drift';

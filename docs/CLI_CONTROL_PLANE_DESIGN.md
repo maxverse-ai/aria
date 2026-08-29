@@ -7,9 +7,9 @@
 > profile reconciler are also implemented as recorded in
 > [`CONTROL_PLANE.md`](CONTROL_PLANE.md). Feishu settings/access/account/model/
 > reasoning/engine flows and local web settings/access flows now use that
-> facade and the appropriate runtime reconciler. Profile activation now uses a
-> root-scoped command through the same facade; profile creation, archive, and
-> purge remain to migrate. This document replaces the earlier
+> facade and the appropriate runtime reconciler. Profile activation, prepared
+> creation, archive, and purge now share root-scoped lifecycle commands and
+> `ProfileLifecycleService`. This document replaces the earlier
 > CLI-centric runtime-binding and delegation roadmap.
 
 ## Scope
@@ -84,7 +84,8 @@ The repository is intentionally in a transitional state:
 | Feishu model and reasoning flows | `ManagementApi` model-scoped commands plus live reconciliation | Public Management API |
 | Engine switch | `profile.engine.update` commit plus Supervisor-owned prepare, quiesce, swap and rollback | Public command + Runtime Admin effect |
 | Profile activation | `profile.activate` through `ProfileLifecycleService`; root config is desired state and `active-profile` is a compatibility projection | Public Management API |
-| Profile archive and purge | direct CLI retention workflow | Public command plus lifecycle saga (pending) |
+| Profile creation | credential/engine/workspace preparation followed by `profile.create`; first root creation remains named bootstrap | Public command plus privileged prerequisite |
+| Profile archive and purge | `profile.archive` / `profile.purge` through a staged, compensating retention saga | Public command plus lifecycle saga |
 | Inactive engine bootstrap | `stageEngineBootstrap` copies only the selected plugin's config field | Privileged infrastructure path |
 | Profile bootstrap and repair | `profile-runtime.ts` and preflight persistence | Privileged infrastructure path |
 | Secret/material migration | profile bootstrap and keystore helpers | Privileged infrastructure path |
@@ -310,8 +311,16 @@ command. Profile activation is implemented as the low-risk, root-scoped
 `profile.activate` command. CLI `profile use` and the Web activation endpoint
 share `ProfileLifecycleService`; neither adapter writes root configuration.
 `config.json.activeProfile` is the desired-state authority and the legacy
-`active-profile` file is a retryable compatibility projection. Creation,
-archive, and purge remain.
+`active-profile` file is a retryable compatibility projection. CLI and Web
+creation prepare credentials outside the Management API, then submit only an
+external SecretRef and normalized profile definition through `profile.create`.
+Creating the first profile is an explicit privileged bootstrap because no
+management root exists yet; adding later profiles always creates an applied
+plan. CLI archive and purge stage profile-owned state under `.trash`, commit
+`profile.archive` or `profile.purge`, restore the staged state if the commit
+fails, and finalize permanent deletion only after commit. Removing the last
+profile uses an explicitly declared root-teardown capability and atomically
+deletes `config.json`; no empty invalid root is persisted.
 
 ### Phase 6: practical lifecycle completion
 

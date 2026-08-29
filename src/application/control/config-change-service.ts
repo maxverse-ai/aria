@@ -10,6 +10,7 @@ import { runtimeEffectRequiresRestart, type ManagementRuntimeEffect } from './ru
 import {
   CONTROL_CHANGE_API_VERSION,
   ControlChangeError,
+  type ConfigMutation,
   type ConfigChangeCommitResult,
   type ControlActorContext,
   type ControlActorReference,
@@ -27,7 +28,6 @@ const DEFAULT_PLAN_TTL_MS = 15 * 60_000;
 
 interface PendingConfigCommit {
   commit: ConfigChangeCommitResult;
-  nextRoot?: RootConfig;
 }
 
 export interface ConfigChangeServiceOptions {
@@ -116,7 +116,7 @@ export class ConfigChangeService {
       parameters,
       rootDir: this.rootDir,
     });
-    validateCandidate(root, candidate.root, resource, candidate.changes);
+    validateCandidate(root, candidate, resource, operation);
     assertSafePlanPayload(
       parameters,
       candidate.changes,
@@ -140,7 +140,7 @@ export class ConfigChangeService {
       status: 'planned',
       actor: actorReference(input.actor),
       baseRevision: configRevision(root),
-      targetRevision: configRevision(candidate.root),
+      targetRevision: configRevision(candidate.deleteRoot ? undefined : candidate.root),
       changes: structuredClone(candidate.changes),
       parameters,
       runtimeEffect: operation.effect,
@@ -184,7 +184,7 @@ export class ConfigChangeService {
   /** Commit desired state and report its runtime effect without performing it. */
   async commitPlan(id: string, actor: ControlActorContext): Promise<ConfigChangeCommitResult> {
     validateActor(actor);
-    return this.repository.withLockedRoot(async (root) => {
+    return this.repository.withLockedRoot(async (root, commitRoot) => {
       const transaction = await this.store.withLockedPlan<PendingConfigCommit>(id, async (plan) => {
         requireActor(plan, actor);
         if (plan.status === 'applied' && plan.appliedAt) {
@@ -194,7 +194,6 @@ export class ConfigChangeService {
           throw new ControlChangeError('not-confirmed', `plan is not confirmed: ${id}`);
         }
         requireNotExpired(plan, this.now());
-        if (!root) throw new ControlChangeError('invalid-plan', 'root config not found');
         const currentRevision = configRevision(root);
         const appliedAt = this.now().toISOString();
 
@@ -209,6 +208,7 @@ export class ConfigChangeService {
             `configuration changed since plan creation (${plan.baseRevision} -> ${currentRevision})`,
           );
         }
+        if (!root) throw new ControlChangeError('invalid-plan', 'root config not found');
         const operation = this.requireOperation(plan.operation.id);
         if (operation.version !== plan.operation.version) {
           throw new ControlChangeError(
@@ -237,8 +237,8 @@ export class ConfigChangeService {
           parameters: structuredClone(plan.parameters),
           rootDir: this.rootDir,
         });
-        validateCandidate(root, candidate.root, resource, candidate.changes);
-        const actualTarget = configRevision(candidate.root);
+        validateCandidate(root, candidate, resource, operation);
+        const actualTarget = configRevision(candidate.deleteRoot ? undefined : candidate.root);
         if (actualTarget !== plan.targetRevision) {
           throw new ControlChangeError(
             'transformation-drift',
@@ -246,15 +246,15 @@ export class ConfigChangeService {
           );
         }
         const applied = { ...plan, status: 'applied' as const, appliedAt };
+        await commitRoot(candidate.deleteRoot ? null : candidate.root);
         return {
           plan: applied,
           result: {
-            nextRoot: candidate.root,
             commit: commitResult(applied, false, operation.effect),
           },
         };
       });
-      return { nextRoot: transaction.nextRoot, result: transaction.commit };
+      return { result: transaction.commit };
     });
   }
 
@@ -399,10 +399,24 @@ function requireNotExpired(plan: StoredControlChangePlan, now: Date): void {
 
 function validateCandidate(
   before: RootConfig,
-  after: RootConfig,
+  candidate: ConfigMutation,
   resource: ControlChangeResource,
-  changes: ControlChangeSummary[],
+  operation: ManagementCommandDefinition,
 ): void {
+  const { root: after, changes } = candidate;
+  if (!Array.isArray(changes) || changes.some((item) => !item.field.trim())) {
+    throw new ControlChangeError('invalid-plan', 'operation returned invalid change summaries');
+  }
+  if (candidate.deleteRoot) {
+    if (
+      resource.kind !== 'root' ||
+      operation.allowsRootDeletion !== true ||
+      !isDeepStrictEqual(before, after)
+    ) {
+      throw new ControlChangeError('invalid-plan', 'operation may not delete root configuration');
+    }
+    return;
+  }
   if (
     after.schemaVersion !== 2 ||
     !after.profiles ||
@@ -411,9 +425,6 @@ function validateCandidate(
     !after.profiles[after.activeProfile]
   ) {
     throw new ControlChangeError('invalid-plan', 'operation returned an invalid root configuration');
-  }
-  if (!Array.isArray(changes) || changes.some((item) => !item.field.trim())) {
-    throw new ControlChangeError('invalid-plan', 'operation returned invalid change summaries');
   }
   if (resource.kind === 'root') return;
 
