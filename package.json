@@ -3,7 +3,7 @@
   "version": "0.1.2",
   "description": "Aria — where your local agent team gathers in Feishu/Lark",
   "type": "module",
-  "packageManager": "pnpm@10.33.0",
+  "packageManager": "pnpm@12.0.0",
   "publishConfig": {
     "access": "public",
     "registry": "https://registry.npmjs.org/"
@@ -57,7 +57,7 @@
     "internal-release:prepare": "node tools/internal-release.mjs prepare",
     "ci:local": "git diff --check && pnpm infra:doctor && pnpm release:check -- --base-ref origin/main && pnpm test && pnpm typecheck && pnpm build",
     "ci:platform": "pnpm infra:doctor && pnpm release:check && pnpm test && pnpm typecheck && pnpm build",
-    "prepare": "npm run build",
+    "prepare": "pnpm build",
     "prepublishOnly": "node tools/release.mjs publish-gate && pnpm release:check && pnpm typecheck && pnpm build"
   },
   "dependencies": {
@@ -104,12 +104,6 @@
   },
   "engines": {
     "node": ">=20.12.0"
-  },
-  "pnpm": {
-    "onlyBuiltDependencies": [
-      "esbuild",
-      "protobufjs"
-    ]
   },
   "keywords": [
     "aria",
