@@ -81,6 +81,12 @@ import type { SessionStore } from '../session/store';
 import type { WorkspaceStore } from '../workspace/store';
 import type { ActiveRuns, RunHandle } from './active-runs';
 import { resolveAddressingContext } from './addressing';
+import {
+  messageTimestampMs,
+  senderTypeOf,
+  toConversationInput,
+  type ConversationInput,
+} from './conversation-input';
 import { ChatModeCache, type ChatMode } from './chat-mode-cache';
 import { ChatTopologyResolver } from './chat-topology';
 import { handleCommentMention } from './comments';
@@ -89,6 +95,11 @@ import { decideLiveFollowup } from '../conversation/live-followup-policy';
 import { commandSessionCatalogIdentity } from './session-catalog-identity';
 import { startKeepalive } from './keepalive';
 import { PendingQueue } from './pending-queue';
+import { FinalReplyCommit, type FinalReplyArtifact } from './final-reply-commit';
+import {
+  FinalReplyFreshness,
+  type FreshnessHandoff,
+} from './final-reply-freshness';
 import type { ProcessPool } from './process-pool';
 import { fetchQuotedContext, fetchTopicContext, type QuotedContext } from './quote';
 import { lookupMessageThreadId } from './thread-id';
@@ -392,8 +403,10 @@ export async function startChannel(deps: StartChannelDeps): Promise<BridgeChanne
   // unblock arms a fresh quiet-window timer. Net effect: at most one run per
   // chat in flight, and everything sent during a run merges into the next
   // batch (only flushed once 600ms of silence has passed *after* the run).
-  const pending = new PendingQueue(DEBOUNCE_MS, (scope, batch) => {
-    const firstMsg = batch[0];
+  let finalReplyFreshness!: FinalReplyFreshness;
+  const pending = new PendingQueue(DEBOUNCE_MS, (scope, inputs) => {
+    const firstInput = inputs[0];
+    const firstMsg = firstInput?.message;
     if (!firstMsg) return;
     pending.block(scope);
     void withTrace({
@@ -403,7 +416,7 @@ export async function startChannel(deps: StartChannelDeps): Promise<BridgeChanne
     }, async () => {
       log.info('flush', 'start', {
         scope,
-        batchSize: batch.length,
+        batchSize: inputs.length,
         chatId: firstMsg.chatId,
         threadId: firstMsg.threadId,
         msgId: firstMsg.messageId,
@@ -438,7 +451,7 @@ export async function startChannel(deps: StartChannelDeps): Promise<BridgeChanne
               channel,
               conversations,
               media,
-              batch,
+              inputs,
               controls,
               cotClient,
               cotStateFile,
@@ -449,6 +462,7 @@ export async function startChannel(deps: StartChannelDeps): Promise<BridgeChanne
               scope,
               mode,
               outboundFinalOnly: outboundPolicy?.streamStrategy === 'final-only',
+              finalReplyFreshness,
             }),
         );
       } catch (err) {
@@ -458,6 +472,11 @@ export async function startChannel(deps: StartChannelDeps): Promise<BridgeChanne
         log.info('flush', 'end');
       }
     });
+  });
+  finalReplyFreshness = new FinalReplyFreshness({
+    channel,
+    chatTopology,
+    pending,
   });
   const activityTracker = new RuntimeActivityTracker(
     controls.profile,
@@ -1056,6 +1075,8 @@ async function intakeMessage(deps: IntakeDeps): Promise<void> {
     return;
   }
 
+  const conversationInput = toConversationInput(emsg, addressing);
+
   let newTaskContent: string | undefined;
   const handled = await tryHandleCommand({
     channel,
@@ -1091,7 +1112,10 @@ async function intakeMessage(deps: IntakeDeps): Promise<void> {
     log.info('intake', 'command', { scope, droppedPending: dropped.length });
     if (newTaskContent) {
       const taskMessage = { ...emsg, content: newTaskContent };
-      const size = pending.push(scope, taskMessage);
+      const size = pending.push(scope, {
+        ...conversationInput,
+        message: taskMessage,
+      });
       log.info('intake', 'new-task-queued', {
         scope,
         queueSize: size,
@@ -1101,15 +1125,14 @@ async function intakeMessage(deps: IntakeDeps): Promise<void> {
     return;
   }
 
-  const size = pending.push(scope, emsg);
+  const size = pending.push(scope, conversationInput);
   log.info('intake', 'queued', { scope, queueSize: size, debounceMs: DEBOUNCE_MS });
   await tryMergeLiveFollowup({
     conversations,
     activeRuns,
     pending,
     scope,
-    msg: emsg,
-    addressedToAgent: addressing.addressedToAgent,
+    input: conversationInput,
     botIdentity: channel.botIdentity,
   });
 }
@@ -1119,20 +1142,19 @@ async function tryMergeLiveFollowup(input: {
   activeRuns: ActiveRuns;
   pending: PendingQueue;
   scope: string;
-  msg: NormalizedMessage;
-  addressedToAgent: boolean;
+  input: ConversationInput;
   botIdentity?: { openId: string; name?: string };
 }): Promise<void> {
   const activeRun = input.activeRuns.get(input.scope)?.run;
   if (!activeRun) return;
-  const senderType = senderTypeOf(input.msg);
+  const { message } = input.input;
   const decision = decideLiveFollowup({
     ...(activeRun.steering ? { support: activeRun.steering } : {}),
-    addressedToAgent: input.addressedToAgent,
-    ...(senderType ? { senderType } : {}),
-    text: input.msg.content,
-    attachmentCount: input.msg.resources.length,
-    ...(input.msg.rawContentType ? { rawContentType: input.msg.rawContentType } : {}),
+    addressedToAgent: input.input.addressing.addressedToAgent,
+    ...(input.input.senderType ? { senderType: input.input.senderType } : {}),
+    text: message.content,
+    attachmentCount: message.resources.length,
+    ...(message.rawContentType ? { rawContentType: message.rawContentType } : {}),
   });
   if (decision.kind !== 'attempt') {
     log.info('followup', 'queued', { scope: input.scope, reason: decision.reason });
@@ -1143,8 +1165,8 @@ async function tryMergeLiveFollowup(input: {
     return;
   }
 
-  const requestId = `im:${input.msg.messageId}`;
-  const claim = input.pending.claim(input.scope, [input.msg], requestId);
+  const requestId = `im:${message.messageId}`;
+  const claim = input.pending.claim(input.scope, [input.input], requestId);
   if (!claim) {
     log.info('followup', 'claim-missed', { scope: input.scope });
     reportMetric('live_followup_message', 1, { outcome: 'queued', reason: 'claim-missed' });
@@ -1154,7 +1176,8 @@ async function tryMergeLiveFollowup(input: {
   const result = await input.conversations.trySteer({
     scopeId: input.scope,
     requestId,
-    prompt: buildLiveFollowupPrompt(input.msg, input.botIdentity),
+    inputId: message.messageId,
+    prompt: buildLiveFollowupPrompt(message, input.botIdentity),
   });
   if (result.kind === 'accepted') {
     input.pending.acknowledge(claim);
@@ -1176,7 +1199,7 @@ interface RunBatchDeps {
   channel: LarkChannel;
   conversations: ConversationRuntime;
   media: MediaCache;
-  batch: NormalizedMessage[];
+  inputs: ConversationInput[];
   controls: Controls;
   cotClient: CotClient;
   cotStateFile?: string;
@@ -1187,6 +1210,7 @@ interface RunBatchDeps {
   scope: string;
   mode: ChatMode;
   outboundFinalOnly?: boolean;
+  finalReplyFreshness: FinalReplyFreshness;
 }
 
 async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
@@ -1194,7 +1218,7 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
     channel,
     conversations,
     media,
-    batch,
+    inputs,
     controls,
     cotClient,
     cotStateFile,
@@ -1205,7 +1229,9 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
     scope,
     mode,
     outboundFinalOnly,
+    finalReplyFreshness,
   } = deps;
+  const batch = inputs.map((input) => input.message);
   if (batch.length === 0) return;
   const firstMsg = batch[0];
   const lastMsg = batch[batch.length - 1];
@@ -1317,6 +1343,7 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
   const prevModel = lastRunModelByScope.get(scope);
   const modelSwitched = prevModel !== undefined && prevModel !== modelSelection;
   lastRunModelByScope.set(scope, modelSelection);
+  const freshnessHandoff = finalReplyFreshness.handoff(scope);
   const extraInstructions = [
     ...(modelSwitched
       ? [
@@ -1325,6 +1352,7 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
         ]
       : []),
     ...(outboundFinalOnly ? [FINAL_ONLY_AGENT_INSTRUCTION] : []),
+    ...(freshnessHandoff ? [freshnessHandoffInstruction(freshnessHandoff)] : []),
   ];
 
   const prompt = buildPrompt(
@@ -1439,6 +1467,18 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
     return;
   }
 
+  const { execution, cwdRealpath: cwd } = flow;
+  const observedWatermark = Math.max(0, ...batch.map(messageTimestampMs));
+  conversations.beginTurn({
+    scopeId: scope,
+    runId: execution.runId,
+    initialWatermarkMs: observedWatermark || Date.now(),
+    initialInputIds: batch.map((message) => message.messageId),
+  });
+  if (freshnessHandoff) {
+    finalReplyFreshness.acknowledgeHandoff(scope, freshnessHandoff);
+  }
+
   const runInitialState = createRunState({
     agentId: capability.agentId,
     agentLabel: getEnginePlugin(agentKind)?.displayName ?? agentKind,
@@ -1448,7 +1488,6 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
       await settleWithin(engineStatusPromise, RUN_STATUS_SNAPSHOT_WAIT_MS),
     ),
   });
-  const { execution, cwdRealpath: cwd } = flow;
   activePolicyFingerprints.set(scope, flow.policy.policyFingerprint);
   const handle = execution.handle;
   const eventStream = execution.subscribe();
@@ -1548,8 +1587,29 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
           }),
       }
     : { runStatusItems };
-  const finalizeReply = (operation: () => Promise<void>): Promise<void> =>
-    conversations.finalizeTurn(scope, execution.runId, operation);
+  const finalReplyCommit = new FinalReplyCommit({
+    conversations,
+    freshness: finalReplyFreshness,
+    context: {
+      scope,
+      runId: execution.runId,
+      chatId,
+      chatType: firstMsg.chatType,
+      ...(threadId ? { threadId } : {}),
+      canAcceptRemote: (message) => (
+        message.chatType === 'p2p'
+          ? canUseDm(controls.profileConfig, controls, message.senderId)
+          : canUseGroup(
+            controls.profileConfig,
+            controls,
+            message.chatId,
+            message.senderId,
+          )
+      ).ok,
+    },
+    retract: (artifact) =>
+      recallReplyMessage(channel, artifact, scope, 'freshness', messageRead),
+  });
 
   // For non-card modes Claude's output doesn't surface visually until either
   // a first streamed token (markdown mode) or the whole run ends (text mode).
@@ -1606,7 +1666,7 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
           replyMode,
           sendOpts,
           cardRenderOptions,
-          finalize: finalizeReply,
+          commit: finalReplyCommit,
         });
         return;
       }
@@ -1634,7 +1694,7 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
         replyMode,
         sendOpts,
         cardRenderOptions,
-        finalize: finalizeReply,
+        commit: finalReplyCommit,
       });
     } else if (replyMode === 'card') {
       let latestState: RunState = runInitialState;
@@ -1675,20 +1735,25 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
         },
         runInitialState,
       );
+      let delivery: 'streamed' | 'fallback' | undefined;
       try {
-        await awaitRenderAwareStream({
+        delivery = await awaitRenderAwareStream({
           mode: replyMode,
           progress,
           renderDone,
           producerStarted: () => producerStarted,
           fallback: async (state) => {
             if (capability.finalReply === 'separate') return;
-            if (!hasDeliverableContent(filterForPrefs(state))) return;
-            await channel.send(
+            await sendFinalReply({
+              channel,
               chatId,
-              { card: renderCard(filterForPrefs(state), cardRenderOptions) },
+              scope,
+              state: filterForPrefs(state),
+              replyMode,
               sendOpts,
-            );
+              cardRenderOptions,
+              commit: finalReplyCommit,
+            });
           },
         });
       } catch (err) {
@@ -1705,8 +1770,13 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
           replyMode,
           sendOpts,
           cardRenderOptions,
-          finalize: finalizeReply,
+          commit: finalReplyCommit,
         });
+      } else if (delivery === 'streamed') {
+        await finalReplyCommit.reconcileExisting(
+          renderText(filterForPrefs(latestState), { includeRunStatus: false }),
+          progress.settled.then(finalReplyArtifactFromResult, () => undefined),
+        );
       }
     } else if (replyMode === 'markdown') {
       let latestState: RunState = runInitialState;
@@ -1742,8 +1812,9 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
         },
         runInitialState,
       );
+      let delivery: 'streamed' | 'fallback' | undefined;
       try {
-        await awaitRenderAwareStream({
+        delivery = await awaitRenderAwareStream({
           mode: replyMode,
           progress,
           renderDone,
@@ -1751,10 +1822,16 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
           fallback: async (state) => {
             if (capability.finalReply === 'separate') return;
             const visibleState = filterForPrefs(state);
-            const body = renderText(visibleState, { runStatusItems });
-            if (hasDeliverableContent(visibleState)) {
-              await channel.send(chatId, { markdown: body }, sendOpts);
-            }
+            await sendFinalReply({
+              channel,
+              chatId,
+              scope,
+              state: visibleState,
+              replyMode,
+              sendOpts,
+              cardRenderOptions,
+              commit: finalReplyCommit,
+            });
           },
         });
       } catch (err) {
@@ -1771,8 +1848,13 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
           replyMode,
           sendOpts,
           cardRenderOptions,
-          finalize: finalizeReply,
+          commit: finalReplyCommit,
         });
+      } else if (delivery === 'streamed') {
+        await finalReplyCommit.reconcileExisting(
+          renderText(filterForPrefs(latestState), { includeRunStatus: false }),
+          progress.settled.then(finalReplyArtifactFromResult, () => undefined),
+        );
       }
     } else {
       // text mode: drain the agent stream without sending anything during
@@ -1798,7 +1880,7 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
         replyMode,
         sendOpts,
         cardRenderOptions,
-        finalize: finalizeReply,
+        commit: finalReplyCommit,
       });
     }
   } catch (err) {
@@ -1865,7 +1947,7 @@ interface LazyProgressStream {
  * the producer runs, and finishes it with a "(no content)" placeholder when the
  * producer never supplied any text. A Codex round that only produces a final
  * answer (delivered separately by `sendFinalReply`) used to hit exactly that:
- * an empty card sat in the chat for seconds until `recall-empty` cleaned it up.
+ * an empty card sat in the chat for seconds until cleanup recalled it.
  */
 function createLazyProgressStream(
   scope: string,
@@ -1968,24 +2050,26 @@ async function recallIfEmptyStreamedReply(
   // up on it), so clean up in the background instead of blocking the run on it.
   if (progress.abandoned()) {
     void progress.settled.then(
-      (result) => recallStreamedMessage(channel, result, scope, messageRead),
+      (result) => recallReplyMessage(channel, result, scope, 'empty', messageRead),
       () => {},
     );
     return;
   }
   if (hasDeliverableContent(finalState)) return;
   const result = await progress.settled.catch(() => undefined);
-  await recallStreamedMessage(channel, result, scope, messageRead);
+  await recallReplyMessage(channel, result, scope, 'empty', messageRead);
 }
 
-async function recallStreamedMessage(
+async function recallReplyMessage(
   channel: LarkChannel,
   streamResult: unknown,
   scope: string,
+  reason: 'empty' | 'freshness',
   messageRead?: MessageResourceSink,
-): Promise<void> {
-  const messageId = (streamResult as { messageId?: string } | undefined)?.messageId;
-  if (!messageId) return;
+): Promise<boolean> {
+  const artifact = finalReplyArtifactFromResult(streamResult);
+  if (!artifact) return false;
+  const { messageId } = artifact;
   try {
     await channel.recallMessage(messageId);
     await messageRead?.remove(messageId, new Date().toISOString()).catch((err) =>
@@ -1994,14 +2078,32 @@ async function recallStreamedMessage(
         err: err instanceof Error ? err.message : String(err),
       }),
     );
-    log.info('outbound', 'recall-empty', { scope, messageId });
+    log.info('outbound', 'recalled', { scope, messageId, reason });
+    return true;
   } catch (err) {
-    log.warn('outbound', 'recall-empty-failed', {
+    log.warn('outbound', 'recall-failed', {
       scope,
       messageId,
+      reason,
       err: err instanceof Error ? err.message : String(err),
     });
+    return false;
   }
+}
+
+function finalReplyArtifactFromResult(result: unknown): FinalReplyArtifact | undefined {
+  const messageId = (result as { messageId?: unknown } | undefined)?.messageId;
+  return typeof messageId === 'string' && messageId.trim() ? { messageId } : undefined;
+}
+
+function freshnessHandoffInstruction(handoff: FreshnessHandoff): string {
+  const delivery = handoff.previousDraftDelivery === 'withheld'
+    ? '上一轮已经生成过答复，但发布前发现了尚未纳入的新输入，所以该答复没有展示给用户。'
+    : handoff.previousDraftDelivery === 'retracted'
+      ? '上一轮答复曾短暂展示，随后因发现尚未纳入的新输入而撤回；用户可能已经看到部分或全部内容。'
+      : '上一轮答复在发现新输入前已开始展示，撤回状态无法确认；用户可能已经看到，而且消息可能仍然可见。';
+  return delivery +
+    '请基于本轮新输入继续，不要假设用户已接受上一轮答复；上一轮执行的工具或外部副作用仍可能已经发生。';
 }
 
 interface FinalReplyInput {
@@ -2012,15 +2114,22 @@ interface FinalReplyInput {
   replyMode: ReturnType<typeof getMessageReplyMode>;
   sendOpts: { replyTo: string; replyInThread?: boolean };
   cardRenderOptions: RunCardRenderOptions;
-  finalize?: (operation: () => Promise<void>) => Promise<void>;
+  commit?: FinalReplyCommit;
 }
 
 async function sendFinalReply(input: FinalReplyInput): Promise<void> {
+  const draftText = renderText(input.state, { includeRunStatus: false });
   const operation = () => publishFinalReply(input);
-  return input.finalize ? input.finalize(operation) : operation();
+  if (input.commit) {
+    await input.commit.publish(draftText, operation);
+    return;
+  }
+  await operation();
 }
 
-async function publishFinalReply(input: FinalReplyInput): Promise<void> {
+async function publishFinalReply(
+  input: FinalReplyInput,
+): Promise<FinalReplyArtifact | undefined> {
   const body = renderText(input.state, {
     runStatusItems: input.cardRenderOptions.runStatusItems,
   });
@@ -2041,6 +2150,7 @@ async function publishFinalReply(input: FinalReplyInput): Promise<void> {
     );
     requireMessageReceipt(result, 'card');
     log.info('outbound', 'sent', outboundLogFields(input, 'card', body, result));
+    return { messageId: result.messageId };
   } else if (input.replyMode === 'markdown') {
     if (body.trim()) {
       const result = await input.channel.send(
@@ -2050,6 +2160,7 @@ async function publishFinalReply(input: FinalReplyInput): Promise<void> {
       );
       requireMessageReceipt(result, 'markdown');
       log.info('outbound', 'sent', outboundLogFields(input, 'markdown', body, result));
+      return { messageId: result.messageId };
     }
   } else if (body.trim()) {
     const result = await input.channel.send(
@@ -2059,11 +2170,16 @@ async function publishFinalReply(input: FinalReplyInput): Promise<void> {
     );
     requireMessageReceipt(result, 'text');
     log.info('outbound', 'sent', outboundLogFields(input, 'text', body, result));
+    return { messageId: result.messageId };
   }
+  return undefined;
 }
 
-function requireMessageReceipt(result: { messageId?: string }, type: string): void {
-  if (!result.messageId?.trim()) {
+function requireMessageReceipt(
+  result: { messageId?: string } | undefined,
+  type: string,
+): asserts result is { messageId: string } {
+  if (!result?.messageId?.trim()) {
     throw new Error(`final ${type} reply missing message receipt`);
   }
 }
@@ -2266,7 +2382,7 @@ async function awaitRenderAwareStream(input: {
   renderDone: Promise<RunState>;
   producerStarted: () => boolean;
   fallback: (state: RunState) => Promise<void>;
-}): Promise<void> {
+}): Promise<'streamed' | 'fallback'> {
   const streamResult = input.progress.settled.then(
     () => ({ kind: 'stream' as const, ok: true as const }),
     (err) => ({ kind: 'stream' as const, ok: false as const, err }),
@@ -2282,7 +2398,7 @@ async function awaitRenderAwareStream(input: {
       const rendered = await renderResult;
       if (!rendered.ok) throw rendered.err;
       await runFallbackReply(input.mode, rendered.state, input.fallback);
-      return;
+      return 'fallback';
     }
     throw first.err;
   }
@@ -2290,7 +2406,7 @@ async function awaitRenderAwareStream(input: {
   if (first.kind === 'stream') {
     const rendered = await renderResult;
     if (!rendered.ok) throw rendered.err;
-    return;
+    return 'streamed';
   }
 
   // Nothing durable ever showed up, so no progress message was opened at all
@@ -2299,7 +2415,7 @@ async function awaitRenderAwareStream(input: {
   if (!input.progress.opened()) {
     log.info('outbound', 'progress-stream-skipped', { mode: input.mode });
     await runFallbackReply(input.mode, first.state, input.fallback);
-    return;
+    return 'fallback';
   }
 
   // The run ended before the stream did. A producer that hasn't started yet is
@@ -2322,7 +2438,7 @@ async function awaitRenderAwareStream(input: {
           log.fail('stream', result.err, { mode: input.mode, step: 'stream-terminal-late' });
         }
       });
-      return;
+      return 'streamed';
     }
     // Still nothing on screen after the grace window: give up on the stream and
     // reply without it. `abandon()` keeps a late producer from rendering the
@@ -2330,7 +2446,7 @@ async function awaitRenderAwareStream(input: {
     input.progress.abandon();
     log.warn('stream', 'producer-not-started-before-agent-terminal', { mode: input.mode });
     await runFallbackReply(input.mode, first.state, input.fallback);
-    return;
+    return 'fallback';
   }
 
   if (!terminal.ok) {
@@ -2340,7 +2456,9 @@ async function awaitRenderAwareStream(input: {
     if (input.producerStarted()) throw terminal.err;
     log.fail('stream', terminal.err, { mode: input.mode, step: 'stream' });
     await runFallbackReply(input.mode, first.state, input.fallback);
+    return 'fallback';
   }
+  return 'streamed';
 }
 
 async function runFallbackReply(
@@ -2473,20 +2591,6 @@ function buildLiveFollowupPrompt(
     },
     userInput: msg.content.trim(),
   });
-}
-
-/**
- * Classify the sender as human or bot from the raw Feishu event
- * (`sender.sender_type`: 'user' = human, 'app' = bot). The normalizer drops
- * this field, so read it off `msg.raw` (`includeRawEvent: true` above).
- * Unknown / missing values return undefined — omit rather than guess.
- */
-function senderTypeOf(msg: NormalizedMessage): 'user' | 'bot' | undefined {
-  const raw = msg.raw as { sender?: { sender_type?: unknown } } | undefined;
-  const senderType = raw?.sender?.sender_type;
-  if (senderType === 'user') return 'user';
-  if (senderType === 'app' || senderType === 'bot') return 'bot';
-  return undefined;
 }
 
 function senderAnnotation(msg: NormalizedMessage): string {

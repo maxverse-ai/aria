@@ -67,12 +67,18 @@ describe('Claude shared security regressions', () => {
     const queued = h.pending.cancel('oc_group');
     expect(queued).toHaveLength(1);
     expect(queued[0]).toMatchObject({
-      chatId: 'oc_group',
-      chatType: 'group',
-      senderId: 'ou_operator',
-      threadId: undefined,
-      content: '[card-click] {"choice":"a","form_value":{"note":"from form"}}',
-      rawContentType: 'card_action',
+      message: {
+        chatId: 'oc_group',
+        chatType: 'group',
+        senderId: 'ou_operator',
+        threadId: undefined,
+        content: '[card-click] {"choice":"a","form_value":{"note":"from form"}}',
+        rawContentType: 'card_action',
+      },
+      addressing: {
+        addressedToAgent: true,
+        kind: 'interactive-callback',
+      },
     });
   });
 });

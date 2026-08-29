@@ -43,6 +43,52 @@ describe('TurnCoordinator', () => {
     });
   });
 
+  it('exposes the initial watermark plus only acknowledged live input ids at finalization', async () => {
+    const steer = vi.fn(async () => ({ kind: 'accepted' as const, runId: 'run-1' }));
+    const activeRuns = new ActiveRuns();
+    activeRuns.register('scope', run({ runId: 'run-1', steer }));
+    const coordinator = new TurnCoordinator(activeRuns);
+    coordinator.begin({
+      scopeId: 'scope',
+      runId: 'run-1',
+      initialWatermarkMs: 1234,
+      initialInputIds: ['initial'],
+    });
+
+    await coordinator.trySteer({
+      scopeId: 'scope',
+      requestId: 'message:accepted',
+      inputId: 'accepted',
+      prompt: 'accepted direction',
+    });
+    const context = await coordinator.finalize('scope', 'run-1', async (value) => value);
+
+    expect(context.initialWatermarkMs).toBe(1234);
+    expect([...context.knownInputIds]).toEqual(['initial', 'accepted']);
+  });
+
+  it('rejects a mismatched accepted run id without claiming input ownership', async () => {
+    const steer = vi.fn(async () => ({ kind: 'accepted' as const, runId: 'run-other' }));
+    const activeRuns = new ActiveRuns();
+    activeRuns.register('scope', run({ runId: 'run-1', steer }));
+    const coordinator = new TurnCoordinator(activeRuns);
+    coordinator.begin({
+      scopeId: 'scope',
+      runId: 'run-1',
+      initialWatermarkMs: 1234,
+      initialInputIds: ['initial'],
+    });
+
+    await expect(coordinator.trySteer({
+      scopeId: 'scope',
+      requestId: 'message:mismatch',
+      inputId: 'mismatch',
+      prompt: 'new direction',
+    })).resolves.toEqual({ kind: 'rejected', reason: 'stale-run' });
+    const context = await coordinator.finalize('scope', 'run-1', async (value) => value);
+    expect([...context.knownInputIds]).toEqual(['initial']);
+  });
+
   it('waits for in-flight steering before publishing the final reply', async () => {
     const pending = deferred<{ kind: 'accepted'; runId: string }>();
     const activeRuns = new ActiveRuns();

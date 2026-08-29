@@ -130,6 +130,17 @@ export class TurnInbox<T> {
     return this.scopes.get(scope)?.items.size ?? 0;
   }
 
+  /**
+   * Stable arrival-ordered view used by the final-reply freshness gate.
+   * Claimed entries are intentionally included: a transport attempt that has
+   * not yet been acknowledged still has to prevent a stale final reply.
+   */
+  snapshot(scope: string): T[] {
+    const entry = this.scopes.get(scope);
+    if (!entry) return [];
+    return [...entry.items.values()].map((item) => item.value);
+  }
+
   activitySnapshot(): {
     pendingMessages: number;
     pendingScopes: number;

@@ -38,6 +38,7 @@ interface FakeLarkChannel {
   botIdentity: { openId: string; name: string };
   handlers: MessageHandlerMap;
   sent: Array<{ chatId: string; content: unknown; options?: unknown }>;
+  recalled: string[];
   rawClient: {
     request: ReturnType<typeof vi.fn>;
     application: {
@@ -51,6 +52,7 @@ interface FakeLarkChannel {
       v1: {
         message: {
           get: ReturnType<typeof vi.fn>;
+          list: ReturnType<typeof vi.fn>;
         };
         messageReaction: {
           create: ReturnType<typeof vi.fn>;
@@ -67,7 +69,8 @@ interface FakeLarkChannel {
   getChatBots(chatId: string, options?: { force?: boolean }): Promise<Array<{ id: string; isBot: true }>>;
   getConnectionStatus(): { state: 'connected'; reconnectAttempts: number };
   send(chatId: string, content: unknown, options?: unknown): Promise<{ messageId: string }>;
-  stream(chatId: string, input: unknown, options?: unknown): Promise<void>;
+  stream(chatId: string, input: unknown, options?: unknown): Promise<unknown>;
+  recallMessage(messageId: string): Promise<void>;
   addReaction(messageId: string, emojiType: string): Promise<string>;
   removeReaction(messageId: string, reactionId: string): Promise<void>;
 }
@@ -167,6 +170,138 @@ describe('automatic active-run follow-ups', () => {
     if (!run) throw new Error('expected the group run to be active');
     expect(run.steerCalls).toHaveLength(0);
   });
+
+  it('holds a stale final for addressed non-text input and hands it to the next turn', async () => {
+    const agent = new SteerableFakeAgent();
+    const h = await createHarness({ agent, messageReply: 'text' });
+    await startTestBridge(h);
+
+    await h.channel.handlers.message?.(message('om_first', 'start'));
+    await waitFor(() => agent.steeringRuns.length === 1);
+    await h.channel.handlers.message?.(
+      message('om_non_text', 'new forwarded context', { rawContentType: 'merge_forward' }),
+    );
+
+    const first = agent.steeringRuns[0];
+    if (!first) throw new Error('expected first run');
+    expect(first.steerCalls).toHaveLength(0);
+    first.complete();
+
+    await waitFor(() => agent.steeringRuns.length === 2);
+    expect(h.channel.sent).toHaveLength(0);
+    expect(agent.runOptions[1]?.prompt).toContain('该答复没有展示给用户');
+    expect(agent.runOptions[1]?.prompt).toContain('new forwarded context');
+
+    agent.steeringRuns[1]?.complete();
+    await waitFor(() => h.channel.sent.length === 1);
+  });
+
+  it('does not let ambient multi-person group chatter hold the addressed final', async () => {
+    const agent = new SteerableFakeAgent();
+    const h = await createHarness({
+      agent,
+      messageReply: 'text',
+      requireMentionInGroup: false,
+      groupHumanCount: 2,
+    });
+    await startTestBridge(h);
+
+    await h.channel.handlers.message?.(
+      message('om_addressed', 'start', { chatType: 'group', mentionedBot: true }),
+    );
+    await waitFor(() => agent.steeringRuns.length === 1);
+    await h.channel.handlers.message?.(
+      message('om_ambient', 'group side conversation', {
+        chatType: 'group',
+        mentionedBot: false,
+      }),
+    );
+    agent.steeringRuns[0]?.complete();
+
+    await waitFor(() => h.channel.sent.length === 1);
+    expect(lastMarkdown(h.channel)).toContain('FINAL_AFTER_STEER');
+  });
+
+  it('recovers a REST-only late user message, suppresses the old final, and queues a new turn', async () => {
+    const agent = new SteerableFakeAgent();
+    const h = await createHarness({
+      agent,
+      messageReply: 'text',
+      historyItems: [historyItem('om_rest_late', 'late from history', 'user')],
+    });
+    await startTestBridge(h);
+
+    await h.channel.handlers.message?.(message('om_first', 'start'));
+    await waitFor(() => agent.steeringRuns.length === 1);
+    agent.steeringRuns[0]?.complete();
+
+    await waitFor(() => agent.steeringRuns.length === 2);
+    expect(h.channel.sent).toHaveLength(0);
+    expect(agent.runOptions[1]?.prompt).toContain('late from history');
+    expect(agent.runOptions[1]?.prompt).toContain('该答复没有展示给用户');
+
+    agent.steeringRuns[1]?.complete();
+    await waitFor(() => h.channel.sent.length === 1);
+  });
+
+  it('suppresses a final already published verbatim by another bot', async () => {
+    const agent = new SteerableFakeAgent();
+    const h = await createHarness({
+      agent,
+      messageReply: 'text',
+      historyItems: [historyItem('om_other_bot', 'FINAL_AFTER_STEER', 'bot')],
+    });
+    await startTestBridge(h);
+
+    await h.channel.handlers.message?.(message('om_first', 'start'));
+    await waitFor(() => agent.steeringRuns.length === 1);
+    agent.steeringRuns[0]?.complete();
+    await waitFor(() => h.channel.rawClient.im.v1.message.list.mock.calls.length > 0);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    expect(h.channel.sent).toHaveLength(0);
+    expect(agent.runOptions).toHaveLength(1);
+  });
+
+  it.each(['markdown', 'card'] as const)(
+    'retracts a streamed Claude %s terminal when addressed input makes it stale',
+    async (messageReply) => {
+      const agent = new InlineControllableAgent();
+      let streamId = 0;
+      const h = await createHarness({
+        agent,
+        agentKind: 'claude',
+        messageReply,
+        stream: async (_chatId, input) => {
+          const markdownProducer = (input as {
+            markdown?: (ctrl: { setContent(markdown: string): Promise<void> }) => Promise<void>;
+          }).markdown;
+          const cardProducer = (input as {
+            card?: { producer?: (ctrl: { update(card: unknown): Promise<void> }) => Promise<void> };
+          }).card?.producer;
+          await markdownProducer?.({ setContent: vi.fn(async () => {}) });
+          await cardProducer?.({ update: vi.fn(async () => {}) });
+          streamId++;
+          return { messageId: `stream_${streamId}` };
+        },
+      });
+      await startTestBridge(h);
+
+      await h.channel.handlers.message?.(message('om_first', 'start'));
+      await waitFor(() => agent.inlineRuns.length === 1);
+      await h.channel.handlers.message?.(
+        message('om_non_text', 'replacement context', { rawContentType: 'merge_forward' }),
+      );
+      agent.inlineRuns[0]?.complete();
+
+      await waitFor(() => h.channel.recalled.includes('stream_1'));
+      expect(h.channel.sent).toHaveLength(0);
+      await waitFor(() => agent.inlineRuns.length === 2);
+      expect(agent.runOptions[1]?.prompt).toContain('上一轮答复曾短暂展示');
+      expect(agent.runOptions[1]?.prompt).toContain('用户可能已经看到');
+      agent.inlineRuns[1]?.complete();
+    },
+  );
 });
 
 describe('new-task escape hatch', () => {
@@ -538,6 +673,8 @@ async function createHarness(options: {
   reactionCreate?: () => Promise<{ data: { reaction_id: string } }>;
   stream?: StreamFn;
   send?: SendFn;
+  historyItems?: Array<Record<string, unknown>>;
+  historyHasMore?: boolean;
   /** One run's events, or one array per run. */
   events?: FakeAgentEvents;
   messageReply?: 'card' | 'markdown' | 'text';
@@ -640,6 +777,75 @@ class SteerableFakeAgent extends FakeAgentAdapter {
   }
 }
 
+class InlineControllableAgent extends FakeAgentAdapter {
+  readonly inlineRuns: InlineControllableRun[] = [];
+
+  constructor() {
+    super({ id: 'claude', displayName: 'Claude' });
+  }
+
+  override run(opts: AgentRunOptions): AgentRun {
+    this.runOptions.push(opts);
+    const run = new InlineControllableRun(opts);
+    this.runs.push(run);
+    this.inlineRuns.push(run);
+    return run;
+  }
+}
+
+class InlineControllableRun implements FakeAgentRun {
+  readonly runId: string;
+  readonly opts: AgentRunOptions;
+  readonly events: AsyncIterable<AgentEvent>;
+  readonly waitForExitResult = true;
+  private readonly gate = deferred<void>();
+  private readonly exited = deferred<void>();
+  private stopRequested = false;
+  private waitCalls = 0;
+
+  constructor(opts: AgentRunOptions) {
+    this.runId = opts.runId;
+    this.opts = opts;
+    this.events = this.iterate();
+  }
+
+  get stopped(): boolean {
+    return this.stopRequested;
+  }
+
+  get waitForExitCalls(): number {
+    return this.waitCalls;
+  }
+
+  complete(): void {
+    this.gate.resolve();
+  }
+
+  async stop(): Promise<void> {
+    this.stopRequested = true;
+    this.gate.resolve();
+  }
+
+  async waitForExit(): Promise<boolean> {
+    this.waitCalls++;
+    await this.exited.promise;
+    return true;
+  }
+
+  private async *iterate(): AsyncIterable<AgentEvent> {
+    try {
+      yield { type: 'text', delta: 'INLINE_TERMINAL' };
+      await this.gate.promise;
+      yield {
+        type: 'done',
+        terminationReason: this.stopRequested ? 'interrupted' : 'normal',
+      };
+    } finally {
+      this.exited.resolve();
+    }
+  }
+}
+
 class SteerableFakeRun implements FakeAgentRun {
   readonly runId: string;
   readonly opts: AgentRunOptions;
@@ -723,14 +929,18 @@ function createFakeLarkChannel(harnessOptions: {
   reactionCreate?: () => Promise<{ data: { reaction_id: string } }>;
   stream?: StreamFn;
   send?: SendFn;
+  historyItems?: Array<Record<string, unknown>>;
+  historyHasMore?: boolean;
   groupHumanCount?: number;
   groupBotCount?: number;
 } = {}): FakeLarkChannel {
   const handlers: MessageHandlerMap = {};
   const sent: FakeLarkChannel['sent'] = [];
+  const recalled: string[] = [];
   const channel: FakeLarkChannel = {
     handlers,
     sent,
+    recalled,
     botIdentity: { openId: 'ou_bot', name: 'Bridge' },
     rawClient: {
       request: vi.fn(async () => ({ data: { items: [] } })),
@@ -747,6 +957,13 @@ function createFakeLarkChannel(harnessOptions: {
         v1: {
           message: {
             get: vi.fn(async () => ({ data: { items: [] } })),
+            list: vi.fn(async () => ({
+              data: {
+                items: harnessOptions.historyItems ?? [],
+                has_more: harnessOptions.historyHasMore ?? false,
+                ...(harnessOptions.historyHasMore ? { page_token: 'next' } : {}),
+              },
+            })),
           },
           messageReaction: {
             create: vi.fn(harnessOptions.reactionCreate ?? (async () => ({ data: { reaction_id: 'reaction_1' } }))),
@@ -785,6 +1002,9 @@ function createFakeLarkChannel(harnessOptions: {
     stream: harnessOptions.stream ?? (async () => {
       await new Promise<void>(() => {});
     }),
+    async recallMessage(messageId) {
+      recalled.push(messageId);
+    },
     async addReaction(messageId, emojiType) {
       const r = await channel.rawClient.im.v1.messageReaction.create({
         path: { message_id: messageId },
@@ -836,6 +1056,7 @@ function message(
     chatType?: 'p2p' | 'group';
     mentionedBot?: boolean;
     replyToMessageId?: string;
+    rawContentType?: string;
   } = {},
 ): NormalizedMessage {
   const chatType = options.chatType ?? 'p2p';
@@ -847,7 +1068,7 @@ function message(
     senderId: 'ou_user',
     senderName: 'User',
     content,
-    rawContentType: 'text',
+    rawContentType: options.rawContentType ?? 'text',
     resources: [],
     mentions: mentionedBot
       ? [{ key: '@_user_1', openId: 'ou_bot', name: 'Bridge', isBot: true }]
@@ -856,6 +1077,20 @@ function message(
     ...(options.replyToMessageId ? { replyToMessageId: options.replyToMessageId } : {}),
     createTime: 1760000001000,
   } as unknown as NormalizedMessage;
+}
+
+function historyItem(messageId: string, text: string, senderType: 'user' | 'bot') {
+  return {
+    message_id: messageId,
+    msg_type: 'text',
+    body: { content: JSON.stringify({ text }) },
+    sender: {
+      id: senderType === 'bot' ? 'ou_other_bot' : 'ou_user',
+      sender_type: senderType,
+    },
+    create_time: '1760000002000',
+    mentions: [],
+  };
 }
 
 function lastMarkdown(channel: FakeLarkChannel): string {

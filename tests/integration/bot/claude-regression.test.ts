@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { getMessageReplyMode, getRequireMentionInGroup } from '../../../src/config/schema.js';
 import { PendingQueue } from '../../../src/bot/pending-queue.js';
 import type { NormalizedMessage } from '@larksuite/channel';
+import type { ConversationInput } from '../../../src/bot/conversation-input.js';
 
 describe('Claude IM regression boundaries', () => {
   afterEach(() => {
@@ -33,12 +34,12 @@ describe('Claude IM regression boundaries', () => {
 
   it('queues messages that arrive while a run is active and flushes them as the next batch', () => {
     vi.useFakeTimers();
-    const flushed: Array<{ scope: string; batch: NormalizedMessage[] }> = [];
+    const flushed: Array<{ scope: string; batch: ConversationInput[] }> = [];
     const queue = new PendingQueue(600, (scope, batch) => flushed.push({ scope, batch }));
 
     queue.block('chat-1');
-    expect(queue.push('chat-1', msg('m-1', 'first'))).toBe(1);
-    expect(queue.push('chat-1', msg('m-2', 'second'))).toBe(2);
+    expect(queue.push('chat-1', input(msg('m-1', 'first')))).toBe(1);
+    expect(queue.push('chat-1', input(msg('m-2', 'second')))).toBe(2);
 
     vi.advanceTimersByTime(5_000);
     expect(flushed).toEqual([]);
@@ -49,7 +50,10 @@ describe('Claude IM regression boundaries', () => {
     vi.advanceTimersByTime(1);
 
     expect(flushed).toEqual([
-      { scope: 'chat-1', batch: [msg('m-1', 'first'), msg('m-2', 'second')] },
+      {
+        scope: 'chat-1',
+        batch: [input(msg('m-1', 'first')), input(msg('m-2', 'second'))],
+      },
     ]);
   });
 
@@ -78,4 +82,11 @@ function msg(messageId: string, content: string): NormalizedMessage {
     resources: [],
     mentionedBot: true,
   } as unknown as NormalizedMessage;
+}
+
+function input(message: NormalizedMessage): ConversationInput {
+  return {
+    message,
+    addressing: { addressedToAgent: true, kind: 'structured-mention' },
+  };
 }
