@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -63,6 +63,7 @@ describe('profile create command', () => {
     expect(saved.profiles['claude-regression']?.workspaces.default).toBe(workspaceRealpath);
     expect(savedText).not.toContain('manual-secret');
     expect(secret).toBe('manual-secret');
+    expect(await appliedOperation(root)).toBe('profile.create');
   });
 
   it('creates a named Codex profile that can write inside the default workspace by default', async () => {
@@ -209,4 +210,14 @@ async function writeProfiles(root: string, activeProfile: string, names: string[
 async function writeJson(path: string, value: unknown): Promise<void> {
   await mkdir(dirname(path), { recursive: true });
   await writeFile(path, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
+}
+
+async function appliedOperation(root: string): Promise<string> {
+  const plans = (await readdir(join(root, 'control', 'plans')))
+    .filter((name) => name.endsWith('.json'));
+  expect(plans).toHaveLength(1);
+  const plan = JSON.parse(await readFile(join(root, 'control', 'plans', plans[0]!), 'utf8')) as {
+    operation: { id: string };
+  };
+  return plan.operation.id;
 }

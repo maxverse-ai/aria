@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -75,6 +75,7 @@ describe('profile retention and export', () => {
     expect(Object.keys(await readRoot(root))).toContain('profiles');
     expect((await readRoot(root)).profiles['codex-dev']).toBeUndefined();
     expect(logs.join('\n')).toContain('已归档 profile');
+    expect(await appliedOperation(root)).toBe('profile.archive');
 
     const failRoot = await makeRoot();
     await writeProfiles(failRoot, 'claude', ['claude', 'codex-dev']);
@@ -311,6 +312,16 @@ function processEntry(overrides: Partial<ProcessEntry>): ProcessEntry {
 
 async function writeRegistry(root: string, entries: ProcessEntry[]): Promise<void> {
   await writeJson(resolveAppPaths({ rootDir: root }).userRegistryFile, { entries });
+}
+
+async function appliedOperation(root: string): Promise<string> {
+  const plans = (await readdir(join(root, 'control', 'plans')))
+    .filter((name) => name.endsWith('.json'));
+  expect(plans).toHaveLength(1);
+  const plan = JSON.parse(await readFile(join(root, 'control', 'plans', plans[0]!), 'utf8')) as {
+    operation: { id: string };
+  };
+  return plan.operation.id;
 }
 
 async function writeJson(path: string, value: unknown): Promise<void> {

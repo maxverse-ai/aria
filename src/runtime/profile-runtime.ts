@@ -1,16 +1,21 @@
 import { readFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import * as p from '@clack/prompts';
+import {
+  authorizeAdapterCommands,
+  PROFILE_CREATE_COMMAND,
+  ProfileLifecycleService,
+} from '../application/control';
 import { runRegistrationWizard } from '../bot/wizard';
 import { detectInstalledAgents, type DetectedAgent } from '../cli/agent-detection';
 import { createBootstrapProfileConfig, resolveBootstrapWorkspace } from '../cli/profile-bootstrap';
 import { getEnginePlugin } from '../agent/plugin/registry';
 import { promptPassword } from '../cli/prompt';
+import { localCliActor } from '../cli/control-actor';
 import { setSecret } from '../config/keystore';
 import { resolveAppPaths, type AppPaths } from '../config/app-paths';
 import {
   agentKindFromString,
-  createRootConfig,
   loadRootConfig,
   readActiveProfile,
   runtimeProfileConfig,
@@ -39,6 +44,7 @@ import {
   recoverLegacyLarkCliSourceOverlay,
 } from '../lark-cli/legacy-source-overlay';
 import { validateAppCredentials } from '../utils/feishu-auth';
+import { acquireProfileRuntimeLock } from './locks';
 
 export interface ResolveProfileRuntimeOptions {
   config?: string;
@@ -154,22 +160,28 @@ export async function resolveProfileRuntime(
     throw new Error('config not initialized');
   }
   const bootstrapAgent = resolveBootstrapAgent(requestedAgent, profile) ?? 'claude';
-  const workspace = opts.workspace;
-  const fresh = await resolveBootstrapAppConfig(opts);
-  const encrypted = await encryptedConfigForProfile(fresh, appPaths);
-  const profileConfig = await createBootstrapProfileConfig({
-    agentKind: bootstrapAgent,
-    accounts: encrypted.accounts,
-    preferences: encrypted.preferences,
-    secrets: encrypted.secrets,
-    workspace,
-    defaultWorkspace: appPaths.defaultWorkspaceDir,
+  return withProfileBootstrapLock(appPaths, bootstrapAgent, async () => {
+    const workspace = opts.workspace;
+    const fresh = await resolveBootstrapAppConfig(opts);
+    const encrypted = await encryptedConfigForProfile(fresh, appPaths);
+    const profileConfig = await createBootstrapProfileConfig({
+      agentKind: bootstrapAgent,
+      accounts: encrypted.accounts,
+      preferences: encrypted.preferences,
+      secrets: encrypted.secrets,
+      workspace,
+      defaultWorkspace: appPaths.defaultWorkspaceDir,
+    });
+    const root = configPath === appPaths.configFile
+      ? await createPreparedProfile(profile, profileConfig, encrypted.secrets, appPaths)
+      : createRootConfigForCustomPath(profile, profileConfig, encrypted.secrets);
+    if (configPath !== appPaths.configFile) {
+      await saveRootConfig(root, configPath);
+      await writeActiveProfile(appPaths.rootDir, profile);
+    }
+    console.log(`配置已保存到 ${configPath}\n`);
+    return { cfg: runtimeProfileConfig(root, profile), profileConfig, configPath, appPaths, profile };
   });
-  const root = createRootConfig(profile, profileConfig, encrypted.secrets);
-  await saveRootConfig(root, configPath);
-  await writeActiveProfile(appPaths.rootDir, profile);
-  console.log(`配置已保存到 ${configPath}\n`);
-  return { cfg: runtimeProfileConfig(root, profile), profileConfig, configPath, appPaths, profile };
 }
 
 async function bootstrapProfileIntoExistingRoot(args: {
@@ -182,38 +194,103 @@ async function bootstrapProfileIntoExistingRoot(args: {
 }): Promise<ProfileRuntime> {
   const { rootConfig, profile, requestedAgent, opts, appPaths, configPath } = args;
   const bootstrapAgent = resolveBootstrapAgent(requestedAgent, profile) ?? 'claude';
-  const workspace = opts.workspace;
-  const fresh = await resolveBootstrapAppConfig(opts);
-  const encrypted = await encryptedConfigForProfile(fresh, appPaths);
-  const profileConfig = await createBootstrapProfileConfig({
-    agentKind: bootstrapAgent,
-    accounts: encrypted.accounts,
-    preferences: encrypted.preferences,
-    secrets: encrypted.secrets,
-    workspace,
-    defaultWorkspace: appPaths.defaultWorkspaceDir,
+  return withProfileBootstrapLock(appPaths, bootstrapAgent, async () => {
+    const workspace = opts.workspace;
+    const fresh = await resolveBootstrapAppConfig(opts);
+    const encrypted = await encryptedConfigForProfile(fresh, appPaths);
+    const profileConfig = await createBootstrapProfileConfig({
+      agentKind: bootstrapAgent,
+      accounts: encrypted.accounts,
+      preferences: encrypted.preferences,
+      secrets: encrypted.secrets,
+      workspace,
+      defaultWorkspace: appPaths.defaultWorkspaceDir,
+    });
+    const nextRoot = configPath === appPaths.configFile
+      ? await createPreparedProfile(profile, profileConfig, encrypted.secrets, appPaths)
+      : appendPreparedProfile(rootConfig, profile, profileConfig, encrypted.secrets);
+    if (configPath !== appPaths.configFile) await saveRootConfig(nextRoot, configPath);
+    console.log(`配置已保存到 ${configPath}\n`);
+    return {
+      cfg: runtimeProfileConfig(nextRoot, profile),
+      profileConfig,
+      configPath,
+      appPaths,
+      profile,
+    };
   });
-  const nextRoot: RootConfig = {
-    ...rootConfig,
-    ...(rootConfig.secrets ?? encrypted.secrets
-      ? { secrets: rootConfig.secrets ?? encrypted.secrets }
-      : {}),
+}
+
+async function withProfileBootstrapLock<T>(
+  appPaths: AppPaths,
+  agentKind: AgentKind,
+  work: () => Promise<T>,
+): Promise<T> {
+  const lock = await acquireProfileRuntimeLock(appPaths, agentKind);
+  try {
+    return await work();
+  } finally {
+    await lock.release().catch(() => {});
+  }
+}
+
+async function createPreparedProfile(
+  profile: string,
+  profileConfig: ProfileConfig,
+  rootSecrets: AppConfig['secrets'],
+  appPaths: AppPaths,
+): Promise<RootConfig> {
+  await new ProfileLifecycleService({
+    rootDir: appPaths.rootDir,
+    authorizeCommand: authorizeAdapterCommands(
+      'local-cli',
+      [PROFILE_CREATE_COMMAND],
+    ),
+  }).create(
+    profile,
+    { config: profileConfig, ...(rootSecrets ? { rootSecrets } : {}) },
+    localCliActor(appPaths.rootDir),
+  );
+  const root = await loadRootConfig(appPaths.configFile);
+  if (!root) throw new Error('profile creation committed without root config');
+  return root;
+}
+
+function createRootConfigForCustomPath(
+  profile: string,
+  profileConfig: ProfileConfig,
+  secrets: AppConfig['secrets'],
+): RootConfig {
+  return {
+    schemaVersion: 2,
+    activeProfile: profile,
+    preferences: {},
+    ...(secrets ? { secrets } : {}),
     profiles: {
-      ...rootConfig.profiles,
       [profile]: {
         ...profileConfig,
         secrets: undefined,
       },
     },
   };
-  await saveRootConfig(nextRoot, configPath);
-  console.log(`配置已保存到 ${configPath}\n`);
+}
+
+function appendPreparedProfile(
+  root: RootConfig,
+  profile: string,
+  profileConfig: ProfileConfig,
+  secrets: AppConfig['secrets'],
+): RootConfig {
   return {
-    cfg: runtimeProfileConfig(nextRoot, profile),
-    profileConfig,
-    configPath,
-    appPaths,
-    profile,
+    ...root,
+    ...(root.secrets ?? secrets ? { secrets: root.secrets ?? secrets } : {}),
+    profiles: {
+      ...root.profiles,
+      [profile]: {
+        ...profileConfig,
+        secrets: undefined,
+      },
+    },
   };
 }
 

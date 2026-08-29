@@ -1,9 +1,13 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { writeNewProfile } from '../../../src/ui/onboard';
+import { resolveAppPaths } from '../../../src/config/app-paths';
+import { getSecret } from '../../../src/config/keystore';
 import { loadRootConfig } from '../../../src/config/profile-store';
+import { secretKeyForApp } from '../../../src/config/schema';
+import { acquireProfileRuntimeLock } from '../../../src/runtime/locks';
 
 const roots: string[] = [];
 
@@ -43,6 +47,13 @@ describe('writeNewProfile (new-profile is additive)', () => {
     expect(second.profile).toBe('work');
     const root2 = (await loadRootConfig(join(root, 'config.json')))!;
     expect(Object.keys(root2.profiles).sort()).toEqual(['claude', 'work']);
+    expect(root2.activeProfile).toBe('claude');
+    await expect(readFile(join(root, 'active-profile'), 'utf8')).resolves.toBe('claude\n');
+    const plans = (await readdir(join(root, 'control', 'plans')))
+      .filter((name) => name.endsWith('.json'));
+    expect(plans).toHaveLength(1);
+    const plan = JSON.parse(await readFile(join(root, 'control', 'plans', plans[0]!), 'utf8'));
+    expect(plan.operation.id).toBe('profile.create');
   });
 
   it('creates a profile with a Unicode (Chinese) name from the scanned bot name', async () => {
@@ -73,5 +84,30 @@ describe('writeNewProfile (new-profile is additive)', () => {
         root,
       ),
     ).rejects.toMatchObject({ status: 400 });
+  });
+
+  it('rejects concurrent provisioning before credentials or desired state are written', async () => {
+    const root = await tmpRoot();
+    const appPaths = resolveAppPaths({ rootDir: root, profile: 'locked' });
+    const lock = await acquireProfileRuntimeLock(appPaths, 'claude');
+    try {
+      await expect(
+        writeNewProfile(
+          {
+            profile: 'locked',
+            agentKind: 'claude',
+            appId: 'cli_locked',
+            appSecret: 'secret',
+            tenant: 'feishu',
+          },
+          root,
+        ),
+      ).rejects.toMatchObject({ status: 409 });
+
+      await expect(loadRootConfig(appPaths.configFile)).resolves.toBeUndefined();
+      await expect(getSecret(secretKeyForApp('cli_locked'), appPaths)).resolves.toBeUndefined();
+    } finally {
+      await lock.release();
+    }
   });
 });

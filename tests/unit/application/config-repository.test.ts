@@ -44,6 +44,15 @@ describe('FileConfigRepository', () => {
     const paths = resolveAppPaths({ rootDir, profile: 'primary' });
     expect((await loadRootConfig(paths.configFile))?.profiles.primary?.preferences.showToolCalls).toBe(true);
   });
+
+  it('deletes root config only for an explicit null transaction', async () => {
+    const rootDir = await createFixture();
+    const repository = new FileConfigRepository(rootDir);
+
+    await repository.withLockedRoot(async () => ({ nextRoot: null, result: undefined }));
+
+    await expect(repository.readRoot()).resolves.toBeUndefined();
+  });
 });
 
 async function createFixture(): Promise<string> {

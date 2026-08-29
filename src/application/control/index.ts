@@ -35,7 +35,11 @@ export type {
 } from './change-types';
 export { configRevision } from './config-revision';
 export { FileConfigRepository } from './config-repository';
-export type { ConfigRepository, ConfigRepositoryTransaction } from './config-repository';
+export type {
+  ConfigRepository,
+  ConfigRepositoryCommit,
+  ConfigRepositoryTransaction,
+} from './config-repository';
 export { ManagementCommandRegistry } from './management-command-registry';
 export {
   DeferredRuntimeReconciler,
@@ -207,8 +211,18 @@ export type { ProfileEngineUpdateInput } from './profile-engine-command';
 export { managementCommandRegistry, managementCommands } from './management-commands';
 export {
   PROFILE_ACTIVATE_COMMAND,
+  PROFILE_ARCHIVE_COMMAND,
+  PROFILE_CREATE_COMMAND,
+  PROFILE_LIFECYCLE_ELEVATED_COMMANDS,
+  PROFILE_PURGE_COMMAND,
+  normalizePreparedProfileDefinition,
   profileActivateCommand,
+  profileArchiveCommand,
+  profileCreateCommand,
+  profileCreateParameters,
+  profilePurgeCommand,
 } from './profile-lifecycle-command';
+export type { PreparedProfileDefinition } from './profile-lifecycle-command';
 export {
   FileActiveProfileProjector,
 } from './active-profile-projector';
@@ -216,9 +230,23 @@ export type {
   ActiveProfileProjectionOutcome,
   ActiveProfileProjectionRequest,
   ActiveProfileProjector,
+  ActiveProfileClearOutcome,
+  ActiveProfileClearRequest,
 } from './active-profile-projector';
 export { ProfileLifecycleService } from './profile-lifecycle-service';
 export type {
   ProfileActivationResult,
+  ProfileCreationInput,
+  ProfileCreationResult,
+  ProfileLifecycleProjectionOutcome,
   ProfileLifecycleServiceOptions,
+  ProfileRetentionCleanupOutcome,
+  ProfileRetentionResult,
 } from './profile-lifecycle-service';
+export { FileProfileRetentionStore } from './profile-retention-store';
+export type {
+  ProfileRetentionMode,
+  ProfileRetentionStore,
+  StageProfileRetentionRequest,
+  StagedProfileRetention,
+} from './profile-retention-store';

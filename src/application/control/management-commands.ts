@@ -12,7 +12,12 @@ import {
   profileReasoningUpdateCommand,
 } from './profile-model-command';
 import { profileEngineUpdateCommand } from './profile-engine-command';
-import { profileActivateCommand } from './profile-lifecycle-command';
+import {
+  profileActivateCommand,
+  profileArchiveCommand,
+  profileCreateCommand,
+  profilePurgeCommand,
+} from './profile-lifecycle-command';
 
 /** Full public command catalog shared by in-process management adapters. */
 export const managementCommands = [
@@ -26,6 +31,9 @@ export const managementCommands = [
   profileReasoningUpdateCommand,
   profileEngineUpdateCommand,
   profileActivateCommand,
+  profileCreateCommand,
+  profileArchiveCommand,
+  profilePurgeCommand,
 ] as const;
 
 export const managementCommandRegistry = new ManagementCommandRegistry(managementCommands);

@@ -54,6 +54,12 @@ function validateCommand(input: ManagementCommandInput): void {
       input.resourceScope !== undefined &&
       input.resourceScope !== 'profile' &&
       input.resourceScope !== 'root') ||
+    ('allowsRootDeletion' in input &&
+      input.allowsRootDeletion !== undefined &&
+      typeof input.allowsRootDeletion !== 'boolean') ||
+    ('allowsRootDeletion' in input &&
+      input.allowsRootDeletion === true &&
+      input.resourceScope !== 'root') ||
     typeof input.prepare !== 'function'
   ) {
     throw new Error(`invalid management command: ${input.id || '<empty>'}`);

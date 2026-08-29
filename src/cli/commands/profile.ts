@@ -1,26 +1,24 @@
 import { existsSync } from 'node:fs';
-import { rm } from 'node:fs/promises';
 import { resolveAppPaths } from '../../config/app-paths';
 import { paths } from '../../config/paths';
 import {
   loadRootConfig,
   agentKindFromString,
   formatRootConfig,
-  readActiveProfile,
-  removeProfile,
   runtimeProfileConfig,
-  saveRootConfig,
-  withConfigFileLock,
-  writeActiveProfile,
 } from '../../config/profile-store';
 import type { RootConfig } from '../../config/profile-schema';
 import { resolveAppSecret } from '../../config/secret-resolver';
 import { writeFileAtomic } from '../../platform/atomic-write';
-import { acquireProfileRuntimeLock, checkRuntimeLock } from '../../runtime/locks';
 import { readAndPrune } from '../../runtime/registry';
 import { listAllProfiles } from '../../runtime/profile-discovery';
 import { resolveProfileRuntime } from '../../runtime/profile-runtime';
-import { ProfileLifecycleService } from '../../application/control';
+import {
+  authorizeAdapterCommands,
+  PROFILE_ARCHIVE_COMMAND,
+  PROFILE_PURGE_COMMAND,
+  ProfileLifecycleService,
+} from '../../application/control';
 import { localCliActor } from '../control-actor';
 
 export interface ProfileCommandOptions {
@@ -106,32 +104,30 @@ export async function runProfileCreate(
 ): Promise<void> {
   const rootDir = opts.rootDir ?? paths.rootDir;
   const configFile = resolveAppPaths({ rootDir }).configFile;
-  await withConfigFileLock(configFile, async () => {
-    const root = await loadRootConfig(configFile);
-    const existing = root?.profiles[name];
-    if (existing) {
-      const requested = agentKindFromString(opts.agent);
-      if (requested && existing.agentKind !== requested) {
-        throw new Error(
-          `profile ${name} already exists with agentKind ${existing.agentKind}, ` +
-            `but profile create requested --agent ${requested}. ` +
-            `Profile names are labels; use the existing ${existing.agentKind} profile, ` +
-            `choose another name, or remove profile ${name} before creating a ${requested} profile.`,
-        );
-      }
-      throw new Error(`profile already exists: ${name}`);
+  const root = await loadRootConfig(configFile);
+  const existing = root?.profiles[name];
+  if (existing) {
+    const requested = agentKindFromString(opts.agent);
+    if (requested && existing.agentKind !== requested) {
+      throw new Error(
+        `profile ${name} already exists with agentKind ${existing.agentKind}, ` +
+          `but profile create requested --agent ${requested}. ` +
+          `Profile names are labels; use the existing ${existing.agentKind} profile, ` +
+          `choose another name, or remove profile ${name} before creating a ${requested} profile.`,
+      );
     }
+    throw new Error(`profile already exists: ${name}`);
+  }
 
-    await resolveProfileRuntime({
-      config: configFile,
-      profile: name,
-      agent: opts.agent,
-      workspace: opts.workspace,
-      appId: opts.appId,
-      appSecret: opts.appSecret,
-      tenant: opts.tenant,
-      allowBootstrap: true,
-    });
+  await resolveProfileRuntime({
+    config: configFile,
+    profile: name,
+    agent: opts.agent,
+    workspace: opts.workspace,
+    appId: opts.appId,
+    appSecret: opts.appSecret,
+    tenant: opts.tenant,
+    allowBootstrap: true,
   });
   console.log(`已创建 profile: ${name}`);
 }
@@ -159,65 +155,28 @@ export async function runProfileRemove(
   if (opts.purge && !opts.yes) {
     throw new Error('profile remove --purge requires --yes');
   }
-  const configFile = resolveAppPaths({ rootDir }).configFile;
-  await withConfigFileLock(configFile, async () => {
-    const root = await loadRootConfig(configFile);
-    if (!root) throw new Error('config not initialized');
-    const profile = root.profiles[name];
-    if (!profile) throw new Error(`profile not found: ${name}`);
-    const activeProfile = await readActiveProfile(rootDir);
-    if (activeProfile) {
-      if (!root.profiles[activeProfile]) {
-        throw new Error(`active profile not found: ${activeProfile}; run profile use <name> to repair`);
-      }
-      root.activeProfile = activeProfile;
-    }
-    const profilePaths = resolveAppPaths({ rootDir, profile: name });
-    const profileLock = await checkRuntimeLock(profilePaths.profileLockFile);
-    if (profileLock.locked) {
-      const holder = profileLock.meta ? ` pid=${profileLock.meta.pid}` : '';
-      throw new Error(`profile is locked/running: ${name}${holder}`);
-    }
-    const lock = await acquireProfileRuntimeLock(profilePaths, profile.agentKind);
-    try {
-      const result = await removeProfile(root, name, rootDir, {
-        purge: opts.purge,
-        now: opts.now,
-      });
-      try {
-        if (Object.keys(result.root.profiles).length === 0) {
-          await rm(configFile, { force: true });
-          await rm(resolveAppPaths({ rootDir }).activeProfileFile, { force: true });
-        } else {
-          await saveRootConfig(result.root, configFile);
-          await writeActiveProfile(rootDir, result.root.activeProfile);
-        }
-      } catch (err) {
-        if (result.restore) {
-          try {
-            await result.restore();
-            await saveRootConfig(root, configFile);
-            await writeActiveProfile(rootDir, root.activeProfile);
-          } catch (restoreErr) {
-            throw new Error(
-              `profile remove failed after moving ${name}; state is at ${result.archivedTo}. ` +
-                `restore failed: ${String((restoreErr as Error).message ?? restoreErr)}. ` +
-                `root config error: ${String((err as Error).message ?? err)}`,
-            );
-          }
-        }
-        throw err;
-      }
-      if (result.purged) {
-        await result.cleanup?.();
-        console.log(`已永久删除 profile: ${name}`);
-        return;
-      }
-      console.log(`已归档 profile: ${name} -> ${result.archivedTo}`);
-    } finally {
-      await lock.release().catch(() => {});
-    }
+  const service = new ProfileLifecycleService({
+    rootDir,
+    ...(opts.now ? { now: opts.now } : {}),
+    authorizeCommand: authorizeAdapterCommands(
+      'local-cli',
+      [opts.purge ? PROFILE_PURGE_COMMAND : PROFILE_ARCHIVE_COMMAND],
+    ),
   });
+  const result = opts.purge
+    ? await service.purge(name, localCliActor(rootDir))
+    : await service.archive(name, localCliActor(rootDir));
+  if (result.mode === 'purge') {
+    console.log(`已永久删除 profile: ${name}`);
+    if (result.cleanup.status === 'failed') {
+      console.warn(`⚠ profile 已从配置删除，但暂存目录清理失败: ${result.archivedTo ?? name}`);
+    }
+  } else {
+    console.log(`已归档 profile: ${name}${result.archivedTo ? ` -> ${result.archivedTo}` : ''}`);
+  }
+  if (result.projection.status === 'failed') {
+    console.warn('⚠ active-profile 兼容投影写入失败；config.json 已完成更新');
+  }
 }
 
 export async function runProfileExport(

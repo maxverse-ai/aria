@@ -177,6 +177,16 @@ plan, confirmation, or application steps.
   legacy `active-profile` file as a separate compatibility projection. Normal
   reads use `config.json`; projection failure does not roll back or misreport
   the durable desired-state commit.
+- `profile.create`, `profile.archive`, and `profile.purge` complete the current
+  root-scoped profile lifecycle. Creation performs credential encryption,
+  engine bootstrap, and workspace preparation before the command and submits
+  only a normalized profile definition containing an external SecretRef. The
+  first profile initializes the absent root through the named bootstrap path;
+  every additive creation uses a Management plan. Archive and purge stage
+  profile-owned files before commit, restore them on commit failure, and keep
+  permanent cleanup and active-profile projection outcomes separate from the
+  durable desired-state result. The final profile is removed with an explicit
+  root-teardown command capability, never by persisting an empty root.
 - The CLI now uses `ManagementApi` while unwrapping its envelopes so existing
   public CLI JSON and human-readable output remain compatible.
 - `config-ops.ts` no longer contains public config writers. It retains only the
@@ -189,6 +199,6 @@ plan, confirmation, or application steps.
   configuration writer.
 - Native Read is a scoped read/query transport and never a configuration
   writer.
-- Bootstrap, schema/layout migration, secret migration, and recovery are named
+- First-root bootstrap, schema/layout migration, secret migration, and recovery are named
   privileged infrastructure writes. They do not impersonate a user or enter a
   human confirmation flow.

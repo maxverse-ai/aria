@@ -19,6 +19,9 @@ describe('ManagementCommandRegistry', () => {
     expect(
       () => new ManagementCommandRegistry([{ ...command, resourceScope: 'unknown' } as never]),
     ).toThrow(/invalid management command/);
+    expect(
+      () => new ManagementCommandRegistry([{ ...command, allowsRootDeletion: true }]),
+    ).toThrow(/invalid management command/);
   });
 
   it('normalizes legacy restart-required operations at the compatibility boundary', () => {

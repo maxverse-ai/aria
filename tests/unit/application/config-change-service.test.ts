@@ -4,6 +4,10 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   ConfigChangeService,
+  FileConfigRepository,
+  type ConfigRepository,
+  type ConfigRepositoryCommit,
+  type ConfigRepositoryTransaction,
   type ManagementCommandDefinition,
   type ControlActorContext,
 } from '../../../src/application/control';
@@ -165,7 +169,61 @@ describe('ConfigChangeService', () => {
       service.createPlan({ operationId: 'test.sensitive', parameters: { value: false }, actor }),
     ).rejects.toMatchObject({ code: 'operation-unavailable' });
   });
+
+  it('keeps a confirmed plan retryable when the desired-state commit fails', async () => {
+    const fixture = await createFixture();
+    const repository = new RejectingCommitRepository(fixture.root);
+    const service = new ConfigChangeService({
+      rootDir: fixture.root,
+      repository,
+      operations: [operation],
+      createId: () => planId,
+    });
+    const plan = await service.createPlan({
+      operationId: operation.id,
+      parameters: { value: false },
+      actor,
+    });
+    await service.confirmPlan(plan.id, actor);
+
+    await expect(service.commitPlan(plan.id, actor)).rejects.toThrow('simulated root commit failure');
+    expect((await service.getPlan(plan.id)).status).toBe('confirmed');
+    expect((await loadRootConfig(fixture.configPath))?.profiles.primary?.access.requireMentionInGroup)
+      .toBe(true);
+
+    const retry = createService(fixture.root);
+    await expect(retry.commitPlan(plan.id, actor)).resolves.toMatchObject({
+      applyResult: { recovered: false },
+    });
+    expect((await retry.getPlan(plan.id)).status).toBe('applied');
+  });
 });
+
+class RejectingCommitRepository implements ConfigRepository {
+  private readonly delegate: FileConfigRepository;
+
+  constructor(rootDir: string) {
+    this.delegate = new FileConfigRepository(rootDir);
+  }
+
+  readRoot() {
+    return this.delegate.readRoot();
+  }
+
+  withLockedRoot<T>(
+    transact: (
+      root: Awaited<ReturnType<FileConfigRepository['readRoot']>>,
+      commitRoot: ConfigRepositoryCommit,
+    ) => Promise<ConfigRepositoryTransaction<T>>,
+  ): Promise<T> {
+    return this.delegate.withLockedRoot(async (root) => {
+      const result = await transact(root, async () => {
+        throw new Error('simulated root commit failure');
+      });
+      return { result: result.result };
+    });
+  }
+}
 
 const operation: ManagementCommandDefinition = {
   id: 'test.access.require-mention',

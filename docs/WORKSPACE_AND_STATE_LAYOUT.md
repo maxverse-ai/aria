@@ -144,6 +144,15 @@ All physical paths must come from the layout resolver.
 is projected from the exact committed root revision; normal readers must not
 use it to override root desired state.
 
+Profile retention is a compensating lifecycle saga. Aria first verifies the
+profile is offline and stages `profiles/<profile>` under `.trash`; it then
+commits `profile.archive` or `profile.purge` through the Management API. A
+failed commit restores the staged directory. Archive keeps the staged path;
+purge removes it only after the desired-state commit. Projection or cleanup
+failure is reported separately and never rewrites the committed configuration.
+Removing the final profile atomically deletes `config.json` and clears the
+compatibility projection rather than storing an empty root configuration.
+
 ## Managed workspace contract
 
 There are two distinct workspace modes.

@@ -1,18 +1,24 @@
+import {
+  authorizeAdapterCommands,
+  ControlChangeError,
+  PROFILE_CREATE_COMMAND,
+  ProfileLifecycleService,
+} from '../application/control';
 import { detectInstalledAgents } from '../cli/agent-detection';
 import { resolveAppPaths } from '../config/app-paths';
 import { setSecret } from '../config/keystore';
 import {
-  createRootConfig,
   loadRootConfig,
   readActiveProfile,
-  saveRootConfig,
-  withConfigFileLock,
-  writeActiveProfile,
 } from '../config/profile-store';
 import type { AgentKind } from '../config/profile-schema';
 import { secretKeyForApp, type AppConfig, type TenantBrand } from '../config/schema';
 import { buildEncryptedAccountConfig } from '../config/store';
 import { createBootstrapProfileConfig } from '../cli/profile-bootstrap';
+import {
+  acquireProfileRuntimeLock,
+  RuntimeLockConflictError,
+} from '../runtime/locks';
 import { validateAppCredentials } from '../utils/feishu-auth';
 import { HttpError } from './http';
 
@@ -127,38 +133,68 @@ export async function writeNewProfile(
     throw new HttpError(409, `profile 已存在：${profile}，请换个名字`);
   }
 
-  const encrypted = await encryptAccount(input, appPaths);
-
-  let profileConfig;
+  let lock;
   try {
-    profileConfig = await createBootstrapProfileConfig({
-      agentKind: input.agentKind,
-      accounts: encrypted.accounts,
-      preferences: encrypted.preferences,
-      secrets: encrypted.secrets,
-      ...(input.workspace ? { workspace: input.workspace } : {}),
-      defaultWorkspace: appPaths.defaultWorkspaceDir,
-    });
-  } catch (err) {
-    throw new HttpError(400, err instanceof Error ? err.message : String(err));
+    lock = await acquireProfileRuntimeLock(appPaths, input.agentKind);
+  } catch (error) {
+    if (error instanceof RuntimeLockConflictError) {
+      throw new HttpError(409, `profile 正在使用中：${profile}`);
+    }
+    throw error;
   }
 
-  await withConfigFileLock(appPaths.configFile, async () => {
-    const root = await loadRootConfig(appPaths.configFile);
-    if (!root) {
-      await saveRootConfig(createRootConfig(profile, profileConfig, encrypted.secrets), appPaths.configFile);
-      return;
-    }
-    if (root.profiles[profile]) {
+  try {
+    const current = await loadRootConfig(appPaths.configFile);
+    if (current?.profiles[profile]) {
       throw new HttpError(409, `profile 已存在：${profile}，请换个名字`);
     }
-    root.profiles[profile] = { ...profileConfig, secrets: undefined };
-    if (!root.secrets && encrypted.secrets) root.secrets = encrypted.secrets;
-    await saveRootConfig(root, appPaths.configFile);
-  });
-  await writeActiveProfile(appPaths.rootDir, profile);
 
-  return { profile };
+    const encrypted = await encryptAccount(input, appPaths);
+
+    let profileConfig;
+    try {
+      profileConfig = await createBootstrapProfileConfig({
+        agentKind: input.agentKind,
+        accounts: encrypted.accounts,
+        preferences: encrypted.preferences,
+        secrets: encrypted.secrets,
+        ...(input.workspace ? { workspace: input.workspace } : {}),
+        defaultWorkspace: appPaths.defaultWorkspaceDir,
+      });
+    } catch (err) {
+      throw new HttpError(400, err instanceof Error ? err.message : String(err));
+    }
+
+    try {
+      await new ProfileLifecycleService({
+        rootDir: appPaths.rootDir,
+        authorizeCommand: authorizeAdapterCommands(
+          'web',
+          [PROFILE_CREATE_COMMAND],
+        ),
+      }).create(
+        profile,
+        {
+          config: profileConfig,
+          ...(encrypted.secrets ? { rootSecrets: encrypted.secrets } : {}),
+        },
+        { source: 'web', principal: 'local-console' },
+      );
+    } catch (error) {
+      if (error instanceof ControlChangeError && error.code === 'profile-already-exists') {
+        throw new HttpError(409, `profile 已存在：${profile}，请换个名字`);
+      }
+      if (error instanceof ControlChangeError && error.code === 'revision-conflict') {
+        throw new HttpError(409, error.message);
+      }
+      if (error instanceof ControlChangeError) throw new HttpError(400, error.message);
+      throw error;
+    }
+
+    return { profile };
+  } finally {
+    await lock.release().catch(() => {});
+  }
 }
 
 async function encryptAccount(input: CreateProfileInput, appPaths: ReturnType<typeof resolveAppPaths>): Promise<AppConfig> {
