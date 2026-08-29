@@ -18,6 +18,8 @@ import type { GovernanceAuditSink } from '../runtime/governance-audit';
 import type { SessionCatalog } from '../session/catalog';
 import type { SessionStore } from '../session/store';
 import type { WorkspaceStore } from '../workspace/store';
+import { TurnCoordinator, type TrySteerInput } from './turn-coordinator';
+import type { AgentSteeringOutcome } from '../agent/steering';
 
 export interface ConversationRuntimeDeps {
   agent: AgentAdapter;
@@ -63,6 +65,7 @@ export class ConversationRuntime {
   readonly activeRuns: ActiveRuns;
   readonly processPool: ProcessPool;
   readonly executor: RunExecutor;
+  readonly turns: TurnCoordinator;
 
   private readonly sessions: SessionStore;
   private readonly sessionCatalog?: SessionCatalog;
@@ -87,6 +90,7 @@ export class ConversationRuntime {
       ...(deps.runAudit ? { audit: deps.runAudit } : {}),
       now: this.now,
     });
+    this.turns = new TurnCoordinator(this.activeRuns);
   }
 
   start(input: StartConversationInput): Promise<StartRunFlowResult> {
@@ -132,6 +136,18 @@ export class ConversationRuntime {
 
   interrupt(scopeId: string): boolean {
     return this.activeRuns.interrupt(scopeId);
+  }
+
+  trySteer(input: TrySteerInput): Promise<AgentSteeringOutcome> {
+    return this.turns.trySteer(input);
+  }
+
+  finalizeTurn<T>(scopeId: string, runId: string, operation: () => Promise<T>): Promise<T> {
+    return this.turns.finalize(scopeId, runId, operation);
+  }
+
+  endTurn(scopeId: string, runId: string): Promise<void> {
+    return this.turns.end(scopeId, runId);
   }
 
   stopAll(): Promise<RunHandle[]> {

@@ -18,7 +18,7 @@ For a product walkthrough, see the [Feishu document](https://larkcommunity.feish
 - **Streaming card**: text replies and tool calls update on one Lark card in real time.
 - **COT process messages**: optionally send a process message with agent progress text and tool calls, then send the final answer separately.
 - **Session continuity**: each chat, topic, or document comment thread keeps its own session.
-- **Queueing and batching**: messages sent in quick succession are handled together; messages sent during a run are queued for the next turn, while commands like `/new`, `/cd`, `/ws use`, and `/stop` can interrupt the current task.
+- **Queueing, batching, and steering**: messages sent in quick succession are handled together. During a run they queue for the next turn by default; supported engines can opt into acknowledged live-turn steering with `/steer`.
 - **Multiple workspaces**: use `/cd` to switch the current project, and `/ws` to save and reuse common project directories.
 - **Images and files**: send them to the bot directly, and the bridge downloads them locally for the agent.
 - **Interactive cards**: `/help`, `/ws list`, and `/status` return cards with clickable buttons.
@@ -156,6 +156,7 @@ If a profile was created with the wrong agent kind, stop or unregister any match
 | `/status` | Show profile, agent, working directory, session, lark-cli identity, and run state |
 | `/config` | Adjust presentation preferences, access settings, and lark-cli identity policy |
 | `/fast [on\|off\|status\|reset]` | Manage Codex Fast for models that expose service tiers (admin only) |
+| `/steer [off\|shadow\|auto\|on\|status]` | Control acknowledged live-turn steering; unsupported agents fall back to the next turn (admin only) |
 | `/invite user @name` | Allow a user to use the bot in DMs |
 | `/invite admin @name` | Add an access-control admin |
 | `/invite group` | Allow the current group to use the bot |
@@ -172,6 +173,8 @@ If a profile was created with the wrong agent kind, stop or unregister any match
 DMs do not require an @ mention. Groups and topic groups require `@bot` by default, except a private group containing exactly one human and this bot behaves like a DM unless that chat explicitly enables strict mention mode. Receiving unmentioned group messages requires the app scope `im:message.group_msg`; `@all` is ignored. Cloud-doc comments in supported document types run when the bot is mentioned.
 
 Codex Fast uses the live model capability catalog: `/fast on` enables it, `/fast off` explicitly selects the standard tier, and `/fast reset` follows Codex's own configuration again. The reply status line shows the `Fast on/off` value actually accepted by App Server. Other agents, and older Codex versions that do not report service tiers, omit the item.
+
+Steering is off by default. `/steer auto` injects eligible P2P follow-ups and explicitly mentioned group follow-ups into an active Codex turn; `/steer on` attempts every eligible text follow-up that already passed normal access policy. Aria removes a message from the next-turn queue only after Codex acknowledges `turn/steer`. `/status` shows the configured policy and engine capability.
 
 ## Reply Display and COT
 

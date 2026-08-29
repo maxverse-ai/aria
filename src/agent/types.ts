@@ -1,5 +1,10 @@
 import type { AgentAvailability } from './preflight';
 import type { ClaudePermissionMode, CodexSandboxMode } from '../config/permissions';
+import type {
+  AgentSteeringOutcome,
+  AgentSteeringRequest,
+  AgentSteeringSupport,
+} from './steering';
 
 export type { ClaudePermissionMode } from '../config/permissions';
 
@@ -79,6 +84,10 @@ export interface AgentRunOptions {
 export interface AgentRun {
   readonly runId: string;
   readonly events: AsyncIterable<AgentEvent>;
+  /** Present only when this concrete run can accept input during its active turn. */
+  readonly steering?: AgentSteeringSupport;
+  /** Resolve accepted only after the engine transport acknowledges the input. */
+  steer?(request: AgentSteeringRequest): Promise<AgentSteeringOutcome>;
   stop(): Promise<void>;
   /**
    * Wait up to `timeoutMs` for the agent process to exit on its own.

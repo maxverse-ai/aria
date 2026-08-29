@@ -37,6 +37,10 @@ export interface TurnStartResponse {
   turn: { id: string };
 }
 
+export interface TurnSteerResponse {
+  turnId: string;
+}
+
 export interface TokenUsageBreakdown {
   totalTokens: number;
   inputTokens: number;

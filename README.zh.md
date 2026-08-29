@@ -18,7 +18,7 @@ Aria 把你的本地编码 agent（Claude Code、Codex 等）带进飞书 / Lark
 - **流式卡片**：文本回复和工具调用实时更新在同一张卡片上。
 - **COT 过程消息**：可选先发一条过程消息展示 agent 的阶段性文本和工具调用，再单独发送最终答案。
 - **会话延续**：每个聊天、话题或文档评论有自己的会话，不会互相串。
-- **排队与消息合并**：短时间连续发送的消息会合并处理；任务运行中收到的普通消息会排队到下一轮，`/new`、`/cd`、`/ws use`、`/stop` 这类命令可以中断当前任务。
+- **排队、消息合并与 Steering**：短时间连续发送的消息会合并处理；任务运行中的消息默认排到下一轮，支持的 Agent 可通过 `/steer` 开启“确认后注入当前 turn”。
 - **多工作空间**：用 `/cd` 切换当前项目，用 `/ws` 保存和复用常用项目目录。
 - **图片 / 文件**：直接发给 bot，bridge 下载到本地后交给本机 agent 处理。
 - **卡片按钮**：`/help`、`/ws list`、`/status` 返回可点击的交互卡片。
@@ -155,6 +155,7 @@ aria profile export <name> --include-secrets --yes
 | `/status` | 查看 profile、agent、工作目录、会话、lark-cli 身份和运行状态 |
 | `/config` | 调整展示偏好、访问控制和 lark-cli 身份策略 |
 | `/fast [on\|off\|status\|reset]` | 管理 Codex Fast 模式；仅支持服务档位的模型显示（管理员） |
+| `/steer [off\|shadow\|auto\|on\|status]` | 控制运行中 Steering；不支持的 Agent 自动回落下一轮（管理员） |
 | `/invite user @某人` | 允许用户私聊使用 bot |
 | `/invite admin @某人` | 添加访问控制管理员 |
 | `/invite group` | 允许当前群使用 bot |
@@ -171,6 +172,8 @@ aria profile export <name> --include-secrets --yes
 私聊不需要 @。群和话题群默认必须 `@bot`；但只有一名用户和当前 bot 的私有群会像私聊一样直接回复，除非该群显式开启了严格 @ 模式。接收群里的非 @ 消息需要应用具备 `im:message.group_msg` 权限；`@all` 会被忽略。支持的云文档评论里 @bot 就会触发回复。
 
 Codex Fast 使用动态模型能力探测：`/fast on` 开启，`/fast off` 显式使用标准档位，`/fast reset` 恢复跟随 Codex 自身配置。回复底部状态栏显示 App Server 实际接受的 `Fast on/off`；其他 Agent 或未上报服务档位的旧版 Codex 不显示这一项。
+
+Steering 默认关闭。`/steer auto` 会把私聊跟进、以及群内明确 @ bot 的跟进尝试注入当前 Codex turn；`/steer on` 会对所有已通过原有访问控制的合格文本跟进尝试注入。只有 Codex 明确确认 `turn/steer` 后，Aria 才会把该消息从下一轮队列移除；`/status` 会显示当前策略和 Agent 能力。
 
 ## 回复展示与 COT
 

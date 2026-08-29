@@ -3,6 +3,7 @@ import type { ModelOption } from '../../../models';
 import { checkAgentAvailability, type AgentAvailability } from '../../../preflight';
 import type { EngineRuntime, EngineStatusSnapshot, EngineUsageWindow } from '../../../runtime/types';
 import type { AgentAdapter, AgentBotIdentity, AgentEvent, AgentRun, AgentRunOptions } from '../../../types';
+import type { AgentSteeringOutcome, AgentSteeringRequest } from '../../../steering';
 import { prefixBridgeSystemPrompt } from '../../../bridge-system-prompt';
 import type { ChannelEnvContext } from '../../../channel-env';
 import { startCodexAppServer } from './process';
@@ -20,6 +21,7 @@ import {
   type ThreadStartResponse,
   type TokenUsageBreakdown,
   type TurnStartResponse,
+  type TurnSteerResponse,
 } from './protocol';
 
 export interface CodexAppServerRuntimeOptions {
@@ -223,12 +225,15 @@ class CodexAppServerAdapter implements AgentAdapter {
 export class AppServerRun implements AgentRun {
   readonly runId: string;
   readonly events: AsyncIterable<AgentEvent>;
+  readonly steering = { mode: 'direct' as const, textOnly: true };
   private threadId: string | undefined;
   private turnId: string | undefined;
   private client: CodexAppServerClient | undefined;
   private stopRequested = false;
   private interruptSent = false;
+  private turnClosing = false;
   private exited = false;
+  private readonly steeringRequests = new Map<string, Promise<AgentSteeringOutcome>>();
   private readonly exitPromise: Promise<void>;
   private resolveExit!: () => void;
 
@@ -246,6 +251,7 @@ export class AppServerRun implements AgentRun {
 
   async stop(): Promise<void> {
     this.stopRequested = true;
+    this.turnClosing = true;
     if (this.client && this.threadId && this.turnId && !this.exited && !this.interruptSent) {
       this.interruptSent = true;
       await this.client
@@ -260,6 +266,50 @@ export class AppServerRun implements AgentRun {
       this.exitPromise.then(() => true),
       new Promise<boolean>((resolve) => setTimeout(() => resolve(false), timeoutMs)),
     ]);
+  }
+
+  steer(request: AgentSteeringRequest): Promise<AgentSteeringOutcome> {
+    const existing = this.steeringRequests.get(request.requestId);
+    if (existing) return existing;
+    const attempt = this.performSteer(request);
+    this.steeringRequests.set(request.requestId, attempt);
+    return attempt;
+  }
+
+  private async performSteer(request: AgentSteeringRequest): Promise<AgentSteeringOutcome> {
+    if (request.expectedRunId !== this.runId) {
+      return { kind: 'rejected', reason: 'stale-run' };
+    }
+    if (!request.prompt.trim()) {
+      return { kind: 'rejected', reason: 'invalid-input' };
+    }
+    if (this.turnClosing || this.stopRequested || this.exited) {
+      return { kind: 'deferred', reason: 'turn-closing' };
+    }
+    const client = this.client;
+    const threadId = this.threadId;
+    const turnId = this.turnId;
+    if (!client || !threadId || !turnId) {
+      return { kind: 'deferred', reason: 'turn-not-ready' };
+    }
+
+    try {
+      const response = await client.request<TurnSteerResponse>('turn/steer', {
+        threadId,
+        input: [{ type: 'text', text: request.prompt, text_elements: [] }],
+        expectedTurnId: turnId,
+      }, 5_000);
+      if (response.turnId !== turnId) {
+        return { kind: 'rejected', reason: 'stale-run' };
+      }
+      return { kind: 'accepted', runId: this.runId };
+    } catch (error) {
+      return {
+        kind: 'rejected',
+        reason: 'transport-error',
+        message: error instanceof Error ? error.message : String(error),
+      };
+    }
   }
 
   private async *stream(): AsyncGenerator<AgentEvent> {
@@ -410,6 +460,7 @@ export class AppServerRun implements AgentRun {
             return;
           }
         } else if (notification.method === 'turn/completed') {
+          this.turnClosing = true;
           const turn = isRecord(params.turn) ? params.turn : undefined;
           generation.closeStep(performance.now());
           for (const event of messages.finishTurn(turn?.status === 'completed')) yield event;
@@ -457,6 +508,7 @@ export class AppServerRun implements AgentRun {
         terminationReason: this.stopRequested ? 'interrupted' : 'failed',
       };
     } finally {
+      this.turnClosing = true;
       unsubscribe?.();
       queue.end();
       this.exited = true;

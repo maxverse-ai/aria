@@ -9,6 +9,8 @@ import {
   cardKitShell as shell,
 } from './cardkit';
 import { agentCatalogStatusLine } from './agent-catalog';
+import type { SteeringPreference } from '../config/profile-schema';
+import type { AgentSteeringMode } from '../agent/steering';
 
 export function workspacesCard(current: string | undefined, named: Record<string, string>): object {
   const entries = Object.entries(named);
@@ -48,6 +50,11 @@ export interface StatusInfo {
   sessionStale: boolean;
   agentName: string;
   engineStatus?: EngineStatusSnapshot;
+  steering?: {
+    preference: SteeringPreference;
+    capability: AgentSteeringMode | 'unsupported';
+    activeRun: boolean;
+  };
   runtimeAccess: {
     label: string;
     value: string;
@@ -86,6 +93,7 @@ export function statusCard(info: StatusInfo): object {
     `🔗 **session**: ${sessionLine}`,
     `🤖 **agent**: ${escapeMd(info.agentName)}`,
     ...formatEngineStatus(info.engineStatus),
+    ...(info.steering ? [`🎛 **steering**: ${formatSteeringStatus(info.steering)}`] : []),
     `🛡 **${escapeMd(info.runtimeAccess.label)}**: ${escapeMd(info.runtimeAccess.value)}`,
     ...(info.larkCliStatus ? [`🔐 **lark-cli**: ${info.larkCliStatus}`] : []),
     `🏃 **active run**: ${info.activeRun ? 'yes' : 'no'}`,
@@ -113,6 +121,11 @@ export function statusCard(info: StatusInfo): object {
       { text: '💡 帮助', value: { cmd: 'help' } },
     ]),
   ]);
+}
+
+function formatSteeringStatus(info: NonNullable<StatusInfo['steering']>): string {
+  const fallback = info.capability === 'unsupported' ? ' · fallback=next turn' : '';
+  return `${info.preference} · ${info.capability} · run=${info.activeRun ? 'active' : 'idle'}${fallback}`;
 }
 
 function formatOutboundPolicy(status: OutboundPolicyStatus | undefined): string {
@@ -411,6 +424,54 @@ export function fastModeCard(info: FastModeCardInfo): object {
   return shell('⚡ Fast 模式', elements);
 }
 
+export interface SteeringCardInfo {
+  agent: string;
+  current: SteeringPreference;
+  capability: AgentSteeringMode | 'unsupported';
+  notice?: string;
+}
+
+export function steeringCard(info: SteeringCardInfo): object {
+  const elements: object[] = [];
+  if (info.notice) elements.push(divMd(info.notice));
+  elements.push(divMd([
+    `Agent：\`${escapeCode(info.agent)}\``,
+    `当前策略：\`${escapeCode(info.current)}\``,
+    `Agent 能力：\`${escapeCode(info.capability)}\``,
+    ...(info.capability === 'unsupported'
+      ? ['当前 Agent 不支持运行中转向；消息会安全进入下一轮。']
+      : ['Codex 会在当前 turn 明确确认接收后，才从下一轮队列移除消息。']),
+  ].join('\n')));
+  elements.push(HR);
+  elements.push(divMd([
+    '- `off`：关闭，运行中的新消息进入下一轮',
+    '- `shadow`：只记录本可转向的消息，不改变路由',
+    '- `auto`：私聊或群内明确 @ 时转向（推荐）',
+    '- `on`：所有已通过访问控制的文本跟进都尝试转向',
+  ].join('\n')));
+  elements.push(HR);
+  elements.push(actions([
+    steeringChoiceButton('关闭', 'off', info.current),
+    steeringChoiceButton('观测', 'shadow', info.current),
+    steeringChoiceButton('自动', 'auto', info.current),
+    steeringChoiceButton('始终', 'on', info.current),
+  ]));
+  return shell('🎛 Steering', elements);
+}
+
+function steeringChoiceButton(
+  label: string,
+  value: SteeringPreference,
+  current: SteeringPreference,
+): Parameters<typeof actions>[0][number] {
+  const selected = value === current;
+  return {
+    text: selected ? `${label} ←` : label,
+    value: { cmd: 'steer.set', arg: value },
+    style: selected ? 'primary' : 'default',
+  };
+}
+
 export function helpCard(agentName = 'Agent'): object {
   const escapedAgentName = escapeMd(agentName);
   return shell('💡 使用帮助', [
@@ -426,6 +487,7 @@ export function helpCard(agentName = 'Agent'): object {
         '- `/account` — 查看当前应用；`/account change` 换 appId/secret 并重连',
         '- `/config` — 调整偏好、访问控制和 lark-cli 身份策略',
         '- `/fast [on|off|status]` — 管理 Codex Fast 模式（管理员）',
+        '- `/steer [off|shadow|auto|on|status]` — 管理运行中转向（管理员）',
         '- `/status` — 当前状态',
         '- `/stop` — 结束当前正在跑的任务（也可点卡片底部 ⏹ 终止 按钮）',
         '- `/stop comment:<scopeHash>` — 管理员停止云文档评论任务',

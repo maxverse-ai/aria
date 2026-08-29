@@ -1,10 +1,6 @@
 import type { NormalizedMessage } from '@larksuite/channel';
 import { log } from '../core/logger';
-
-interface PendingEntry {
-  messages: NormalizedMessage[];
-  timer?: NodeJS.Timeout;
-}
+import { TurnInbox, type TurnInboxClaim } from '../conversation/turn-inbox';
 
 export type FlushHandler = (scope: string, batch: NormalizedMessage[]) => void;
 
@@ -21,45 +17,46 @@ export type FlushHandler = (scope: string, batch: NormalizedMessage[]) => void;
  * Commands should bypass this queue — they're cheap and should be responsive.
  */
 export class PendingQueue {
-  private readonly map = new Map<string, PendingEntry>();
-  private readonly blocked = new Set<string>();
-  private readonly delayMs: number;
-  private readonly onFlush: FlushHandler;
+  private readonly inbox: TurnInbox<NormalizedMessage>;
+  private anonymousId = 0;
+  private readonly anonymousKeys = new WeakMap<NormalizedMessage, string>();
 
   constructor(delayMs: number, onFlush: FlushHandler) {
-    this.delayMs = delayMs;
-    this.onFlush = onFlush;
+    this.inbox = new TurnInbox(delayMs, (scope, messages) => {
+      try {
+        onFlush(scope, messages);
+      } catch (err) {
+        log.fail('queue', err, { scope, batchSize: messages.length });
+      }
+    });
   }
 
   push(scope: string, msg: NormalizedMessage): number {
-    const existing = this.map.get(scope);
-    if (existing) {
-      if (existing.timer) clearTimeout(existing.timer);
-      existing.messages.push(msg);
-      existing.timer = this.blocked.has(scope) ? undefined : this.armTimer(scope);
-      return existing.messages.length;
-    }
-    this.map.set(scope, {
-      messages: [msg],
-      timer: this.blocked.has(scope) ? undefined : this.armTimer(scope),
-    });
-    return 1;
+    return this.inbox.offer(scope, this.keyFor(msg), msg).size;
+  }
+
+  claim(
+    scope: string,
+    messages: readonly NormalizedMessage[],
+    claimId: string,
+  ): TurnInboxClaim<NormalizedMessage> | undefined {
+    return this.inbox.claim(scope, messages.map((message) => this.keyFor(message)), claimId);
+  }
+
+  acknowledge(claim: TurnInboxClaim<NormalizedMessage>): number {
+    return this.inbox.acknowledge(claim);
+  }
+
+  release(claim: TurnInboxClaim<NormalizedMessage>): number {
+    return this.inbox.release(claim);
   }
 
   cancel(scope: string): NormalizedMessage[] {
-    const entry = this.map.get(scope);
-    if (!entry) return [];
-    if (entry.timer) clearTimeout(entry.timer);
-    this.map.delete(scope);
-    return entry.messages;
+    return this.inbox.cancel(scope);
   }
 
   cancelAll(): void {
-    for (const entry of this.map.values()) {
-      if (entry.timer) clearTimeout(entry.timer);
-    }
-    this.map.clear();
-    this.blocked.clear();
+    this.inbox.cancelAll();
   }
 
   activitySnapshot(): {
@@ -67,50 +64,30 @@ export class PendingQueue {
     pendingScopes: number;
     blockedScopes: number;
   } {
-    let pendingMessages = 0;
-    for (const entry of this.map.values()) pendingMessages += entry.messages.length;
-    return {
-      pendingMessages,
-      pendingScopes: this.map.size,
-      blockedScopes: this.blocked.size,
-    };
+    const { claimedMessages: _claimedMessages, ...snapshot } = this.inbox.activitySnapshot();
+    return snapshot;
   }
 
   /** Pause the debounce timer; pushed messages keep accumulating. */
   block(scope: string): void {
-    if (this.blocked.has(scope)) return;
-    this.blocked.add(scope);
-    const entry = this.map.get(scope);
-    if (entry?.timer) {
-      clearTimeout(entry.timer);
-      entry.timer = undefined;
-    }
-    log.info('queue', 'blocked', { scope, queued: entry?.messages.length ?? 0 });
+    this.inbox.block(scope);
+    log.info('queue', 'blocked', { scope, queued: this.inbox.size(scope) });
   }
 
   /** Resume the debounce timer; arms a fresh quiet window if anything queued. */
   unblock(scope: string): void {
-    if (!this.blocked.has(scope)) return;
-    this.blocked.delete(scope);
-    const entry = this.map.get(scope);
-    log.info('queue', 'unblocked', { scope, queued: entry?.messages.length ?? 0 });
-    if (!entry || entry.messages.length === 0) return;
-    if (entry.timer) clearTimeout(entry.timer);
-    entry.timer = this.armTimer(scope);
+    this.inbox.unblock(scope);
+    log.info('queue', 'unblocked', { scope, queued: this.inbox.size(scope) });
   }
 
-  private armTimer(scope: string): NodeJS.Timeout {
-    return setTimeout(() => this.flush(scope), this.delayMs);
-  }
-
-  private flush(scope: string): void {
-    const entry = this.map.get(scope);
-    if (!entry) return;
-    this.map.delete(scope);
-    try {
-      this.onFlush(scope, entry.messages);
-    } catch (err) {
-      log.fail('queue', err, { scope, batchSize: entry.messages.length });
-    }
+  private keyFor(msg: NormalizedMessage): string {
+    const messageId = typeof msg.messageId === 'string' ? msg.messageId.trim() : '';
+    if (messageId) return messageId;
+    const existing = this.anonymousKeys.get(msg);
+    if (existing) return existing;
+    this.anonymousId++;
+    const key = `anonymous:${this.anonymousId}`;
+    this.anonymousKeys.set(msg, key);
+    return key;
   }
 }

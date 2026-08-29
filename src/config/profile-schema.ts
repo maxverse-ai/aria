@@ -188,6 +188,14 @@ export interface LarkCliConfig {
   };
 }
 
+export const STEERING_PREFERENCES = ['off', 'shadow', 'auto', 'on'] as const;
+export type SteeringPreference = (typeof STEERING_PREFERENCES)[number];
+
+export interface CoordinationConfig {
+  /** How new messages are routed while a turn is active. */
+  steering: SteeringPreference;
+}
+
 export interface ProfileConfig {
   schemaVersion: 2;
   agentKind: AgentKind;
@@ -218,6 +226,8 @@ export interface ProfileConfig {
   comments: CommentConfig;
   /** In-meeting agent settings. See {@link MeetingConfig}. */
   meeting: MeetingConfig;
+  /** Cross-channel conversation coordination policy. */
+  coordination: CoordinationConfig;
   larkCli: LarkCliConfig;
 }
 
@@ -261,6 +271,7 @@ export interface CreateDefaultProfileConfigInput {
   pi?: PiConfig;
   plugins?: string[];
   secrets?: SecretsConfig;
+  coordination?: Partial<CoordinationConfig>;
 }
 
 export function createDefaultProfileConfig(
@@ -302,6 +313,7 @@ export function normalizeProfileConfig(input: unknown): ProfileConfig {
     attachments?: Partial<AttachmentConfig>;
     comments?: unknown;
     meeting?: unknown;
+    coordination?: unknown;
     larkCli?: unknown;
   };
 
@@ -331,6 +343,7 @@ export function normalizeProfileConfig(input: unknown): ProfileConfig {
   const workspaces = normalizeWorkspaces(raw.workspaces);
   const comments = normalizeComments(raw.comments);
   const meeting = normalizeMeeting(raw.meeting);
+  const coordination = normalizeCoordination(raw.coordination);
   const larkCli = normalizeLarkCli(raw.larkCli);
   const plugins = normalizePlugins(raw.plugins);
 
@@ -362,7 +375,17 @@ export function normalizeProfileConfig(input: unknown): ProfileConfig {
     },
     comments,
     meeting,
+    coordination,
     larkCli,
+  };
+}
+
+function normalizeCoordination(input: unknown): CoordinationConfig {
+  const raw = (input && typeof input === 'object' ? input : {}) as { steering?: unknown };
+  return {
+    steering: STEERING_PREFERENCES.includes(raw.steering as SteeringPreference)
+      ? raw.steering as SteeringPreference
+      : 'off',
   };
 }
 

@@ -84,6 +84,7 @@ import { ChatModeCache, type ChatMode } from './chat-mode-cache';
 import { ChatTopologyResolver, isDmLikeTopology } from './chat-topology';
 import { handleCommentMention } from './comments';
 import { ConversationRuntime } from '../conversation/runtime';
+import { decideSteering } from '../conversation/steering-policy';
 import { commandSessionCatalogIdentity } from './session-catalog-identity';
 import { startKeepalive } from './keepalive';
 import { PendingQueue } from './pending-queue';
@@ -520,6 +521,7 @@ export async function startChannel(deps: StartChannelDeps): Promise<BridgeChanne
           }, () =>
             intakeMessage({
               channel,
+              conversations,
               agent,
               sessions,
               sessionCatalog,
@@ -867,6 +869,7 @@ async function sendForwardFetchFailedHint(
 
 interface IntakeDeps {
   channel: LarkChannel;
+  conversations: ConversationRuntime;
   agent: AgentAdapter;
   sessions: SessionStore;
   sessionCatalog?: SessionCatalog;
@@ -895,6 +898,7 @@ type LogThreadModeOverride = (input: {
 async function intakeMessage(deps: IntakeDeps): Promise<void> {
   const {
     channel,
+    conversations,
     agent,
     sessions,
     sessionCatalog,
@@ -1080,6 +1084,76 @@ async function intakeMessage(deps: IntakeDeps): Promise<void> {
 
   const size = pending.push(scope, emsg);
   log.info('intake', 'queued', { scope, queueSize: size, debounceMs: DEBOUNCE_MS });
+  await trySteerQueuedMessage({
+    conversations,
+    activeRuns,
+    pending,
+    controls,
+    scope,
+    msg: emsg,
+    botIdentity: channel.botIdentity,
+  });
+}
+
+async function trySteerQueuedMessage(input: {
+  conversations: ConversationRuntime;
+  activeRuns: ActiveRuns;
+  pending: PendingQueue;
+  controls: Controls;
+  scope: string;
+  msg: NormalizedMessage;
+  botIdentity?: { openId: string; name?: string };
+}): Promise<void> {
+  const preference = input.controls.profileConfig.coordination.steering;
+  if (preference === 'off') return;
+  const activeRun = input.activeRuns.get(input.scope)?.run;
+  if (!activeRun) return;
+  const senderType = senderTypeOf(input.msg);
+  const decision = decideSteering({
+    preference,
+    ...(activeRun.steering ? { support: activeRun.steering } : {}),
+    chatType: input.msg.chatType,
+    ...(senderType ? { senderType } : {}),
+    mentionedBot: input.msg.mentionedBot,
+    text: input.msg.content,
+    attachmentCount: input.msg.resources.length,
+    ...(input.msg.rawContentType ? { rawContentType: input.msg.rawContentType } : {}),
+  });
+  if (decision.kind !== 'attempt') {
+    const outcome = decision.kind === 'shadow' ? 'shadow' : 'queued';
+    const reason = decision.kind === 'queue' ? decision.reason : 'eligible';
+    log.info('steering', outcome, { scope: input.scope, reason });
+    reportMetric('steering_message', 1, { outcome, reason });
+    return;
+  }
+
+  const requestId = `im:${input.msg.messageId}`;
+  const claim = input.pending.claim(input.scope, [input.msg], requestId);
+  if (!claim) {
+    log.info('steering', 'claim-missed', { scope: input.scope });
+    reportMetric('steering_message', 1, { outcome: 'queued', reason: 'claim-missed' });
+    return;
+  }
+
+  const result = await input.conversations.trySteer({
+    scopeId: input.scope,
+    requestId,
+    prompt: buildSteeringPrompt(input.msg, input.botIdentity),
+  });
+  if (result.kind === 'accepted') {
+    input.pending.acknowledge(claim);
+    log.info('steering', 'accepted', { scope: input.scope, runId: result.runId });
+    reportMetric('steering_message', 1, { outcome: 'accepted' });
+    return;
+  }
+
+  input.pending.release(claim);
+  log.info('steering', result.kind, {
+    scope: input.scope,
+    reason: result.reason,
+    ...(result.kind === 'rejected' && result.message ? { message: result.message } : {}),
+  });
+  reportMetric('steering_message', 1, { outcome: result.kind, reason: result.reason });
 }
 
 interface RunBatchDeps {
@@ -1458,6 +1532,8 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
           }),
       }
     : { runStatusItems };
+  const finalizeReply = (operation: () => Promise<void>): Promise<void> =>
+    conversations.finalizeTurn(scope, execution.runId, operation);
 
   // For non-card modes Claude's output doesn't surface visually until either
   // a first streamed token (markdown mode) or the whole run ends (text mode).
@@ -1514,6 +1590,7 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
           replyMode,
           sendOpts,
           cardRenderOptions,
+          finalize: finalizeReply,
         });
         return;
       }
@@ -1541,6 +1618,7 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
         replyMode,
         sendOpts,
         cardRenderOptions,
+        finalize: finalizeReply,
       });
     } else if (replyMode === 'card') {
       let latestState: RunState = runInitialState;
@@ -1611,6 +1689,7 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
           replyMode,
           sendOpts,
           cardRenderOptions,
+          finalize: finalizeReply,
         });
       }
     } else if (replyMode === 'markdown') {
@@ -1676,6 +1755,7 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
           replyMode,
           sendOpts,
           cardRenderOptions,
+          finalize: finalizeReply,
         });
       }
     } else {
@@ -1702,12 +1782,14 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
         replyMode,
         sendOpts,
         cardRenderOptions,
+        finalize: finalizeReply,
       });
     }
   } catch (err) {
     replyFailed = true;
     log.fail('stream', err);
   } finally {
+    await conversations.endTurn(scope, execution.runId);
     const replyFields = {
       ...observabilityFields(),
       runId: execution.runId,
@@ -1906,7 +1988,7 @@ async function recallStreamedMessage(
   }
 }
 
-async function sendFinalReply(input: {
+interface FinalReplyInput {
   channel: LarkChannel;
   chatId: string;
   scope: string;
@@ -1914,7 +1996,15 @@ async function sendFinalReply(input: {
   replyMode: ReturnType<typeof getMessageReplyMode>;
   sendOpts: { replyTo: string; replyInThread?: boolean };
   cardRenderOptions: RunCardRenderOptions;
-}): Promise<void> {
+  finalize?: (operation: () => Promise<void>) => Promise<void>;
+}
+
+async function sendFinalReply(input: FinalReplyInput): Promise<void> {
+  const operation = () => publishFinalReply(input);
+  return input.finalize ? input.finalize(operation) : operation();
+}
+
+async function publishFinalReply(input: FinalReplyInput): Promise<void> {
   const body = renderText(input.state, {
     runStatusItems: input.cardRenderOptions.runStatusItems,
   });
@@ -2342,6 +2432,30 @@ function buildPrompt(
     quotedMessages: quotes.map(toPromptQuote),
     interactiveCards: batch.map(toPromptInteractiveCard).filter(isDefined),
     attachments: attachments.map(toPromptAttachment),
+  });
+}
+
+/** Build only the new user envelope; the active turn already has bridge instructions. */
+function buildSteeringPrompt(
+  msg: NormalizedMessage,
+  botIdentity?: { openId: string; name?: string },
+): string {
+  const senderType = senderTypeOf(msg);
+  const mentions = mergeMentions([msg]);
+  return buildAgentPrompt({
+    context: {
+      chatId: msg.chatId,
+      chatType: msg.chatType,
+      senderId: msg.senderId,
+      ...(msg.senderName ? { senderName: msg.senderName } : {}),
+      ...(senderType ? { senderType } : {}),
+      ...(botIdentity?.openId ? { botOpenId: botIdentity.openId } : {}),
+      ...(mentions.length > 0 ? { mentions } : {}),
+      ...(msg.threadId ? { threadId: msg.threadId } : {}),
+      messageIds: [msg.messageId],
+      source: 'im',
+    },
+    userInput: msg.content.trim(),
   });
 }
 

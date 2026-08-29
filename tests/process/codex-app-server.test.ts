@@ -253,6 +253,54 @@ describe('Codex App Server runtime', () => {
     await runtime.dispose();
   });
 
+  it('steers the active turn with expectedTurnId and deduplicates delivery', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'aria-codex-app-server-steer-'));
+    roots.push(root);
+    const runtime = new CodexAppServerRuntime({
+      binary: await writeFakeCodex(root),
+      profileStateDir: root,
+      inheritCodexHome: true,
+      sandbox: 'workspace-write',
+    });
+    const run = runtime.execution.run({
+      runId: 'run-steer',
+      prompt: 'hold-for-steer',
+      cwd: root,
+    });
+    expect(run.steering).toEqual({ mode: 'direct', textOnly: true });
+    const iterator = run.events[Symbol.asyncIterator]();
+    await expect(iterator.next()).resolves.toMatchObject({ value: { type: 'system' } });
+    const nextEvent = iterator.next();
+    await waitForLifecycleLine(root, 'turn-active');
+
+    const request = {
+      requestId: 'message:m-steer',
+      expectedRunId: 'run-steer',
+      prompt: 'change direction now',
+    };
+    const [first, duplicate] = await Promise.all([run.steer?.(request), run.steer?.(request)]);
+    expect(first).toEqual({ kind: 'accepted', runId: 'run-steer' });
+    expect(duplicate).toEqual(first);
+    await expect(run.steer?.({ ...request, requestId: 'stale', expectedRunId: 'old-run' }))
+      .resolves.toEqual({ kind: 'rejected', reason: 'stale-run' });
+
+    const events: AgentEvent[] = [];
+    const firstAfterSteer = await nextEvent;
+    if (!firstAfterSteer.done) events.push(firstAfterSteer.value);
+    for (;;) {
+      const next = await iterator.next();
+      if (next.done) break;
+      events.push(next.value);
+    }
+    expect(events).toContainEqual({ type: 'final_text', content: 'steered answer' });
+    expect(await steeringRequests(root)).toEqual([{
+      threadId: 'thread-1',
+      input: [{ type: 'text', text: 'change direction now', text_elements: [] }],
+      expectedTurnId: 'turn-1',
+    }]);
+    await runtime.dispose();
+  });
+
   it('reports an explicit turn effort over the thread default', async () => {
     const root = await mkdtemp(join(tmpdir(), 'aria-codex-app-server-effort-'));
     roots.push(root);
@@ -425,6 +473,20 @@ async function serviceTierRequestLines(root: string): Promise<string[]> {
   return value.trim().split('\n').filter(Boolean);
 }
 
+async function steeringRequests(root: string): Promise<unknown[]> {
+  const value = await readFile(join(root, 'steering-requests.log'), 'utf8');
+  return value.trim().split('\n').filter(Boolean).map((line) => JSON.parse(line));
+}
+
+async function waitForLifecycleLine(root: string, expected: string): Promise<void> {
+  const deadline = Date.now() + 2_000;
+  while (Date.now() < deadline) {
+    if ((await lifecycleLines(root)).includes(expected)) return;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error(`timed out waiting for lifecycle line: ${expected}`);
+}
+
 async function writeFakeCodex(root: string, options: { failFirstInitialize?: boolean } = {}): Promise<string> {
   const path = join(root, 'codex');
   const lifecyclePath = join(root, 'lifecycle.log');
@@ -440,6 +502,7 @@ const fs = require('node:fs');
 const lifecyclePath = ${JSON.stringify(lifecyclePath)};
 const initializeFailurePath = ${JSON.stringify(initializeFailurePath)};
 const serviceTierRequestPath = ${JSON.stringify(join(root, 'service-tier-requests.log'))};
+const steeringRequestPath = ${JSON.stringify(join(root, 'steering-requests.log'))};
 const failFirstInitialize = ${JSON.stringify(options.failFirstInitialize === true)};
 fs.appendFileSync(lifecyclePath, 'spawn\\n');
 const readline = require('node:readline');
@@ -478,6 +541,11 @@ const completeMeasuredTurn = () => {
     send({ method: 'turn/completed', params: { threadId: currentThreadId, turn: { id: 'turn-1', status: 'completed', error: null } } });
   }, 300);
 };
+const completeSteeredTurn = () => {
+  send({ method: 'item/agentMessage/delta', params: { threadId: currentThreadId, turnId: 'turn-1', itemId: 'steered-message', delta: 'steered answer' } });
+  send({ method: 'item/completed', params: { threadId: currentThreadId, turnId: 'turn-1', item: { id: 'steered-message', type: 'agentMessage', text: 'steered answer' } } });
+  send({ method: 'turn/completed', params: { threadId: currentThreadId, turn: { id: 'turn-1', status: 'completed', error: null } } });
+};
 rl.on('line', (line) => {
   const msg = JSON.parse(line);
   if (msg.id === 900 && msg.result && msg.result.decision === 'decline') {
@@ -503,6 +571,7 @@ rl.on('line', (line) => {
     send({ id: msg.id, result: { turn: { id: 'turn-1' } } });
     const prompt = msg.params.input[0].text;
     fs.appendFileSync(lifecyclePath, 'identity ' + String(prompt.includes('ou_bot_self')) + '\\n');
+    if (prompt.includes('hold-for-steer')) fs.appendFileSync(lifecyclePath, 'turn-active\\n');
     if (prompt.includes('crash')) {
       setImmediate(() => process.exit(17));
     } else if (prompt.includes('multi-message')) {
@@ -514,6 +583,10 @@ rl.on('line', (line) => {
     } else if (!prompt.includes('hold')) {
       send({ id: 900, method: 'item/commandExecution/requestApproval', params: { threadId: currentThreadId, turnId: 'turn-1', itemId: 'approval-1' } });
     }
+  } else if (msg.method === 'turn/steer') {
+    fs.appendFileSync(steeringRequestPath, JSON.stringify(msg.params) + '\\n');
+    send({ id: msg.id, result: { turnId: 'turn-1' } });
+    setImmediate(completeSteeredTurn);
   } else if (msg.method === 'account/read') {
     send({ id: msg.id, result: { account: { type: 'chatgpt', email: 'private@example.com', planType: 'pro' }, requiresOpenaiAuth: true } });
   } else if (msg.method === 'account/rateLimits/read') {
