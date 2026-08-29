@@ -10,12 +10,12 @@ describe('StableLauncher', () => {
   it('keeps version selection in install.json instead of the command path', async () => {
     const root = await mkdtemp(join(tmpdir(), 'aria-launcher-'));
     const paths = resolveInstallPaths({ installRoot: join(root, 'cli'), binRoot: join(root, 'commands') });
-    const launcher = new StableLauncher(paths, 'linux', '/usr/bin/node');
+    const launcher = new StableLauncher(paths, process.platform, process.execPath);
     await launcher.write();
 
-    expect(await readFile(paths.launcherModuleFile, 'utf8')).toContain(paths.stateFile);
+    expect(await readFile(paths.launcherModuleFile, 'utf8')).toContain(JSON.stringify(paths.stateFile));
     expect(await readFile(paths.commandFile, 'utf8')).toContain(paths.launcherModuleFile);
-    expect(launcher.launchSpec()).toEqual({ nodePath: '/usr/bin/node', entryPath: paths.launcherModuleFile });
+    expect(launcher.launchSpec()).toEqual({ nodePath: process.execPath, entryPath: paths.launcherModuleFile });
   });
 
   it('loads the selected version and preserves CLI arguments', async () => {
@@ -29,9 +29,12 @@ describe('StableLauncher', () => {
       schemaVersion: 1,
       current: { entryPath },
     }));
-    await new StableLauncher(paths, 'linux', process.execPath).write();
+    await new StableLauncher(paths, process.platform, process.execPath).write();
 
-    expect(execFileSync(process.execPath, [paths.commandFile, 'hello'], { encoding: 'utf8' }).trim())
+    expect(execFileSync(paths.commandFile, ['hello'], {
+      encoding: 'utf8',
+      shell: process.platform === 'win32',
+    }).trim())
       .toBe('["hello"]');
   });
 });
