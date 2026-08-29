@@ -34,11 +34,39 @@ For a product walkthrough, see the [Feishu document](https://larkcommunity.feish
 
 ## Install
 
+Aria is currently distributed from private, immutable GitHub Releases; the
+Aria package itself is not published to npm. First authenticate GitHub CLI with
+an account that can read `maxverse-ai/aria`, then download the standalone
+installer from the newest complete internal release:
+
 ```bash
-npm i -g @maxverse-ai/aria
-# or
-pnpm add -g @maxverse-ai/aria
+gh auth status
+ARIA_REPOSITORY=maxverse-ai/aria
+ARIA_TAG="$(gh api "repos/$ARIA_REPOSITORY/releases?per_page=100" --jq 'map(select(.draft == false and .prerelease == true and .immutable == true and (.tag_name | startswith("internal-v")))) | sort_by(.tag_name | ltrimstr("internal-v") | split(".") | map(tonumber)) | last.tag_name')"
+ARIA_INSTALL_TMP="$(mktemp -d)"
+gh release download "$ARIA_TAG" --repo "$ARIA_REPOSITORY" --pattern aria-install.mjs --dir "$ARIA_INSTALL_TMP"
+node "$ARIA_INSTALL_TMP/aria-install.mjs"
 ```
+
+The installer delegates credentials to `gh`; Aria never reads or stores a
+GitHub token. It installs versioned packages under a platform data directory
+and writes a stable `aria` launcher (normally `~/.local/bin/aria` on Linux and
+macOS). Add the printed command directory to `PATH` if needed.
+
+To upgrade or roll back later:
+
+```bash
+aria update check
+aria update plan
+aria update apply <plan-id>
+aria update status <operation-id>
+aria update rollback
+```
+
+`apply` and `rollback` use an OS-detached executor by default, so updating a
+running daemon cannot kill its own updater. Each apply rechecks live activity,
+release metadata, and package bytes; failed health checks restore the previous
+version and service definitions.
 
 ## First run
 
@@ -79,7 +107,10 @@ aria status
 aria stop
 ```
 
-Install globally before using service commands. The daemon's launchd plist / systemd unit / Windows task records the bridge CLI path; if that path comes from an npm temp cache through `npx`, the daemon can break when the cache is cleaned. `run` is fine through `npx` as a one-shot foreground process.
+Install with the versioned GitHub Release installer before using service
+commands. The daemon definition points to Aria's stable launcher, while the
+active version is selected through an atomically written install-state file.
+This keeps service definitions valid across upgrades and rollbacks.
 
 Service commands install a per-profile service:
 

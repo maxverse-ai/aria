@@ -7,7 +7,18 @@ import { describe, expect, it } from "vitest";
 import { sha256File, validateManifest, validatePackageInventory, validatePackageName } from "../../../tools/artifact.mjs";
 import { compareNumericVersions, evaluateToolchain, parseNumericVersion } from "../../../tools/infra-doctor.mjs";
 
-const requiredFiles = ["LICENSE", "README.md", "README.zh.md", "bin/aria.mjs", "dist/cli.js", "dist/index.d.ts", "dist/index.js", "package.json"];
+const requiredFiles = [
+  "LICENSE",
+  "README.md",
+  "README.zh.md",
+  "bin/aria.mjs",
+  "dist/cli.js",
+  "dist/installer.js",
+  "dist/updater.js",
+  "dist/index.d.ts",
+  "dist/index.js",
+  "package.json",
+];
 
 describe("toolchain doctor", () => {
   it("parses and compares numeric runtime versions", () => {

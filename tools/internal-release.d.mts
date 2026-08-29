@@ -29,3 +29,29 @@ export function createInternalReleasePlan(input: {
   digest: string;
   notes: string;
 }): InternalReleasePlan;
+
+export interface InternalReleaseManifest {
+  schemaVersion: 1;
+  channel: "internal";
+  repository: string;
+  tag: string;
+  version: string;
+  commit: string;
+  packageName: string;
+  artifactManifest: "manifest.json";
+  tarball: string;
+  checksums: "SHA256SUMS";
+  sha256: string;
+  nodeRange: string;
+  stateSchemaVersion: 1;
+  minRollbackVersion: string | null;
+  createdAt: string;
+}
+
+export function createReleaseManifest(input: {
+  packageJson: { name: string; version: string; engines?: { node?: string } };
+  plan: Pick<InternalReleasePlan, "ok" | "tag" | "version" | "commit">;
+  manifest: { tarball: string };
+  digest: string;
+  createdAt: string;
+}): InternalReleaseManifest;

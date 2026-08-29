@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { execFileSync } from "node:child_process";
-import { readFileSync, writeFileSync } from "node:fs";
+import { copyFileSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -76,6 +76,31 @@ export function createInternalReleasePlan({ packageJson, policy, manifest, commi
   };
 }
 
+export function createReleaseManifest({ packageJson, plan, manifest, digest, createdAt }) {
+  if (!plan.ok) throw new Error("cannot create release metadata from an invalid internal release plan");
+  const nodeRange = packageJson.engines?.node;
+  if (typeof nodeRange !== "string" || !/^>=\d+\.\d+\.\d+$/.test(nodeRange)) {
+    throw new Error("package engines.node must be a simple >=x.y.z range");
+  }
+  return {
+    schemaVersion: 1,
+    channel: "internal",
+    repository: expectedRepository,
+    tag: plan.tag,
+    version: plan.version,
+    commit: plan.commit,
+    packageName: packageJson.name,
+    artifactManifest: "manifest.json",
+    tarball: basename(manifest.tarball),
+    checksums: "SHA256SUMS",
+    sha256: digest,
+    nodeRange,
+    stateSchemaVersion: 1,
+    minRollbackVersion: null,
+    createdAt,
+  };
+}
+
 function assertCleanWorktree() {
   if (run("git", ["status", "--porcelain", "--untracked-files=normal"])) {
     throw new Error("internal release requires a clean worktree");
@@ -122,11 +147,24 @@ function prepareInternalRelease() {
 
   const checksumPath = resolve(root, "artifacts", "SHA256SUMS");
   writeFileSync(checksumPath, `${digest}  ${basename(tarball)}\n`, "utf8");
+  const releaseManifestPath = resolve(root, "artifacts", "release.json");
+  const releaseManifest = createReleaseManifest({
+    packageJson,
+    plan,
+    manifest,
+    digest,
+    createdAt: new Date().toISOString(),
+  });
+  writeFileSync(releaseManifestPath, `${JSON.stringify(releaseManifest, null, 2)}\n`, "utf8");
+  const installerPath = resolve(root, "artifacts", "aria-install.mjs");
+  copyFileSync(resolve(root, "dist", "installer.js"), installerPath);
   const result = {
     ...plan,
     tarball: `artifacts/${basename(tarball)}`,
     manifest: "artifacts/manifest.json",
     checksums: "artifacts/SHA256SUMS",
+    releaseManifest: "artifacts/release.json",
+    installer: "artifacts/aria-install.mjs",
     notes,
     sha256: digest,
   };

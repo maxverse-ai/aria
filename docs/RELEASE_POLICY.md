@@ -91,13 +91,19 @@ and stable-promotion releases.
 
 Internal snapshots are private repository records, not npm publications. They
 use the package version already reviewed on `main`, an `internal-v<VERSION>` tag,
-and a GitHub prerelease with a verified tarball, manifest, and checksum file.
+and an immutable GitHub prerelease with a verified tarball, artifact manifest,
+checksum file, release contract, and standalone installer.
 
 `.github/workflows/internal-release.yml` is the only supported entry point. It
 accepts only the exact current `origin/main` commit, reruns all gates, builds and
 verifies the candidate, creates a draft release, verifies all assets, and only
 then publishes it as a prerelease. It has no npm credentials or OIDC permission
 and never invokes `npm publish`.
+
+Repository-level Release immutability is mandatory. The workflow verifies the
+published release's `immutable` API field and fails closed when the protection
+is not enabled. Consumers ignore drafts, mutable releases, incomplete asset
+sets, and tags outside `internal-v*`.
 
 Internal tags deliberately do not match `v*`, so they remain outside the npm
 tag/registry consistency checks. Internal versions are immutable: corrections

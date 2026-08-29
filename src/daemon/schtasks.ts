@@ -10,6 +10,7 @@ import {
   windowsLauncherCmdPath,
 } from './paths';
 import { paths } from '../config/paths';
+import type { ServiceLaunchSpec } from './service-adapter';
 
 export interface LauncherInputs {
   /** Absolute path to node.exe. */
@@ -52,13 +53,17 @@ export function buildLauncherCmd(inputs: LauncherInputs): string {
   ].join('\r\n');
 }
 
-async function writeLauncherCmd(profile: string, runArgs: string[] = ['run']): Promise<void> {
-  const bridgeEntryPath = process.argv[1];
+async function writeLauncherCmd(
+  profile: string,
+  runArgs: string[] = ['run'],
+  launchSpec?: ServiceLaunchSpec,
+): Promise<void> {
+  const bridgeEntryPath = launchSpec?.bridgeEntryPath ?? process.argv[1];
   if (!bridgeEntryPath) {
     throw new Error('cannot determine bridge entry path (process.argv[1] is empty)');
   }
   const content = buildLauncherCmd({
-    nodePath: process.execPath,
+    nodePath: launchSpec?.nodePath ?? process.execPath,
     bridgeEntryPath,
     envPath: process.env.PATH ?? '',
     profile,
@@ -97,8 +102,9 @@ function runSchtasks(args: string[]): SchtasksResult {
 export async function installTask(
   profile: string,
   runArgs: string[] = ['run'],
+  launchSpec?: ServiceLaunchSpec,
 ): Promise<SchtasksResult> {
-  await writeLauncherCmd(profile, runArgs);
+  await writeLauncherCmd(profile, runArgs, launchSpec);
   return runSchtasks([
     '/Create',
     '/F',

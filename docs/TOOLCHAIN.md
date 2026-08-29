@@ -65,10 +65,12 @@ It is not a release. The protected release workflow repeats the exact-commit
 gates, builds this candidate once, verifies it, and passes the same tarball to
 the guarded publisher. It never runs `npm publish` against the source directory.
 
-The private internal-release workflow uses the same candidate format, adds a
-`SHA256SUMS` file, and attaches all three files to a draft GitHub release before
-publishing it as a prerelease. This records an immutable internal snapshot
-without interacting with the npm registry.
+The private internal-release workflow uses the same candidate format and adds
+`SHA256SUMS`, a machine-readable `release.json`, and the standalone
+`aria-install.mjs` bootstrapper. It attaches all five assets to a draft GitHub
+release before publishing it as an immutable prerelease. The workflow fails
+closed unless repository-level GitHub Release immutability is enabled. It never
+interacts with the npm registry for the Aria package.
 
 ## Release boundary
 

@@ -76,8 +76,10 @@ jobs:
           TARBALL: ${{ steps.internal.outputs.tarball }}
           MANIFEST: ${{ steps.internal.outputs.manifest }}
           CHECKSUMS: ${{ steps.internal.outputs.checksums }}
+          RELEASE_MANIFEST: ${{ steps.internal.outputs.releaseManifest }}
+          INSTALLER: ${{ steps.internal.outputs.installer }}
         run: |
-          gh release create "$TAG" "$TARBALL" "$MANIFEST" "$CHECKSUMS" \
+          gh release create "$TAG" "$TARBALL" "$MANIFEST" "$CHECKSUMS" "$RELEASE_MANIFEST" "$INSTALLER" \
             --target "$COMMIT" \
             --title "$TITLE" \
             --notes-file "$NOTES" \
@@ -91,7 +93,10 @@ jobs:
           TAG: ${{ steps.internal.outputs.tag }}
         run: |
           test "$(gh release view "$TAG" --json isDraft --jq '.isDraft')" = "true"
-          test "$(gh release view "$TAG" --json assets --jq '.assets | length')" = "3"
+          test "$(gh release view "$TAG" --json assets --jq '.assets | length')" = "5"
+          for asset in manifest.json SHA256SUMS release.json aria-install.mjs; do
+            gh release view "$TAG" --json assets --jq '.assets[].name' | grep -Fx "$asset"
+          done
 
       - name: Publish as private prerelease
         env:
@@ -106,6 +111,7 @@ jobs:
         run: |
           test "$(gh release view "$TAG" --json isDraft --jq '.isDraft')" = "false"
           test "$(gh release view "$TAG" --json isPrerelease --jq '.isPrerelease')" = "true"
+          test "$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" --jq '.immutable')" = "true"
 
       - name: Remove incomplete release created by this run
         if: failure() && steps.draft.outputs.created == 'true'

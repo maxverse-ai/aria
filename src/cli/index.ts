@@ -39,6 +39,13 @@ import {
   runConfigPlanShow,
   runConfigSettings,
 } from './commands/config-change';
+import {
+  runUpdateApply,
+  runUpdateCheck,
+  runUpdatePlan,
+  runUpdateRollback,
+  runUpdateStatus,
+} from './commands/update';
 
 const program = new Command();
 
@@ -341,6 +348,57 @@ program
   .option('--web-ui', 'target the supervisor service instead of a per-profile one')
   .action(async (opts: { profile?: string; webUi?: boolean }) => {
     await runServiceUnregister({ profile: opts.profile, webUi: opts.webUi });
+  });
+
+// === distribution commands (private immutable GitHub Releases) ===
+
+const update = program
+  .command('update')
+  .description('Check, plan, apply, and roll back versioned Aria installations');
+
+update
+  .command('check')
+  .description('Check the newest complete immutable internal release')
+  .option('--json', 'print machine-readable JSON')
+  .action(async (opts: { json?: boolean }) => {
+    await runUpdateCheck(opts);
+  });
+
+update
+  .command('plan')
+  .description('Download, verify, and persist an expiring update plan')
+  .option('--version <version>', 'select an exact stable version')
+  .option('--force', 'allow an older target version')
+  .option('--json', 'print machine-readable JSON')
+  .action(async (opts: { version?: string; force?: boolean; json?: boolean }) => {
+    await runUpdatePlan(opts);
+  });
+
+update
+  .command('apply <plan-id>')
+  .description('Apply a verified update plan using a detached OS executor')
+  .option('--foreground', 'run in the current process (recovery use only)')
+  .option('--json', 'print machine-readable JSON')
+  .action(async (planId: string, opts: { foreground?: boolean; json?: boolean }) => {
+    await runUpdateApply(planId, opts);
+  });
+
+update
+  .command('status [operation-id]')
+  .description('Show the latest or selected update operation')
+  .option('--json', 'print machine-readable JSON')
+  .action(async (operationId: string | undefined, opts: { json?: boolean }) => {
+    await runUpdateStatus(operationId, opts);
+  });
+
+update
+  .command('rollback')
+  .description('Atomically switch back to the previous installed version')
+  .option('--force', 'proceed when live activity cannot be proven safe')
+  .option('--foreground', 'run in the current process (recovery use only)')
+  .option('--json', 'print machine-readable JSON')
+  .action(async (opts: { force?: boolean; foreground?: boolean; json?: boolean }) => {
+    await runUpdateRollback(opts);
   });
 
 const secrets = program
