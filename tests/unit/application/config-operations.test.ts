@@ -20,6 +20,7 @@ describe('low-risk config operations', () => {
     ['max-concurrent-runs', 4, 'preferences.maxConcurrentRuns', 4, 'live'],
     ['run-idle-timeout', 12, 'preferences.runIdleTimeoutMinutes', 12, 'live'],
     ['meeting-enabled', true, 'meeting.enabled', true, 'reconnect'],
+    ['steering', 'auto', 'coordination.steering', 'auto', 'live'],
   ] as const)('prepares %s through an explicit deterministic operation', (setting, value, field, after, effect) => {
     const root = fixtureRoot();
     const id = operationIdForSetting(setting);
@@ -45,6 +46,7 @@ describe('low-risk config operations', () => {
     expect(parseSettingValue('message-reply', 'card')).toBe('card');
     expect(parseSettingValue('service-tier', 'standard')).toBe(SERVICE_TIER_STANDARD);
     expect(parseSettingValue('service-tier', 'fast')).toBe('fast');
+    expect(parseSettingValue('steering', 'shadow')).toBe('shadow');
     expect(() => parseSettingValue('show-tool-calls', 'maybe')).toThrow(/expects/);
     expect(() => operationIdForSetting('app-secret')).toThrow(/unsupported setting/);
   });

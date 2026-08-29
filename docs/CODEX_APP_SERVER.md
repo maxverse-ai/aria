@@ -28,6 +28,17 @@ does not grant a broader sandbox.
 App Server requests that require interactive approval are declined. Other
 unsupported server-initiated requests fail explicitly instead of hanging.
 
+## Active-turn steering
+
+Codex advertises a structured, text-only steering capability. When enabled by
+the profile's `/steer` policy, Aria sends `turn/steer` with the active
+`threadId`, an `expectedTurnId`, and the new text envelope. The message leaves
+the next-turn inbox only after App Server returns that same turn id. Duplicate
+Feishu deliveries reuse a stable request id and do not send the JSON-RPC call
+twice. Unsupported engines and any deferred/rejected attempt retain the message
+for the next turn. See [`COORDINATION.md`](COORDINATION.md) for the ownership and
+final-reply ordering model.
+
 ## Live status
 
 `/status` reads structured metadata from

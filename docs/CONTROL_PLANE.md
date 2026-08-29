@@ -112,15 +112,16 @@ aria config apply <plan-id> [--json]
 
 Supported settings are `require-mention`, `show-tool-calls`, `message-reply`,
 `cot-messages`, `max-concurrent-runs`, `run-idle-timeout` and
-`meeting-enabled`. `aria config settings` is the machine-readable source of
-truth for accepted values.
+`meeting-enabled`, `service-tier`, and `steering`. `aria config settings` is the
+machine-readable source of truth for accepted values. Steering accepts `off`,
+`shadow`, `auto`, or `on`.
 
 The CLI creates no direct-write shortcut: plan, confirmation and application
 remain separate invocations. Because an external CLI process cannot refresh a
 running bridge's in-memory profile, its compatibility presenter explicitly
 reports `restartRequired: true`; persisted changes take effect after a safe
-restart. Canonical command metadata is transport-neutral: the first six
-settings declare `live`, while `meeting-enabled` declares `reconnect`.
+restart. Canonical command metadata is transport-neutral: every setting except
+`meeting-enabled` declares `live`; `meeting-enabled` declares `reconnect`.
 The `/config` preferences form executes one registered aggregate command and
 refreshes the exact committed revision through `ProfileRuntimeReconciler`.
 The web settings form uses one larger aggregate contract so a form submission

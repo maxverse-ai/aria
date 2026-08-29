@@ -1,6 +1,7 @@
 import type { AccessMode } from '../config/permissions';
 import type { ProfileConfig } from '../config/profile-schema';
 import { BRIDGE_SYSTEM_PROMPT } from './bridge-system-prompt';
+import type { AgentSteeringSupport } from './steering';
 
 export type AgentCapabilityId = string;
 export type AgentSessionKind = string;
@@ -25,6 +26,8 @@ export interface AgentCapability {
   supportsImages?: boolean;
   /** Engine accepts model-scoped service tiers such as Codex Fast. */
   supportsServiceTiers?: boolean;
+  /** Static capability advertisement; the concrete run still owns delivery. */
+  steering?: AgentSteeringSupport;
 }
 
 export function claudeCapability(profile?: Pick<ProfileConfig, 'permissions'>): AgentCapability {
@@ -63,6 +66,7 @@ export function codexCapability(profile: Pick<ProfileConfig, 'permissions'>): Ag
     finalReply: 'separate',
     supportsImages: true,
     supportsServiceTiers: true,
+    steering: { mode: 'direct', textOnly: true },
   };
 }
 

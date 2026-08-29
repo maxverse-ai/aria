@@ -2,8 +2,9 @@ import type { NormalizedMessage } from '@larksuite/channel';
 import { realpath } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { AgentEvent } from '../../../src/agent/types.js';
-import type { FakeAgentEvents } from '../../helpers/fake-agent.js';
+import type { AgentSteeringRequest } from '../../../src/agent/steering.js';
+import type { AgentEvent, AgentRun, AgentRunOptions } from '../../../src/agent/types.js';
+import type { FakeAgentEvents, FakeAgentRun } from '../../helpers/fake-agent.js';
 import { createDefaultProfileConfig } from '../../../src/config/profile-schema.js';
 import { log } from '../../../src/core/logger.js';
 import { SessionStore } from '../../../src/session/store.js';
@@ -79,6 +80,43 @@ afterEach(async () => {
   sdkMock.channel = undefined;
   sdkMock.createLarkChannel.mockClear();
   await Promise.all(cleanups.splice(0).map((cleanup) => cleanup()));
+});
+
+describe('active-turn steering', () => {
+  it('hands an eligible second IM message to the active Codex turn exactly once', async () => {
+    const agent = new SteerableFakeAgent();
+    const h = await createHarness({
+      agent,
+      steering: 'auto',
+      messageReply: 'text',
+    });
+    await startTestBridge(h);
+
+    await h.channel.handlers.message?.(message('om_first', 'start the task'));
+    await waitFor(() => agent.steeringRuns.length === 1);
+
+    await h.channel.handlers.message?.(
+      message('om_second', 'continue with this additional constraint'),
+    );
+
+    const run = agent.steeringRuns[0];
+    if (!run) throw new Error('expected the first run to be active');
+    expect(run.steerCalls).toHaveLength(1);
+    expect(run.steerCalls[0]).toMatchObject({
+      requestId: 'im:om_second',
+      expectedRunId: run.runId,
+    });
+    expect(run.steerCalls[0]?.prompt).toContain('<user_input>');
+    expect(run.steerCalls[0]?.prompt).toContain('continue with this additional constraint');
+    expect(run.steerCalls[0]?.prompt).not.toContain('start the task');
+
+    run.complete();
+    await waitFor(() => h.channel.sent.length === 1);
+    await new Promise((resolve) => setTimeout(resolve, 700));
+
+    expect(agent.runOptions).toHaveLength(1);
+    expect(lastMarkdown(h.channel)).toContain('FINAL_AFTER_STEER');
+  });
 });
 
 describe('markdown stream startup failures', () => {
@@ -438,6 +476,9 @@ async function createHarness(options: {
   messageReply?: 'card' | 'markdown' | 'text';
   /** Codex holds its answer back for a dedicated final reply; Claude streams it. */
   agentKind?: 'claude' | 'codex';
+  /** Inject a specialized adapter for active-turn lifecycle tests. */
+  agent?: FakeAgentAdapter;
+  steering?: 'off' | 'shadow' | 'auto' | 'on';
 } = {}): Promise<{
   tmp: TmpProfile;
   channel: FakeLarkChannel;
@@ -468,6 +509,9 @@ async function createHarness(options: {
       cotMessages: 'off',
       ...(options.messageReply ? { messageReply: options.messageReply } : {}),
     },
+    coordination: {
+      steering: options.steering ?? 'off',
+    },
   });
   const profileConfig = {
     ...baseProfileConfig,
@@ -478,7 +522,7 @@ async function createHarness(options: {
   };
   const sessions = new SessionStore(join(tmp.profile, 'sessions.json'));
   const workspaces = new WorkspaceStore(join(tmp.profile, 'workspaces.json'));
-  const agent = new FakeAgentAdapter({
+  const agent = options.agent ?? new FakeAgentAdapter({
     id: 'codex',
     displayName: 'Codex',
     events: options.events ?? [
@@ -508,6 +552,84 @@ async function createHarness(options: {
     profileConfig,
     controls,
   };
+}
+
+class SteerableFakeAgent extends FakeAgentAdapter {
+  readonly steeringRuns: SteerableFakeRun[] = [];
+
+  constructor() {
+    super({ id: 'codex', displayName: 'Codex' });
+  }
+
+  override run(opts: AgentRunOptions): AgentRun {
+    this.runOptions.push(opts);
+    const run = new SteerableFakeRun(opts);
+    this.runs.push(run);
+    this.steeringRuns.push(run);
+    return run;
+  }
+}
+
+class SteerableFakeRun implements FakeAgentRun {
+  readonly runId: string;
+  readonly opts: AgentRunOptions;
+  readonly events: AsyncIterable<AgentEvent>;
+  readonly steering = { mode: 'direct' as const, textOnly: true };
+  readonly steerCalls: AgentSteeringRequest[] = [];
+  readonly waitForExitResult = true;
+  private readonly gate = deferred<void>();
+  private readonly exited = deferred<void>();
+  private stopRequested = false;
+  private waitCalls = 0;
+
+  constructor(opts: AgentRunOptions) {
+    this.runId = opts.runId;
+    this.opts = opts;
+    this.events = this.iterate();
+  }
+
+  get stopped(): boolean {
+    return this.stopRequested;
+  }
+
+  get waitForExitCalls(): number {
+    return this.waitCalls;
+  }
+
+  async steer(request: AgentSteeringRequest) {
+    this.steerCalls.push(request);
+    return { kind: 'accepted' as const, runId: this.runId };
+  }
+
+  complete(): void {
+    this.gate.resolve();
+  }
+
+  async stop(): Promise<void> {
+    this.stopRequested = true;
+    this.gate.resolve();
+  }
+
+  async waitForExit(): Promise<boolean> {
+    this.waitCalls++;
+    await this.exited.promise;
+    return true;
+  }
+
+  private async *iterate(): AsyncIterable<AgentEvent> {
+    try {
+      await this.gate.promise;
+      if (!this.stopRequested) {
+        yield { type: 'final_text', content: 'FINAL_AFTER_STEER' };
+      }
+      yield {
+        type: 'done',
+        terminationReason: this.stopRequested ? 'interrupted' : 'normal',
+      };
+    } finally {
+      this.exited.resolve();
+    }
+  }
 }
 
 async function startTestBridge(h: {
