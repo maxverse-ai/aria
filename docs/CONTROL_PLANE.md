@@ -1,20 +1,25 @@
 # Control plane architecture
 
-The current implementation status is recorded here. The deferred design for
-trusted actors, authorization, delegation, adapters and runtime boundaries is
-documented separately in [`CLI_CONTROL_PLANE_DESIGN.md`](CLI_CONTROL_PLANE_DESIGN.md).
-Those sections are proposals, not shipped behavior.
+The current implementation status is recorded here. The approved target
+architecture and migration plan for trusted actors, authorization, adapters,
+runtime effects and audit are documented separately in
+[`CLI_CONTROL_PLANE_DESIGN.md`](CLI_CONTROL_PLANE_DESIGN.md). Those sections
+are not shipped behavior unless identified below.
 
 Aria exposes supported management capabilities through one application-layer
-control plane. CLI commands are the canonical machine interface; Feishu cards,
-the local web console and agent-driven natural-language flows are adapters over
-the same commands rather than independent configuration implementations.
+Management API. CLI commands are the currently shipped machine interface.
+Feishu cards and the local web console still share the older `config-ops.ts`
+write path and have not yet migrated; agent-driven flows can invoke the shipped
+CLI commands. The target is for every public entry point to become an adapter
+over the same registered commands.
 
 ```text
-CLI ---------+
-Card --------+--> Control Plane --> Domain/config/runtime readers
-Web UI ------+
-Agent + CLI -+
+CLI --------------------+--> Management API --> Config repository
+Card / Web (target) ----+                         |
+Agent + CLI ------------+                         +--> Runtime reconciler
+
+Runtime Admin IPC -----------------------------> Runtime lifecycle
+Native Read API -------------------------------> Read model and audit queries
 ```
 
 ## Dependency rules
@@ -25,8 +30,9 @@ Agent + CLI -+
 - Snapshots use explicit allowlists. Secrets, actor/chat identifiers and local
   filesystem paths must not be exposed by default.
 - JSON contracts are versioned independently from the stored profile schema.
-- Conversation, credential and runtime bindings are separate concepts. A
-  future write control plane must not use one identifier as all three.
+- Management commands, runtime administration, and native reads have separate
+  contracts. One surface must not silently authorize or persist through
+  another.
 
 ## Phase 1: read-only surface
 
@@ -48,9 +54,9 @@ All four operations are local and read-only. Their JSON schemas are:
 
 ## Phase 2: change protocol
 
-All future writers use `ConfigChangeService` and its versioned
-`plan -> confirm -> apply` protocol. This phase intentionally registers no
-user-facing mutation operations yet.
+The shipped CLI change protocol uses `ConfigChangeService` and its versioned
+`plan -> confirm -> apply` workflow. This phase initially registered no
+user-facing mutation operations.
 
 - Operations are explicit, versioned and deterministic; there is no generic
   JSON Patch or direct config-file escape hatch.
@@ -91,5 +97,22 @@ The CLI creates no direct-write shortcut: plan, confirmation and application
 remain separate invocations. Because an external CLI process cannot refresh a
 running bridge's in-memory profile, every phase-3 operation explicitly reports
 `restartRequired: true`; persisted changes take effect after a safe restart.
-Cards, web adapters and agents must call the same service and may not edit
-configuration files directly.
+Cards and web adapters do not satisfy that target yet: their shared
+`config-ops.ts` compatibility path writes configuration and refreshes live
+state directly. They must migrate incrementally without changing current user
+behavior. Agent flows may use the staged CLI service and cannot bypass its
+plan, confirmation, or application steps.
+
+## Current boundary summary
+
+- `ConfigChangeService` is the shipped application boundary for low-risk CLI
+  mutations.
+- `config-ops.ts` is the shared compatibility writer for Feishu and web
+  configuration flows, not a second target architecture.
+- Runtime reconnect, restart, activity preflight, and engine replacement
+  belong to Runtime Admin IPC and the Supervisor.
+- Native Read is a scoped read/query transport and never a configuration
+  writer.
+- Bootstrap, schema/layout migration, secret migration, and recovery are named
+  privileged infrastructure writes. They do not impersonate a user or enter a
+  human confirmation flow.

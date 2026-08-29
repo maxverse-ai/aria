@@ -37,8 +37,9 @@ from, or coupled to the runtime data of the repository used to develop Aria.
 - Initializing Git repositories, Git identities, remotes, or credentials.
 - Copying an existing project into a managed workspace.
 - Pre-populating sessions, logs, caches, OAuth state, or runtime sidecars.
-- Changing the user-agent-space design described in
-  `USER_AGENT_SPACE_ARCHITECTURE.md`.
+- Introducing user-specific runtime spaces. The archived proposal in
+  `USER_AGENT_SPACE_ARCHITECTURE.md` is not an active dependency of this
+  layout.
 - Adopting platform-specific XDG directories in the first implementation. The
   logical boundaries in this document can be mapped to platform-specific roots
   later.
@@ -263,9 +264,9 @@ The core gives the plugin a confined root such as
 `profiles/<profile>/engines/<engine-id>/`. The plugin owns everything below
 that root and cannot redirect other profile state implicitly.
 
-If user-agent spaces are implemented, an agent-space resolver can compose the
-same identity, state, engine, cache, logs, and runtime categories beneath the
-space root. The lifecycle categories remain unchanged.
+The archived user-agent-space proposal does not affect this layout. Any future
+user-specific runtime isolation requires a new architecture decision and must
+compose these lifecycle categories without changing their ownership.
 
 ## Security requirements
 

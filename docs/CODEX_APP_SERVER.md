@@ -3,9 +3,10 @@
 Aria's Codex engine uses one managed `codex app-server --stdio` process per
 profile. The App Server is the only supported Codex execution transport.
 
-The proposed, not-yet-implemented design for keeping group traffic on a shared
-bot runtime while giving each direct-message user an isolated App Server is
-documented in [`USER_AGENT_SPACE_ARCHITECTURE.md`](USER_AGENT_SPACE_ARCHITECTURE.md).
+The earlier user-specific App Server proposal is archived and was never
+implemented. It is retained only as historical context in
+[`USER_AGENT_SPACE_ARCHITECTURE.md`](USER_AGENT_SPACE_ARCHITECTURE.md); the
+active architecture remains one engine runtime per profile.
 
 Profiles only need to identify the Codex binary:
 
