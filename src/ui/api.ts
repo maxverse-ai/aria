@@ -1,4 +1,17 @@
+import { randomUUID } from 'node:crypto';
+import { dirname } from 'node:path';
 import type { LarkChannel } from '@larksuite/channel';
+import {
+  ConfigChangeService,
+  MANAGEMENT_API_VERSION,
+  ManagementApi,
+  PROFILE_SETTINGS_RECONNECT_COMMAND,
+  PROFILE_SETTINGS_UPDATE_COMMAND,
+  configRevision,
+  managementCommandRegistry,
+  nextLarkCliRecordedAt,
+  profileSettingsUpdateParameters,
+} from '../application/control';
 import { fetchKnownChats } from '../bot/lark-info';
 import {
   ADD_BOT_SCOPES,
@@ -20,7 +33,6 @@ import { loadRootConfig, runtimeProfileConfig } from '../config/profile-store';
 import {
   applyProfileLarkCliIdentity,
   saveAccessConfig,
-  savePreferencesConfig,
   type MutableProfileState,
 } from '../config/config-ops';
 import {
@@ -48,6 +60,8 @@ import {
   supportedModels,
 } from '../agent/models';
 import { log } from '../core/logger';
+import { getRunStatusItems } from '../run-status/preferences';
+import { ProfileRuntimeReconciler } from '../runtime/profile-runtime-reconciler';
 import { HttpError } from './http';
 import type { UiRuntime } from './types';
 
@@ -282,9 +296,11 @@ function parseConfigBody(state: MutableProfileState, body: unknown): ParsedConfi
 }
 
 /**
- * Apply a settings change to the profile whose process hosts the UI — live,
- * in-memory, no restart. Runs the lark-cli identity policy (with rollback) like
- * the chat form. Use {@link applyConfigToDisk} for other profiles.
+ * Apply a settings change to the profile whose process hosts the UI. The
+ * desired state is committed through ManagementApi, then reconciled live; a
+ * meeting enable/disable transition uses the profile reconnect path. Runs the
+ * lark-cli identity policy (with rollback) like the chat form. Use
+ * {@link applyConfigToDisk} for other profiles.
  */
 export async function applyConfig(rt: UiRuntime, body: unknown): Promise<ConfigView> {
   const p = parseConfigBody(rt, body);
@@ -295,14 +311,7 @@ export async function applyConfig(rt: UiRuntime, body: unknown): Promise<ConfigV
       if (!ok) throw new ApiError(500, 'lark-cli 身份策略未生效');
       identityApplied = true;
     }
-    await savePreferencesConfig(
-      rt,
-      p.nextPreferences,
-      p.requireMentionInGroup,
-      p.larkCliIdentity,
-      p.mode,
-      p.meeting,
-    );
+    await commitProfileSettings(rt, p, rt);
   } catch (err) {
     if (identityApplied) {
       await applyProfileLarkCliIdentity(rt, p.previousEffectiveIdentity).catch(() =>
@@ -312,6 +321,7 @@ export async function applyConfig(rt: UiRuntime, body: unknown): Promise<ConfigV
     if (err instanceof ApiError) throw err;
     throw new ApiError(500, `保存失败：${err instanceof Error ? err.message : String(err)}`);
   }
+  await refreshConfigProjection(rt);
   log.info('ui', 'config-saved', { profile: rt.profile, mode: p.mode, live: true });
   return buildConfigView(rt, true);
 }
@@ -329,19 +339,86 @@ export async function applyConfigToDisk(
 ): Promise<ConfigView> {
   const p = parseConfigBody(state, body);
   try {
-    await savePreferencesConfig(
-      state,
-      p.nextPreferences,
-      p.requireMentionInGroup,
-      p.larkCliIdentity,
-      p.mode,
-      p.meeting,
-    );
+    await commitProfileSettings(state, p);
   } catch (err) {
     throw new ApiError(500, `保存失败：${err instanceof Error ? err.message : String(err)}`);
   }
+  await refreshConfigProjection(state);
   log.info('ui', 'config-saved', { profile: state.profile, mode: p.mode, live: false });
   return buildConfigView(state, false);
+}
+
+async function commitProfileSettings(
+  state: MutableProfileState,
+  parsed: ParsedConfig,
+  runtime?: UiRuntime,
+): Promise<void> {
+  const actor = { source: 'web' as const, principal: 'local-console' };
+  const api = new ManagementApi(
+    new ConfigChangeService({
+      rootDir: dirname(state.configPath),
+      registry: managementCommandRegistry,
+    }),
+    runtime ? new ProfileRuntimeReconciler(runtime) : undefined,
+  );
+  const command = parsed.meeting.enabled === state.profileConfig.meeting.enabled
+    ? PROFILE_SETTINGS_UPDATE_COMMAND
+    : PROFILE_SETTINGS_RECONNECT_COMMAND;
+  const nextCfg = { ...state.cfg, preferences: parsed.nextPreferences };
+  const result = await api.execute({
+    schema: 'aria.management.execute.request.v1',
+    apiVersion: MANAGEMENT_API_VERSION,
+    requestId: randomUUID(),
+    actor,
+    profile: state.profile,
+    command,
+    input: profileSettingsUpdateParameters({
+      mode: parsed.mode,
+      model: parsed.nextPreferences.model,
+      messageReply: getMessageReplyMode(nextCfg),
+      showToolCalls: getShowToolCalls(nextCfg),
+      cotMessages: getCotMessages(nextCfg),
+      runStatusTouched: false,
+      runStatusItems: getRunStatusItems(parsed.nextPreferences),
+      maxConcurrentRuns: getMaxConcurrentRuns(nextCfg),
+      runIdleTimeoutMinutes: (getRunIdleTimeoutMs(nextCfg) ?? 0) / 60_000,
+      requireMentionInGroup: parsed.requireMentionInGroup,
+      larkCliIdentity: parsed.larkCliIdentity,
+      larkCliRecordedAt: nextLarkCliRecordedAt(
+        state.profileConfig.larkCli.localUserImport?.attemptedAt,
+      ),
+      meeting: parsed.meeting,
+    }),
+  });
+  if (!runtime || result.reconciliation.status === 'applied') return;
+
+  const retry = await api.commit({
+    schema: 'aria.management.commit.request.v1',
+    apiVersion: MANAGEMENT_API_VERSION,
+    requestId: randomUUID(),
+    actor,
+    planId: result.planId,
+  });
+  if (retry.reconciliation.status !== 'applied') {
+    const currentRoot = await loadRootConfig(state.configPath).catch(() => undefined);
+    log.warn('ui', 'config-runtime-reconcile-incomplete', {
+      profile: state.profile,
+      status: retry.reconciliation.status,
+      effect: retry.reconciliation.effect,
+      desiredRevision: result.applyResult.resultRevision,
+      ...(currentRoot ? { currentRevision: configRevision(currentRoot) } : {}),
+      ...('code' in retry.reconciliation ? { code: retry.reconciliation.code } : {}),
+      ...('reason' in retry.reconciliation ? { reason: retry.reconciliation.reason } : {}),
+    });
+  }
+}
+
+async function refreshConfigProjection(state: MutableProfileState): Promise<void> {
+  const root = await loadRootConfig(state.configPath);
+  const profileConfig = root?.profiles[state.profile];
+  if (!root || !profileConfig) throw new Error(`profile not found: ${state.profile}`);
+  state.profileConfig = profileConfig;
+  state.cfg = runtimeProfileConfig(root, state.profile);
 }
 
 type AccessKind = 'user' | 'admin' | 'chat';

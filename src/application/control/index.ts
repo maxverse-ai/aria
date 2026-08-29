@@ -146,9 +146,18 @@ export type {
   LowRiskConfigSettingDescriptor,
 } from './config-operations';
 export {
+  nextLarkCliRecordedAt,
   PROFILE_PREFERENCES_UPDATE_COMMAND,
   profilePreferencesUpdateCommand,
   profilePreferencesUpdateParameters,
 } from './profile-preferences-command';
 export type { ProfilePreferencesUpdateInput } from './profile-preferences-command';
+export {
+  PROFILE_SETTINGS_RECONNECT_COMMAND,
+  PROFILE_SETTINGS_UPDATE_COMMAND,
+  profileSettingsReconnectCommand,
+  profileSettingsUpdateCommand,
+  profileSettingsUpdateParameters,
+} from './profile-settings-command';
+export type { ProfileSettingsUpdateInput } from './profile-settings-command';
 export { managementCommandRegistry, managementCommands } from './management-commands';

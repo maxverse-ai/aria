@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createDefaultProfileConfig } from '../../../src/config/profile-schema';
 import {
   createRootConfig,
@@ -35,7 +35,7 @@ async function makeControls(profile: string): Promise<any> {
     ownerRefreshState: 'unknown',
     processId: 'test',
     refreshOwner: async () => {},
-    restart: async () => {},
+    restart: vi.fn(async () => {}),
   };
 }
 
@@ -157,16 +157,39 @@ describe('ui server (supervisor-backed)', () => {
     expect(saved.profiles.claude.mode).toBe('team');
   });
 
+  it('reconnects only when online meeting enablement changes', async () => {
+    const controls = online.get('claude');
+    const enabled = await json(
+      await post('/api/config', handle.token, {
+        meeting: { enabled: true, trigger: '@aria' },
+      }),
+    );
+    expect(enabled.meeting).toMatchObject({ enabled: true, trigger: '@aria' });
+    expect(controls.restart).toHaveBeenCalledWith({ wait: true });
+
+    controls.restart.mockClear();
+    const tuned = await json(
+      await post('/api/config', handle.token, { meeting: { trigger: '@assistant' } }),
+    );
+    expect(tuned.meeting).toMatchObject({ enabled: true, trigger: '@assistant' });
+    expect(controls.restart).not.toHaveBeenCalled();
+  });
+
   it('reads and writes an offline profile on disk (deferred, live=false)', async () => {
     const view = await json(await get('/api/config?profile=work', handle.token));
     expect(view.live).toBe(false);
 
     const saved = await json(
-      await post('/api/config?profile=work', handle.token, { mode: 'team' }),
+      await post('/api/config?profile=work', handle.token, {
+        mode: 'team',
+        meeting: { enabled: true },
+      }),
     );
     expect(saved.live).toBe(false);
+    expect(saved.meeting.enabled).toBe(true);
     const disk = JSON.parse(await readFile(configPath, 'utf8'));
     expect(disk.profiles.work.mode).toBe('team');
+    expect(disk.profiles.work.meeting.enabled).toBe(true);
     expect(disk.profiles.claude.mode).toBe('personal');
   });
 
