@@ -1,8 +1,12 @@
-# User Agent Space architecture
+# Archived: User Agent Space architecture
 
-> Status: design proposal, not implemented. This document records the agreed
-> direction so implementation can be resumed later without rediscovering the
-> identity and runtime boundaries.
+> Status: archived proposal, never implemented, not on the active roadmap.
+> Aria retains one engine runtime per profile. This document is preserved only
+> as historical design context; implementation requires a new architecture
+> decision and must not be inferred from the management-control-plane plan.
+
+Everything below this notice describes the historical proposal. Its decisions,
+phases, rollout steps, and acceptance criteria are inactive.
 
 ## Decision summary
 
