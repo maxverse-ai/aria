@@ -256,6 +256,11 @@ describe('Bridge command contracts', () => {
     ).resolves.toBe(true);
 
     expect(lastMarkdown(h.channel)).toContain('仅管理员可用');
+
+    await expect(
+      h.run('/fast on', { senderId: 'ou-not-admin' }),
+    ).resolves.toBe(true);
+    expect(lastMarkdown(h.channel)).toContain('仅管理员可用');
   });
 
   it('does not expose access allowlists through the Lark /config form', async () => {

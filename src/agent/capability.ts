@@ -23,6 +23,8 @@ export interface AgentCapability {
   finalReply?: 'inline' | 'separate';
   /** Engine can consume image attachments. */
   supportsImages?: boolean;
+  /** Engine accepts model-scoped service tiers such as Codex Fast. */
+  supportsServiceTiers?: boolean;
 }
 
 export function claudeCapability(profile?: Pick<ProfileConfig, 'permissions'>): AgentCapability {
@@ -60,6 +62,7 @@ export function codexCapability(profile: Pick<ProfileConfig, 'permissions'>): Ag
     },
     finalReply: 'separate',
     supportsImages: true,
+    supportsServiceTiers: true,
   };
 }
 

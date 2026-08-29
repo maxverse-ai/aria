@@ -36,7 +36,7 @@ describe('config change CLI handlers', () => {
     await runConfigSettings({ json: true });
     const settings = JSON.parse(output.pop()!);
     expect(settings.schema).toBe('aria.control.config-settings.v1');
-    expect(settings.settings).toHaveLength(7);
+    expect(settings.settings).toHaveLength(8);
 
     await runConfigPlan('show-tool-calls', 'false', {
       rootDir: fixture.root,

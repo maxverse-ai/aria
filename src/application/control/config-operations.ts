@@ -6,6 +6,11 @@ import {
   getRunIdleTimeoutMs,
   getShowToolCalls,
 } from '../../config/schema';
+import {
+  decodeServiceTierSelection,
+  SERVICE_TIER_INHERIT,
+  SERVICE_TIER_STANDARD,
+} from '../../agent/service-tier';
 import type {
   ConfigChangeOperation,
   ManagementCommandDefinition,
@@ -19,6 +24,7 @@ import type { ManagementRuntimeEffect } from './runtime-effect';
 export const LOW_RISK_CONFIG_SETTINGS = [
   'require-mention',
   'show-tool-calls',
+  'service-tier',
   'message-reply',
   'cot-messages',
   'max-concurrent-runs',
@@ -27,6 +33,8 @@ export const LOW_RISK_CONFIG_SETTINGS = [
 ] as const;
 
 export type LowRiskConfigSetting = (typeof LOW_RISK_CONFIG_SETTINGS)[number];
+
+export const SERVICE_TIER_SET_COMMAND = 'config.service-tier.set';
 
 export interface LowRiskConfigSettingDescriptor {
   setting: LowRiskConfigSetting;
@@ -44,6 +52,7 @@ export interface ControlConfigSettingsSnapshot {
 export const lowRiskConfigSettingDescriptors: readonly LowRiskConfigSettingDescriptor[] = [
   descriptor('require-mention', 'config.require-mention.set', 'true|false|on|off'),
   descriptor('show-tool-calls', 'config.show-tool-calls.set', 'true|false|on|off'),
+  descriptor('service-tier', SERVICE_TIER_SET_COMMAND, 'inherit|standard|<engine-tier-id>'),
   descriptor('message-reply', 'config.message-reply.set', 'card|markdown|text'),
   descriptor('cot-messages', 'config.cot-messages.set', 'off|brief|detailed'),
   descriptor('max-concurrent-runs', 'config.max-concurrent-runs.set', 'integer 1..50'),
@@ -71,6 +80,15 @@ export const lowRiskConfigCommands: readonly ManagementCommandDefinition[] = [
     const after = booleanValue(value);
     if (before !== after) profile.preferences = { ...profile.preferences, showToolCalls: after };
     return summary('preferences.showToolCalls', before, after);
+  }),
+  operation(SERVICE_TIER_SET_COMMAND, 'live', ({ profile, value }) => {
+    const before = serviceTierSummary(profile.preferences.serviceTier);
+    const after = serviceTierValue(value);
+    const preferences = { ...profile.preferences };
+    if (after === undefined) delete preferences.serviceTier;
+    else preferences.serviceTier = after;
+    profile.preferences = preferences;
+    return summary('preferences.serviceTier', before, serviceTierSummary(after));
   }),
   operation('config.message-reply.set', 'live', ({ profile, value }) => {
     const before = getMessageReplyMode(profile);
@@ -144,6 +162,14 @@ export function parseSettingValue(setting: string, raw: string): ControlPlanScal
     if (!/^-?\d+$/.test(raw)) throw new Error(`${setting} expects an integer`);
     return Number(raw);
   }
+  if (setting === 'service-tier') {
+    if (raw === 'inherit') return SERVICE_TIER_INHERIT;
+    if (raw === 'standard' || raw === 'default' || raw === 'off') {
+      return SERVICE_TIER_STANDARD;
+    }
+    if (!raw.trim()) throw new Error('service-tier expects inherit, standard, or a tier id');
+    return raw.trim();
+  }
   return raw;
 }
 
@@ -190,6 +216,21 @@ function enumValue<T extends string>(value: ControlPlanScalar | undefined, value
     throw new ControlChangeError('invalid-plan', `value must be one of ${values.join(', ')}`);
   }
   return value as T;
+}
+
+function serviceTierValue(value: ControlPlanScalar | undefined): string | null | undefined {
+  try {
+    return decodeServiceTierSelection(value);
+  } catch {
+    throw new ControlChangeError(
+      'invalid-plan',
+      'value must be inherit, standard, or a non-empty service tier id',
+    );
+  }
+}
+
+function serviceTierSummary(value: string | null | undefined): string | null {
+  return value === undefined ? 'inherit' : value;
 }
 
 function descriptor(

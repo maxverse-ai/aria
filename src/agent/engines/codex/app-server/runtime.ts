@@ -127,6 +127,20 @@ export class CodexAppServerRuntime implements EngineRuntime {
             },
           }
         : {}),
+      ...(model.serviceTiers?.length
+        ? {
+            serviceTiers: {
+              options: model.serviceTiers.map((tier) => ({
+                value: tier.id,
+                label: tier.name || tier.id,
+                ...(tier.description ? { description: tier.description } : {}),
+              })),
+              ...(model.defaultServiceTier
+                ? { defaultValue: model.defaultServiceTier }
+                : {}),
+            },
+          }
+        : {}),
     }));
   }
 
@@ -268,12 +282,18 @@ export class AppServerRun implements AgentRun {
             approvalPolicy: 'never',
             sandbox: this.options.sandbox ?? this.runtime.sandbox,
             ...(this.options.model ? { model: this.options.model } : {}),
+            ...(this.options.serviceTier !== undefined
+              ? { serviceTier: this.options.serviceTier }
+              : {}),
           })
         : await this.client.request<ThreadStartResponse>('thread/start', {
             cwd: this.options.cwd,
             approvalPolicy: 'never',
             sandbox: this.options.sandbox ?? this.runtime.sandbox,
             ...(this.options.model ? { model: this.options.model } : {}),
+            ...(this.options.serviceTier !== undefined
+              ? { serviceTier: this.options.serviceTier }
+              : {}),
           });
       this.threadId = thread.thread.id;
       model = thread.model;
@@ -290,6 +310,7 @@ export class AppServerRun implements AgentRun {
         cwd: this.options.cwd,
         model,
         ...(reasoningEffort ? { reasoningEffort } : {}),
+        ...('serviceTier' in thread ? { serviceTier: thread.serviceTier ?? null } : {}),
       };
 
       const input: unknown[] = [
@@ -311,6 +332,9 @@ export class AppServerRun implements AgentRun {
         ...(this.options.model ? { model: this.options.model } : {}),
         ...(this.options.reasoningEffort && this.options.reasoningEffort !== 'default'
           ? { effort: this.options.reasoningEffort }
+          : {}),
+        ...(this.options.serviceTier !== undefined
+          ? { serviceTier: this.options.serviceTier }
           : {}),
       });
       this.turnId = started.turn.id;

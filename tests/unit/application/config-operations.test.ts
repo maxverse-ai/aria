@@ -8,11 +8,13 @@ import {
 } from '../../../src/application/control';
 import { createRootConfig } from '../../../src/config/profile-store';
 import { createDefaultProfileConfig } from '../../../src/config/profile-schema';
+import { SERVICE_TIER_STANDARD } from '../../../src/agent/service-tier';
 
 describe('low-risk config operations', () => {
   it.each([
     ['require-mention', false, 'access.requireMentionInGroup', false, 'live'],
     ['show-tool-calls', false, 'preferences.showToolCalls', false, 'live'],
+    ['service-tier', SERVICE_TIER_STANDARD, 'preferences.serviceTier', null, 'live'],
     ['message-reply', 'text', 'preferences.messageReply', 'text', 'live'],
     ['cot-messages', 'brief', 'preferences.cotMessages', 'brief', 'live'],
     ['max-concurrent-runs', 4, 'preferences.maxConcurrentRuns', 4, 'live'],
@@ -41,6 +43,8 @@ describe('low-risk config operations', () => {
     expect(parseSettingValue('require-mention', 'off')).toBe(false);
     expect(parseSettingValue('max-concurrent-runs', '7')).toBe(7);
     expect(parseSettingValue('message-reply', 'card')).toBe('card');
+    expect(parseSettingValue('service-tier', 'standard')).toBe(SERVICE_TIER_STANDARD);
+    expect(parseSettingValue('service-tier', 'fast')).toBe('fast');
     expect(() => parseSettingValue('show-tool-calls', 'maybe')).toThrow(/expects/);
     expect(() => operationIdForSetting('app-secret')).toThrow(/unsupported setting/);
   });

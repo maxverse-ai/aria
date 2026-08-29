@@ -20,6 +20,7 @@ import { SessionStore } from '../../../src/session/store';
 import { WorkspaceStore } from '../../../src/workspace/store';
 import { FakeAgentAdapter } from '../../helpers/fake-agent';
 import { createFakeChannel } from '../../helpers/fake-channel';
+import type { ModelOption } from '../../../src/agent/models';
 
 vi.mock('../../../src/utils/feishu-auth', () => ({
   validateAppCredentials: vi.fn(async () => ({
@@ -150,6 +151,33 @@ describe('profile-aware account and config commands', () => {
     expect(cleared.profiles.claude?.preferences.model).toBeUndefined();
   });
 
+  it('persists Codex Fast from the /config service-tier picker', async () => {
+    vi.useFakeTimers();
+    const h = await createHarness({
+      profile: 'codex-dev',
+      engineModels: [{
+        value: 'gpt-fast-config',
+        label: 'GPT Fast Config',
+        isDefault: true,
+        serviceTiers: {
+          options: [{ value: 'fast', label: 'Fast' }],
+        },
+      }],
+    });
+
+    await h.command('/config submit', {
+      model: 'default',
+      service_tier: 'fast',
+      message_reply: 'text',
+    });
+
+    const root = await waitForRoot(h.rootDir, (candidate) =>
+      candidate.profiles['codex-dev']?.preferences.serviceTier === 'fast',
+    );
+    expect(root.profiles['codex-dev']?.preferences.serviceTier).toBe('fast');
+    expect(h.controls.profileConfig.preferences.serviceTier).toBe('fast');
+  });
+
   it('requests a runtime engine switch and clears the previous engine model', async () => {
     vi.useFakeTimers();
     const h = await createHarness({
@@ -227,13 +255,13 @@ describe('profile-aware account and config commands', () => {
     });
 
     const root = await waitForRoot(h.rootDir, (candidate) =>
-      candidate.profiles.claude?.preferences.runStatus?.items?.length === 4,
+      candidate.profiles.claude?.preferences.runStatus?.items?.length === 5,
     );
     expect(root.profiles.claude?.preferences.runStatus).toEqual({
-      items: ['model', 'weekly-limit', 'context', 'elapsed'],
+      items: ['model', 'service-tier', 'weekly-limit', 'context', 'elapsed'],
     });
     expect(getRunStatusItems(runtimeProfileConfig(root, 'claude').preferences)).toEqual([
-      'model', 'weekly-limit', 'context', 'elapsed',
+      'model', 'service-tier', 'weekly-limit', 'context', 'elapsed',
     ]);
 
     await h.command('/config submit', {
@@ -362,6 +390,8 @@ describe('profile-aware account and config commands', () => {
 
 async function createHarness(options: {
   preferences?: RootConfig['profiles'][string]['preferences'];
+  profile?: 'claude' | 'codex-dev';
+  engineModels?: ModelOption[];
 } = {}): Promise<{
   rootDir: string;
   channel: ReturnType<typeof createFakeChannel>;
@@ -373,13 +403,15 @@ async function createHarness(options: {
   const workspace = join(rootDir, 'workspace');
   await mkdir(workspace, { recursive: true });
   const root = await writeRoot(rootDir, workspace, options.preferences);
-  const profileConfig = root.profiles.claude!;
-  const appPaths = resolveAppPaths({ rootDir, profile: 'claude' });
+  const profile = options.profile ?? 'claude';
+  const profileConfig = root.profiles[profile]!;
+  profileConfig.workspaces.default = workspace;
+  const appPaths = resolveAppPaths({ rootDir, profile });
   const channel = createFakeChannel();
   const sessions = new SessionStore(appPaths.sessionsFile);
   const workspaces = new WorkspaceStore(appPaths.workspacesFile);
   const controls = {
-    profile: 'claude',
+    profile,
     profileConfig,
     botOwnerId: 'ou-admin',
     ownerRefreshState: 'ok',
@@ -393,8 +425,14 @@ async function createHarness(options: {
     })),
     exit: vi.fn(async () => {}),
     configPath: appPaths.configFile,
-    cfg: runtimeProfileConfig(root, 'claude'),
+    cfg: runtimeProfileConfig(root, profile),
     processId: 'proc-1',
+    ...(options.engineModels
+      ? {
+          engineModels: async () => options.engineModels,
+          engineGeneration: () => 4012,
+        }
+      : {}),
   } satisfies Controls;
 
   return {
@@ -449,6 +487,7 @@ async function writeRoot(
           app: { id: 'cli_codex', secret: '${APP_SECRET}', tenant: 'feishu' },
         },
         codex: { binaryPath: 'codex' },
+        access: { admins: ['ou-admin'] },
       }),
     },
   };

@@ -1,7 +1,7 @@
 import { realpath } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { claudeCapability } from '../../../src/agent/capability';
+import { claudeCapability, codexCapability } from '../../../src/agent/capability';
 import { ActiveRuns } from '../../../src/bot/active-runs';
 import { startRunFlow } from '../../../src/bot/run-flow';
 import { ProcessPool } from '../../../src/bot/process-pool';
@@ -99,6 +99,48 @@ describe('IM run flow', () => {
     if (!result.ok) throw new Error('expected run flow to start');
     expect(result.cwdRealpath).toBe(workspaceRealpath);
     expect(h.agent.runOptions[0]?.cwd).toBe(workspaceRealpath);
+  });
+
+  it('passes service tiers only through engines that declare the capability', async () => {
+    const codex = await createHarness({ defaultWorkspace: true });
+    codex.profileConfig.agentKind = 'codex';
+    codex.profileConfig.codex = { binaryPath: 'codex' };
+    codex.profileConfig.preferences.serviceTier = 'fast';
+
+    const codexResult = await startRunFlow({
+      scopeId: 'chat-codex',
+      scope: { source: 'im', chatId: 'chat-codex', actorId: 'ou_user' },
+      prompt: 'hello',
+      attachments: [],
+      access: { ok: true, reason: 'allowed-user' },
+      capability: codexCapability(codex.profileConfig),
+      profileConfig: codex.profileConfig,
+      sessions: codex.sessions,
+      workspaces: codex.workspaces,
+      executor: codex.executor,
+      serviceTier: null,
+      now: 1000,
+    });
+    expect(codexResult.ok).toBe(true);
+    expect(codex.agent.runOptions[0]?.serviceTier).toBeNull();
+
+    const claude = await createHarness({ defaultWorkspace: true });
+    claude.profileConfig.preferences.serviceTier = 'fast';
+    const claudeResult = await startRunFlow({
+      scopeId: 'chat-claude',
+      scope: { source: 'im', chatId: 'chat-claude', actorId: 'ou_user' },
+      prompt: 'hello',
+      attachments: [],
+      access: { ok: true, reason: 'allowed-user' },
+      capability: claudeCapability(claude.profileConfig),
+      profileConfig: claude.profileConfig,
+      sessions: claude.sessions,
+      workspaces: claude.workspaces,
+      executor: claude.executor,
+      now: 1000,
+    });
+    expect(claudeResult.ok).toBe(true);
+    expect(claude.agent.runOptions[0]?.serviceTier).toBeUndefined();
   });
 
   it('records the real denied policy decision without prompt content', async () => {

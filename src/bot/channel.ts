@@ -9,6 +9,7 @@ import { capabilityFor, getEnginePlugin } from '../agent/plugin/registry';
 import { listEngineModels } from '../agent/model-catalog';
 import { modelLabel, normalizeModelSelection, resolveModelArg } from '../agent/models';
 import { resolveReasoning, savedReasoningEffort } from '../agent/reasoning';
+import { resolveServiceTier } from '../agent/service-tier';
 import {
   buildAgentPrompt,
   type BridgePromptInteractiveCard,
@@ -1301,6 +1302,23 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
       reason: reasoning.fallbackReason,
     });
   }
+  let serviceTier: string | null | undefined;
+  if (capability.supportsServiceTiers) {
+    const resolution = resolveServiceTier(
+      modelOptions,
+      modelPref,
+      controls.profileConfig.preferences.serviceTier,
+    );
+    serviceTier = resolution.effective;
+    if (resolution.unsupportedConfiguredTier) {
+      log.warn('service-tier', 'unsupported-selection-standardized', {
+        scope,
+        agent: controls.profileConfig.agentKind,
+        model: modelResolution.resolvedModel,
+        tier: resolution.unsupportedConfiguredTier,
+      });
+    }
+  }
   const flow = await conversations.start({
     scopeId: scope,
     scope: scopeContext,
@@ -1311,6 +1329,7 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
     profileConfig: controls.profileConfig,
     now: Date.now(),
     reasoningEffort: reasoning.effective ?? null,
+    serviceTier,
     stopGraceMs: getAgentStopGraceMs(controls.cfg),
     observability: {
       profile: controls.profile,

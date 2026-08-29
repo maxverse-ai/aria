@@ -139,6 +139,7 @@ export {
   lowRiskConfigOperations,
   operationIdForSetting,
   parseSettingValue,
+  SERVICE_TIER_SET_COMMAND,
 } from './config-operations';
 export type {
   ControlConfigSettingsSnapshot,

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   agentCard,
   effortCard,
+  fastModeCard,
   helpCard,
   modelSwitchSuccessCard,
   modelsCard,
@@ -50,6 +51,14 @@ const cards = [
       { value: 'high', label: 'high' },
       { value: 'xhigh', label: 'xhigh' },
     ],
+    source: '实时 Agent Runtime',
+  }),
+  fastModeCard({
+    agent: 'codex',
+    model: 'gpt-5.6-sol',
+    current: 'on',
+    configuredTier: 'fast',
+    fastOption: { value: 'fast', label: 'Fast' },
     source: '实时 Agent Runtime',
   }),
   helpCard('Codex'),

@@ -22,6 +22,7 @@ export interface ProfileSettingsUpdateInput extends ProfilePreferencesUpdateInpu
 const PREFERENCE_PARAMETER_KEYS = [
   'mode',
   'model',
+  'serviceTier',
   'messageReply',
   'showToolCalls',
   'cotMessages',

@@ -19,6 +19,7 @@ describe('run status line', () => {
       threadId: 'thread-1',
       model: 'gpt-5.6-sol',
       reasoningEffort: 'max',
+      serviceTier: 'fast',
     });
     const withUsage = reduce(withModel, {
       type: 'usage',
@@ -35,9 +36,26 @@ describe('run status line', () => {
         state: 'resolved',
       },
       reasoningEffort: 'max',
+      serviceTier: 'fast',
       usage: { inputTokens: 1200, outputTokens: 34, cachedInputTokens: 900 },
     });
     expect(renderRunStatusLine(withUsage.runStatus)).toContain('gpt-5.6-sol');
+    expect(renderRunStatusLine(withUsage.runStatus)).toContain('⚡ Fast on');
+  });
+
+  it('shows explicit Fast off but omits the item when an engine does not report a tier', () => {
+    const codex = reduce(createRunState({ agentId: 'codex' }), {
+      type: 'system',
+      model: 'gpt-5.6-sol',
+      serviceTier: null,
+    });
+    expect(renderRunStatusLine(codex.runStatus)).toContain('⚡ Fast off');
+
+    const claude = reduce(createRunState({ agentId: 'claude' }), {
+      type: 'system',
+      model: 'claude-sonnet-5',
+    });
+    expect(renderRunStatusLine(claude.runStatus)).not.toContain('Fast');
   });
 
   it('renders the compact status as the bottom-most card and markdown element', () => {

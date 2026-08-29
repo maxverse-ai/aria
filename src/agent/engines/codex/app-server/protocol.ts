@@ -21,12 +21,16 @@ export interface ThreadStartResponse {
   thread: { id: string };
   model: string;
   reasoningEffort?: string | null;
+  /** Added by newer App Server versions; optional keeps older binaries usable. */
+  serviceTier?: string | null;
 }
 
 export interface ThreadResumeResponse {
   thread: { id: string };
   model: string;
   reasoningEffort?: string | null;
+  /** Added by newer App Server versions; optional keeps older binaries usable. */
+  serviceTier?: string | null;
 }
 
 export interface TurnStartResponse {
@@ -81,6 +85,12 @@ export interface ModelListResponse {
       description: string;
     }>;
     multiAgentVersion?: string | null;
+    serviceTiers?: Array<{
+      id: string;
+      name: string;
+      description: string;
+    }>;
+    defaultServiceTier?: string | null;
   }>;
   nextCursor: string | null;
 }

@@ -13,6 +13,7 @@ import {
   type Controls,
 } from '../../../src/commands/index.js';
 import { createDefaultProfileConfig, type AgentKind, type ProfileConfig } from '../../../src/config/profile-schema.js';
+import { createRootConfig, saveRootConfig } from '../../../src/config/profile-store.js';
 import { canUseDm } from '../../../src/policy/access.js';
 import { evaluateRunPolicy } from '../../../src/policy/run-policy.js';
 import { resolveWorkingDirectory } from '../../../src/policy/workspace.js';
@@ -280,6 +281,51 @@ describe('agent-aware resume commands', () => {
     expect(JSON.stringify(lastContent(h.channel))).toContain('gpt-runtime');
   });
 
+  it('controls Codex Fast from Feishu and persists it through the management boundary', async () => {
+    const h = await createHarness('codex');
+    h.controls.engineModels = async () => [{
+      value: 'gpt-fast-test',
+      label: 'GPT Fast Test',
+      isDefault: true,
+      serviceTiers: {
+        options: [{ value: 'fast', label: 'Fast', description: 'Lower latency' }],
+      },
+    }];
+    h.controls.engineGeneration = () => 9911;
+
+    await expect(h.run('/fast status')).resolves.toBe(true);
+    expect(JSON.stringify(lastContent(h.channel))).toContain('Fast 模式');
+    expect(JSON.stringify(lastContent(h.channel))).toContain('开启 Fast');
+
+    await expect(h.run('/fast on')).resolves.toBe(true);
+    expect(h.controls.profileConfig.preferences.serviceTier).toBe('fast');
+    expect(lastMarkdown(h.channel)).toContain('Fast on');
+
+    await expect(
+      h.dispatchCard({ cmd: 'fast.set', arg: 'off' }, 'om_fake_1'),
+    ).resolves.toBeUndefined();
+    await vi.waitFor(() => {
+      expect(h.controls.profileConfig.preferences.serviceTier).toBeNull();
+      expect(h.channel.rawClient.requests.filter(
+        (request) => request.method === 'cardkit.v1.card.update',
+      )).toHaveLength(2);
+    });
+    const updates = h.channel.rawClient.requests.filter(
+      (request) => request.method === 'cardkit.v1.card.update',
+    );
+    expect(JSON.stringify(updates[0])).toContain('正在更新 Fast 配置');
+    expect(JSON.stringify(updates[1])).toContain('Fast off');
+  });
+
+  it('keeps /fast unavailable for agents that do not declare service tiers', async () => {
+    const h = await createHarness('claude');
+
+    await expect(h.run('/fast on')).resolves.toBe(true);
+
+    expect(lastMarkdown(h.channel)).toContain('当前 Agent 没有可切换的服务档位');
+    expect(h.controls.profileConfig.preferences.serviceTier).toBeUndefined();
+  });
+
   it('routes Aria-owned model and effort cards through the inspected control channel', async () => {
     const h = await createHarness('codex', { useControlChannel: true });
     h.controls.engineModels = async () => [{
@@ -501,6 +547,8 @@ async function createHarness(
   if (options.defaultWorkspace !== false) {
     profileConfig.workspaces.default = tmp.workspace;
   }
+  const configPath = join(tmp.profile, 'config.json');
+  await saveRootConfig(createRootConfig(agentKind, profileConfig), configPath);
   const controls = {
     profile: agentKind,
     profileConfig,
@@ -519,7 +567,7 @@ async function createHarness(
       };
     }),
     exit: vi.fn(async () => {}),
-    configPath: join(tmp.profile, 'config.json'),
+    configPath,
     cfg: profileConfig,
     processId: 'proc-1',
   } satisfies Controls;

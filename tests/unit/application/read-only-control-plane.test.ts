@@ -56,7 +56,7 @@ describe('ReadOnlyControlPlane', () => {
     expect(config).toMatchObject({
       schema: 'aria.control.config.v1',
       revision: expect.stringMatching(/^sha256:[a-f0-9]{64}$/),
-      agent: { kind: 'codex', model: 'gpt-test' },
+      agent: { kind: 'codex', model: 'gpt-test', serviceTier: 'fast' },
       access: {
         allowedUsers: 1,
         allowedChats: 1,
@@ -121,6 +121,7 @@ async function createFixture(): Promise<{ root: string }> {
     },
     preferences: {
       model: 'gpt-test',
+      serviceTier: 'fast',
       maxConcurrentRuns: 4,
       runIdleTimeoutMinutes: 2,
       agentStopGraceMs: 7_000,

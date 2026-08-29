@@ -88,7 +88,7 @@ export interface AppAccess {
   /** chat_id allowlist for groups the bot responds in. Does not apply to p2p. */
   allowedChats?: string[];
   /** open_id list with admin privileges. Gates sensitive commands
-   * (/account, /config, /exit, /reconnect, /doctor, /cd, /ws, /doc,
+   * (/account, /config, /fast, /exit, /reconnect, /doctor, /cd, /ws, /doc,
    * /invite, /remove). */
   admins?: string[];
   /** Per-chat @-mention override (chat_id → bool); overrides the global
@@ -125,6 +125,13 @@ export interface AppPreferences {
   reasoningEffort?: string;
   /** Model-scoped reasoning selections, keyed by `<engine>:<model-selection>`. */
   reasoningEffortByModel?: Record<string, string>;
+  /**
+   * Explicit execution service tier. A string selects that engine-native tier,
+   * `null` explicitly selects the standard tier, and an absent property follows
+   * the underlying agent's own configuration. Engines without service-tier
+   * support ignore this preference.
+   */
+  serviceTier?: string | null;
   /** Presentation-only run footer controls; does not disable status collection. */
   runStatus?: RunStatusPreference;
   /**
