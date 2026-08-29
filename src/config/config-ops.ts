@@ -15,12 +15,12 @@ import { log, reportMetric } from '../core/logger';
 
 /**
  * The mutable per-profile runtime state these ops read and keep in sync. The
- * running bridge's `Controls` object structurally satisfies this, so both the
- * chat `/config` handlers and the local web UI's REST layer drive config
- * changes through the exact same disk-write + in-memory-refresh logic (no
- * divergent second implementation). `cfg` / `profileConfig` are reassigned in
- * place after a successful save so the live process picks up changes without a
- * restart — mirroring how the chat form already applies preferences/access.
+ * running bridge's `Controls` object structurally satisfies this. This is the
+ * compatibility boundary for the local web UI and remaining chat
+ * access/account flows. The `/config` preferences form has moved to
+ * `ManagementApi`; later slices should continue shrinking this surface.
+ * `cfg` / `profileConfig` are reassigned after a successful compatibility
+ * save so the live process picks up changes without a restart.
  */
 export interface MutableProfileState {
   configPath: string;
@@ -158,6 +158,8 @@ export async function saveAccountConfig(
  * under the config file lock, refreshing in-memory state. Stores the user's
  * identity selection verbatim (not the team-mode-forced effective preset) so
  * it comes back into effect when switching to personal mode.
+ * @deprecated Retained for the web compatibility path until that adapter
+ * migrates to `ManagementApi`.
  */
 export async function savePreferencesConfig(
   state: MutableProfileState,

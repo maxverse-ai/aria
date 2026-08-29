@@ -114,6 +114,15 @@ describe('profile-aware account and config commands', () => {
       status: 'not-needed',
       reason: 'manual-user-default',
     });
+    await vi.waitFor(() => {
+      expect(h.controls.cfg.preferences).toMatchObject({
+        messageReply: 'text',
+        showToolCalls: false,
+        maxConcurrentRuns: 7,
+        runIdleTimeoutMinutes: 15,
+      });
+      expect(h.controls.profileConfig.larkCli.identityPreset).toBe('user-default');
+    });
     expect(getRequireMentionInGroup(runtimeProfileConfig(root, 'claude'))).toBe(false);
     expect((root as unknown as { accounts?: unknown }).accounts).toBeUndefined();
   });
