@@ -8,8 +8,10 @@ release or deployment automation.
 
 - `.node-version` pins the preferred build runtime.
 - `package.json#engines` remains the supported runtime floor.
-- `package.json#packageManager` pins pnpm; use Corepack rather than a separately
-  installed global pnpm.
+- `package.json#packageManager` pins pnpm 12.0.0; use Corepack rather than a
+  separately installed global pnpm.
+- `pnpm-workspace.yaml#allowBuilds` is the reviewed allowlist for dependency
+  lifecycle scripts.
 - CI validates the supported Node 20 floor across Linux, macOS, and Windows. The
   package artifact is built with the pinned runtime.
 
