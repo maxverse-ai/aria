@@ -10,6 +10,7 @@ import {
   operationIdForSetting,
   type ControlActorContext,
   type ManagementPlanRequest,
+  type RuntimeReconciler,
 } from '../../../src/application/control';
 import { resolveAppPaths } from '../../../src/config/app-paths';
 import {
@@ -37,7 +38,11 @@ describe('ManagementApi', () => {
       schema: 'aria.management.plan.v1',
       apiVersion: 1,
       requestId: 'request-plan',
-      plan: { id: '11111111111111111111111111111111', status: 'planned' },
+      plan: {
+        id: '11111111111111111111111111111111',
+        status: 'planned',
+        operation: { restartRequired: false },
+      },
     });
     expect((await loadRootConfig(fixture.configPath))?.profiles.primary?.preferences.cotMessages)
       .not.toBe('brief');
@@ -71,16 +76,45 @@ describe('ManagementApi', () => {
       schema: 'aria.management.commit.v1',
       apiVersion: 1,
       requestId: 'request-commit',
-      effect: 'restart',
+      effect: 'live',
       applyResult: { planId: '11111111111111111111111111111111', recovered: false },
+      reconciliation: {
+        status: 'deferred',
+        effect: 'live',
+        reason: 'runtime-reconciler-unavailable',
+      },
     });
     expect((await loadRootConfig(fixture.configPath))?.profiles.primary?.preferences.cotMessages)
       .toBe('brief');
+
+    const runtimeReconciler: RuntimeReconciler = {
+      async reconcile(request) {
+        if (request.effect === 'none') return { status: 'not-required', effect: 'none' };
+        return { status: 'applied', effect: request.effect };
+      },
+    };
+    const retried = await createApi(
+      fixture.root,
+      '44444444444444444444444444444444',
+      runtimeReconciler,
+    ).commit({
+      schema: 'aria.management.commit.request.v1',
+      apiVersion: MANAGEMENT_API_VERSION,
+      requestId: 'request-reconcile-retry',
+      actor,
+      planId: planned.plan.id,
+    });
+    expect(retried.reconciliation).toEqual({ status: 'applied', effect: 'live' });
+    expect(retried.applyResult.appliedAt).toBe(committed.applyResult.appliedAt);
   });
 
   it('offers execute as the functional one-call adapter path', async () => {
     const fixture = await createFixture();
-    const api = createApi(fixture.root, '22222222222222222222222222222222');
+    const api = createApi(
+      fixture.root,
+      '22222222222222222222222222222222',
+      { reconcile: async () => { throw new Error('runtime failed'); } },
+    );
 
     const result = await api.execute({
       schema: 'aria.management.execute.request.v1',
@@ -96,8 +130,13 @@ describe('ManagementApi', () => {
       apiVersion: 1,
       requestId: 'request-execute',
       planId: '22222222222222222222222222222222',
-      effect: 'restart',
+      effect: 'live',
       applyResult: { planId: '22222222222222222222222222222222' },
+      reconciliation: {
+        status: 'failed',
+        effect: 'live',
+        code: 'runtime-reconciler-error',
+      },
     });
     expect((await loadRootConfig(fixture.configPath))?.profiles.primary?.preferences.showToolCalls)
       .toBe(false);
@@ -127,13 +166,18 @@ function planRequest(requestId: string): ManagementPlanRequest {
   };
 }
 
-function createApi(rootDir: string, planId: string): ManagementApi {
+function createApi(
+  rootDir: string,
+  planId: string,
+  reconciler?: RuntimeReconciler,
+): ManagementApi {
   return new ManagementApi(
     new ConfigChangeService({
       rootDir,
       registry: lowRiskConfigCommandRegistry,
       createId: () => planId,
     }),
+    reconciler,
   );
 }
 

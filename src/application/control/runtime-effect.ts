@@ -22,3 +22,17 @@ export type RuntimeReconcileOutcome =
 export interface RuntimeReconciler {
   reconcile(request: RuntimeReconcileRequest): Promise<RuntimeReconcileOutcome>;
 }
+
+/**
+ * Safe default for adapters that can commit desired state but do not own a
+ * running profile. The caller can retry the same committed plan later with a
+ * runtime-aware reconciler without repeating the configuration write.
+ */
+export class DeferredRuntimeReconciler implements RuntimeReconciler {
+  constructor(private readonly reason = 'runtime-reconciler-unavailable') {}
+
+  async reconcile(request: RuntimeReconcileRequest): Promise<RuntimeReconcileOutcome> {
+    if (request.effect === 'none') return { status: 'not-required', effect: 'none' };
+    return { status: 'deferred', effect: request.effect, reason: this.reason };
+  }
+}

@@ -98,8 +98,10 @@ truth for accepted values.
 
 The CLI creates no direct-write shortcut: plan, confirmation and application
 remain separate invocations. Because an external CLI process cannot refresh a
-running bridge's in-memory profile, every phase-3 operation explicitly reports
-`restartRequired: true`; persisted changes take effect after a safe restart.
+running bridge's in-memory profile, its compatibility presenter explicitly
+reports `restartRequired: true`; persisted changes take effect after a safe
+restart. Canonical command metadata is transport-neutral: the first six
+settings declare `live`, while `meeting-enabled` declares `reconnect`.
 Cards and web adapters do not satisfy that target yet: their shared
 `config-ops.ts` compatibility path writes configuration and refreshes live
 state directly. They must migrate incrementally without changing current user
@@ -119,7 +121,16 @@ plan, confirmation, or application steps.
 - `FileConfigRepository` owns desired-state reads, the shared configuration
   lock, and atomic commits. `ConfigChangeService.commitPlan()` reports the
   durable apply result separately from its `none | live | reconnect | restart`
-  runtime effect; actual reconciliation is a later phase.
+  runtime effect.
+- `ManagementApi` asks a `RuntimeReconciler` to apply that effect only after a
+  successful commit and returns its `not-required | applied | deferred |
+  failed` outcome separately. A reconciliation failure never rewrites or
+  misreports the durable commit; committing an already-applied plan retries
+  reconciliation without repeating the write.
+- `ProfileRuntimeReconciler` can reload an exact committed revision into a
+  running profile for `live`, invoke its connect-before-disconnect path for
+  `reconnect`, and defer process-level `restart`. Adapters have not cut over to
+  this implementation yet.
 - The CLI now uses `ManagementApi` while unwrapping its envelopes so existing
   public CLI JSON and human-readable output remain compatible.
 - `config-ops.ts` is the shared compatibility writer for Feishu and web

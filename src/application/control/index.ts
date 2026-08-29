@@ -34,6 +34,7 @@ export { FileConfigRepository } from './config-repository';
 export type { ConfigRepository, ConfigRepositoryTransaction } from './config-repository';
 export { ManagementCommandRegistry } from './management-command-registry';
 export {
+  DeferredRuntimeReconciler,
   MANAGEMENT_RUNTIME_EFFECTS,
   runtimeEffectRequiresRestart,
 } from './runtime-effect';

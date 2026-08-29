@@ -6,7 +6,12 @@ import type {
   ControlChangePlanSnapshot,
   ControlPlanParameters,
 } from './change-types';
-import type { ManagementRuntimeEffect } from './runtime-effect';
+import {
+  DeferredRuntimeReconciler,
+  type ManagementRuntimeEffect,
+  type RuntimeReconcileOutcome,
+  type RuntimeReconciler,
+} from './runtime-effect';
 
 export const MANAGEMENT_API_VERSION = 1 as const;
 
@@ -56,6 +61,7 @@ export interface ManagementCommitResult extends ConfigChangeCommitResult {
   schema: 'aria.management.commit.v1';
   apiVersion: typeof MANAGEMENT_API_VERSION;
   requestId: string;
+  reconciliation: RuntimeReconcileOutcome;
 }
 
 export interface ManagementExecuteResult {
@@ -65,6 +71,7 @@ export interface ManagementExecuteResult {
   planId: string;
   applyResult: ControlChangeApplyResult;
   effect: ManagementRuntimeEffect;
+  reconciliation: RuntimeReconcileOutcome;
 }
 
 export type ManagementApiErrorCode = 'invalid-request' | 'unsupported-version';
@@ -85,7 +92,14 @@ export class ManagementApiError extends Error {
  * ConfigChangeService.
  */
 export class ManagementApi {
-  constructor(private readonly changes: ConfigChangeService) {}
+  private readonly reconciler: RuntimeReconciler;
+
+  constructor(
+    private readonly changes: ConfigChangeService,
+    reconciler?: RuntimeReconciler,
+  ) {
+    this.reconciler = reconciler ?? new DeferredRuntimeReconciler();
+  }
 
   async plan(request: ManagementPlanRequest): Promise<ManagementPlanResult> {
     validateRequest(request, 'aria.management.plan.request.v1');
@@ -120,11 +134,13 @@ export class ManagementApi {
     validateRequest(request, 'aria.management.commit.request.v1');
     validatePlanId(request.planId);
     const result = await this.changes.commitPlan(request.planId, request.actor);
+    const reconciliation = await this.reconcile(result);
     return {
       schema: 'aria.management.commit.v1',
       apiVersion: MANAGEMENT_API_VERSION,
       requestId: request.requestId,
       ...result,
+      reconciliation,
     };
   }
 
@@ -141,13 +157,31 @@ export class ManagementApi {
     });
     await this.changes.confirmPlan(plan.id, request.actor);
     const committed = await this.changes.commitPlan(plan.id, request.actor);
+    const reconciliation = await this.reconcile(committed);
     return {
       schema: 'aria.management.execute.v1',
       apiVersion: MANAGEMENT_API_VERSION,
       requestId: request.requestId,
       planId: plan.id,
       ...committed,
+      reconciliation,
     };
+  }
+
+  private async reconcile(result: ConfigChangeCommitResult): Promise<RuntimeReconcileOutcome> {
+    try {
+      const outcome = await this.reconciler.reconcile({
+        profile: result.applyResult.profile,
+        effect: result.effect,
+        revision: result.applyResult.resultRevision,
+      });
+      if (!matchesEffect(result.effect, outcome)) {
+        return failedOutcome(result.effect, 'runtime-reconcile-contract-violation');
+      }
+      return outcome;
+    } catch {
+      return failedOutcome(result.effect, 'runtime-reconciler-error');
+    }
   }
 }
 
@@ -183,4 +217,16 @@ function validatePlanId(planId: string): void {
 
 function isIdentifier(value: string): boolean {
   return /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(value);
+}
+
+function matchesEffect(effect: ManagementRuntimeEffect, outcome: RuntimeReconcileOutcome): boolean {
+  return effect === outcome.effect;
+}
+
+function failedOutcome(
+  effect: ManagementRuntimeEffect,
+  code: string,
+): RuntimeReconcileOutcome {
+  if (effect === 'none') return { status: 'not-required', effect: 'none' };
+  return { status: 'failed', effect, code };
 }

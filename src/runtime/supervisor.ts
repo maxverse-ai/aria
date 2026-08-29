@@ -43,6 +43,7 @@ import type {
   NativeReadProfileRuntime,
   NativeReadRuntimeFactory,
 } from './native-read-runtime';
+import { ProfileRuntimeReconciler } from './profile-runtime-reconciler';
 
 type StartChannelFn = typeof realStartChannel;
 
@@ -547,6 +548,11 @@ export class Supervisor {
 
   controlsFor(profile: string): Controls | undefined {
     return this.managed.get(profile)?.controls;
+  }
+
+  runtimeReconcilerFor(profile: string): ProfileRuntimeReconciler | undefined {
+    const controls = this.controlsFor(profile);
+    return controls ? new ProfileRuntimeReconciler(controls) : undefined;
   }
 
   channelFor(profile: string) {

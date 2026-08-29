@@ -3,9 +3,10 @@
 > Status: approved target architecture, implementation in progress. The
 > read-only surface, low-risk CLI protocol, command registry, config repository
 > port, mutation type, runtime-effect contract, and versioned Management API
-> facade are implemented as recorded in [`CONTROL_PLANE.md`](CONTROL_PLANE.md).
-> This document replaces the earlier CLI-centric runtime-binding and delegation
-> roadmap.
+> facade are implemented. Commit/reconciliation separation and the running
+> profile reconciler are also implemented as recorded in
+> [`CONTROL_PLANE.md`](CONTROL_PLANE.md). This document replaces the earlier
+> CLI-centric runtime-binding and delegation roadmap.
 
 ## Scope
 
@@ -229,9 +230,8 @@ prompts, transcripts, unrestricted tool arguments/results, and private paths.
 - Separate durable commit results from runtime reconciliation results.
 - Preserve current CLI JSON and human-readable compatibility.
 
-Implemented for the low-risk CLI path. Runtime reconciliation is currently a
-contract and a separate commit outcome; no adapter invokes runtime effects
-through it yet.
+Implemented for the low-risk CLI path. Runtime effects are canonical command
+metadata rather than transport behavior.
 
 ### Phase 2: versioned Management API
 
@@ -241,19 +241,25 @@ through it yet.
 - Route the CLI through the facade while preserving its public output.
 
 Implemented for the low-risk command registry. The facade orchestrates the
-mutation kernel and returns runtime effects; it does not reconcile them yet.
+mutation kernel and returns commit and reconciliation outcomes independently.
 
-### Phase 3: adapter migration
-
-- Migrate `/config` and cards, then web, through the same facade.
-- Preserve existing user behavior while deleting duplicated write decisions.
-- Keep adapter-specific parsing and rendering outside the application layer.
-
-### Phase 4: runtime reconciliation
+### Phase 3: runtime reconciliation
 
 - Consume the committed runtime effect through a dedicated reconciler.
 - Report desired-state commit and applied-state reconciliation independently.
 - Add retryable reconciliation without repeating configuration writes.
+
+The foundation is implemented. The default reconciler defers effects for an
+adapter with no runtime ownership. A running-profile implementation applies an
+exact desired revision live, reconnects through the Supervisor, and defers a
+process restart. Public card and web writers do not use it yet.
+
+### Phase 4: adapter migration
+
+- Migrate `/config` and cards, then web, through the same facade and running
+  profile reconciler.
+- Preserve existing user behavior while deleting duplicated write decisions.
+- Keep adapter-specific parsing and rendering outside the application layer.
 
 ### Phase 5: management command expansion
 
