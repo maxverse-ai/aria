@@ -28,6 +28,8 @@ export type {
   ControlPlanScalar,
   ManagementCommandDefinition,
   ManagementCommandInput,
+  ManagementCommandPrepareInput,
+  ControlParameterPrivacy,
 } from './change-types';
 export { configRevision } from './config-revision';
 export { FileConfigRepository } from './config-repository';
@@ -46,9 +48,12 @@ export type {
 } from './runtime-effect';
 export { ConfigChangeService } from './config-change-service';
 export type {
+  ConfigChangeAuthorizationInput,
+  ConfigChangeCommandAuthorizer,
   ConfigChangeServiceOptions,
   CreateConfigChangePlanInput,
 } from './config-change-service';
+export { authorizeAdapterCommands } from './adapter-command-authorization';
 export {
   MANAGEMENT_API_VERSION,
   ManagementApi,
@@ -161,4 +166,22 @@ export {
   profileSettingsUpdateParameters,
 } from './profile-settings-command';
 export type { ProfileSettingsUpdateInput } from './profile-settings-command';
+export {
+  PROFILE_ACCESS_UPDATE_COMMAND,
+  applyProfileAccessUpdate,
+  profileAccessUpdateCommand,
+  profileAccessUpdateParameters,
+} from './profile-access-command';
+export type {
+  ProfileAccessAction,
+  ProfileAccessKind,
+  ProfileAccessUpdateInput,
+} from './profile-access-command';
+export {
+  PROFILE_ACCOUNT_UPDATE_COMMAND,
+  nextAccountRecordedAt,
+  profileAccountUpdateCommand,
+  profileAccountUpdateParameters,
+} from './profile-account-command';
+export type { ProfileAccountUpdateInput } from './profile-account-command';
 export { managementCommandRegistry, managementCommands } from './management-commands';

@@ -1,26 +1,16 @@
 import { dirname } from 'node:path';
 import { resolveAppPaths } from './app-paths';
-import { setSecret } from './keystore';
-import {
-  loadRootConfig,
-  runtimeProfileConfig,
-  saveRootConfig,
-  withConfigFileLock,
-} from './profile-store';
-import { saveConfig } from './store';
-import { secretKeyForApp, type AppConfig } from './schema';
-import type { ProfileAccess, ProfileConfig } from './profile-schema';
+import type { AppConfig } from './schema';
+import type { ProfileConfig } from './profile-schema';
 import { applyLarkCliIdentityPolicy } from '../lark-cli/identity-policy';
-import { log, reportMetric } from '../core/logger';
+import { log } from '../core/logger';
 
 /**
  * The mutable per-profile runtime state these ops read and keep in sync. The
  * running bridge's `Controls` object structurally satisfies this. This is the
- * compatibility boundary for the remaining chat/web access and account flows.
- * Preferences in both `/config` and the web console have moved to
- * `ManagementApi`; later slices should continue shrinking this surface.
- * `cfg` / `profileConfig` are reassigned after a successful compatibility
- * save so the live process picks up changes without a restart.
+ * mutable profile projection shared by in-process adapters. Public config
+ * writers use `ManagementApi`; this module only retains the lark-cli identity
+ * side effect that must happen before a settings commit.
  */
 export interface MutableProfileState {
   configPath: string;
@@ -61,94 +51,4 @@ export async function applyProfileLarkCliIdentity(
     });
   }
   return ok;
-}
-
-/**
- * Mutate the profile's access lists (allowlists + admins) under the config
- * file lock, persist, and refresh the in-memory state. `mutate` receives the
- * current {@link ProfileAccess} and returns the next one.
- */
-export async function saveAccessConfig(
-  state: MutableProfileState,
-  mutate: (access: ProfileAccess) => ProfileAccess,
-): Promise<ProfileAccess> {
-  try {
-    return await withConfigFileLock(state.configPath, async () => {
-      const root = await loadRootConfig(state.configPath);
-      if (!root) {
-        const access = mutate(state.profileConfig.access);
-        state.profileConfig = {
-          ...state.profileConfig,
-          access,
-        };
-        state.cfg.preferences = {
-          ...(state.cfg.preferences ?? {}),
-          access: {
-            allowedUsers: access.allowedUsers,
-            allowedChats: access.allowedChats,
-            admins: access.admins,
-            ...(access.chatRequireMention && Object.keys(access.chatRequireMention).length > 0
-              ? { chatRequireMention: access.chatRequireMention }
-              : {}),
-          },
-          requireMentionInGroup: access.requireMentionInGroup,
-        };
-        await saveConfig(state.cfg, state.configPath);
-        return access;
-      }
-
-      const profile = root.profiles[state.profile];
-      if (!profile) throw new Error(`profile not found: ${state.profile}`);
-      const access = mutate(profile.access);
-      root.profiles[state.profile] = {
-        ...profile,
-        access,
-      };
-      await saveRootConfig(root, state.configPath);
-      state.profileConfig = root.profiles[state.profile]!;
-      state.cfg = runtimeProfileConfig(root, state.profile);
-      log.info('config-ops', 'access-mutated', {
-        allowedUsers: access.allowedUsers.length,
-        allowedChats: access.allowedChats.length,
-        admins: access.admins.length,
-      });
-      return access;
-    });
-  } catch (err) {
-    reportMetric('command_fail', 1, { step: 'access.save' });
-    throw err;
-  }
-}
-
-/**
- * Store a new App Secret in the keystore and persist the account config
- * (SecretRef in config.json, plaintext only in the keystore), refreshing
- * in-memory state. Callers restart the bridge afterwards to reconnect with
- * the new credentials.
- */
-export async function saveAccountConfig(
-  state: MutableProfileState,
-  newCfg: AppConfig,
-  plaintextSecret: string,
-): Promise<void> {
-  const appPaths = profileAppPaths(state);
-  await setSecret(secretKeyForApp(newCfg.accounts.app.id), plaintextSecret, appPaths);
-
-  const root = await loadRootConfig(state.configPath);
-  if (!root) {
-    await saveConfig(newCfg, state.configPath);
-    state.cfg = newCfg;
-    return;
-  }
-
-  const profile = root.profiles[state.profile];
-  if (!profile) throw new Error(`profile not found: ${state.profile}`);
-  root.profiles[state.profile] = {
-    ...profile,
-    accounts: newCfg.accounts,
-  };
-  if (newCfg.secrets) root.secrets = newCfg.secrets;
-  await saveRootConfig(root, state.configPath);
-  state.profileConfig = root.profiles[state.profile]!;
-  state.cfg = runtimeProfileConfig(root, state.profile);
 }

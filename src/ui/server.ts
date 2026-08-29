@@ -236,8 +236,8 @@ async function route(
     return;
   }
   if (path === '/api/access' && p) {
-    const { state } = await resolveTargetState(deps, url);
-    sendJson(res, 200, await mutateAccess(state, await readJsonBody(req)));
+    const { state, controls } = await resolveTargetState(deps, url);
+    sendJson(res, 200, await mutateAccess(state, await readJsonBody(req), controls));
     return;
   }
   if (path === '/api/chats' && g) {

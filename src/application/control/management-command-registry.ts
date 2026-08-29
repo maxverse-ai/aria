@@ -37,6 +37,7 @@ function normalizeCommand(input: ManagementCommandInput): ManagementCommandDefin
     version: legacy.version,
     risk: legacy.risk,
     effect: legacy.restartRequired ? 'restart' : 'none',
+    parameterPrivacy: 'ordinary',
     prepare: legacy.prepare,
   };
 }
@@ -46,6 +47,9 @@ function validateCommand(input: ManagementCommandInput): void {
     !input.id.trim() ||
     input.version !== 1 ||
     !['low', 'sensitive', 'destructive'].includes(input.risk) ||
+    ('parameterPrivacy' in input &&
+      input.parameterPrivacy !== undefined &&
+      !['ordinary', 'private-identifiers'].includes(input.parameterPrivacy)) ||
     typeof input.prepare !== 'function'
   ) {
     throw new Error(`invalid management command: ${input.id || '<empty>'}`);
