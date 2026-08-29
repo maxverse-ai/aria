@@ -5,7 +5,7 @@ import { copyFileSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { sha256File, validateManifest } from "./artifact.mjs";
+import { sha256File, validateManifest, verifyStandaloneNodeAsset } from "./artifact.mjs";
 import { parseVersion, validatePolicy } from "./release-policy.mjs";
 
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
@@ -158,6 +158,7 @@ function prepareInternalRelease() {
   writeFileSync(releaseManifestPath, `${JSON.stringify(releaseManifest, null, 2)}\n`, "utf8");
   const installerPath = resolve(root, "artifacts", "aria-install.mjs");
   copyFileSync(resolve(root, "dist", "installer.js"), installerPath);
+  verifyStandaloneNodeAsset(installerPath);
   const result = {
     ...plan,
     tarball: `artifacts/${basename(tarball)}`,

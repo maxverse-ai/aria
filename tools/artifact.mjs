@@ -2,7 +2,7 @@
 
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { cpSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { copyFileSync, cpSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -37,6 +37,32 @@ function run(executable, args, options = {}) {
 
 export function sha256File(path) {
   return createHash("sha256").update(readFileSync(path)).digest("hex");
+}
+
+export function verifyStandaloneNodeAsset(assetPath, expectedOutput = "Usage:") {
+  const directory = mkdtempSync(join(tmpdir(), "aria-standalone-"));
+  const isolatedAsset = resolve(directory, "aria-install.mjs");
+  try {
+    copyFileSync(assetPath, isolatedAsset);
+    const env = { ...process.env };
+    delete env.NODE_PATH;
+    delete env.NODE_OPTIONS;
+    const output = execFileSync(process.execPath, [isolatedAsset, "--help"], {
+      cwd: directory,
+      env,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    }).trim();
+    if (!output.includes(expectedOutput)) {
+      throw new Error(`standalone asset help output is missing ${JSON.stringify(expectedOutput)}`);
+    }
+    return output;
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new Error(`standalone asset cannot run without repository dependencies: ${detail}`, { cause: error });
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 }
 
 export function validatePackageInventory(files) {
@@ -164,6 +190,8 @@ function verifyArtifact() {
     if (installedVersion !== manifest.version) {
       throw new Error(`installed artifact reports ${installedVersion}, expected ${manifest.version}`);
     }
+    const packageRoot = resolve(installation, "node_modules", ...manifest.packageName.split("/"));
+    verifyStandaloneNodeAsset(resolve(packageRoot, "dist", "installer.js"));
   } finally {
     rmSync(installation, { recursive: true, force: true });
   }

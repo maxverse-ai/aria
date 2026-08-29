@@ -4,7 +4,13 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { sha256File, validateManifest, validatePackageInventory, validatePackageName } from "../../../tools/artifact.mjs";
+import {
+  sha256File,
+  validateManifest,
+  validatePackageInventory,
+  validatePackageName,
+  verifyStandaloneNodeAsset,
+} from "../../../tools/artifact.mjs";
 import { compareNumericVersions, evaluateToolchain, parseNumericVersion } from "../../../tools/infra-doctor.mjs";
 
 const requiredFiles = [
@@ -93,6 +99,18 @@ describe("candidate artifact metadata", () => {
     };
     expect(validateManifest(manifest)).toBe(manifest);
     expect(() => validateManifest({ ...manifest, tarball: "../aria.tgz" })).toThrow(/basename/);
+    rmSync(directory, { recursive: true, force: true });
+  });
+
+  it("executes release entrypoints with no repository dependency tree", () => {
+    const directory = mkdtempSync(join(tmpdir(), "aria-standalone-unit-"));
+    const standalone = join(directory, "standalone.mjs");
+    const externalized = join(directory, "externalized.mjs");
+    writeFileSync(standalone, 'console.log("Usage: aria")\n', "utf8");
+    writeFileSync(externalized, 'import "missing-aria-release-dependency";\n', "utf8");
+
+    expect(verifyStandaloneNodeAsset(standalone)).toContain("Usage: aria");
+    expect(() => verifyStandaloneNodeAsset(externalized)).toThrow(/cannot run without repository dependencies/);
     rmSync(directory, { recursive: true, force: true });
   });
 });
