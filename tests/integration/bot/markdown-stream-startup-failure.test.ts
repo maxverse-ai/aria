@@ -63,6 +63,8 @@ interface FakeLarkChannel {
   connect(): Promise<void>;
   disconnect(): Promise<void>;
   getChatMode(chatId: string): Promise<'group' | 'topic'>;
+  getChatMembers(chatId: string, options?: { force?: boolean }): Promise<Array<{ id: string }>>;
+  getChatBots(chatId: string, options?: { force?: boolean }): Promise<Array<{ id: string; isBot: true }>>;
   getConnectionStatus(): { state: 'connected'; reconnectAttempts: number };
   send(chatId: string, content: unknown, options?: unknown): Promise<{ messageId: string }>;
   stream(chatId: string, input: unknown, options?: unknown): Promise<void>;
@@ -82,12 +84,11 @@ afterEach(async () => {
   await Promise.all(cleanups.splice(0).map((cleanup) => cleanup()));
 });
 
-describe('active-turn steering', () => {
+describe('automatic active-run follow-ups', () => {
   it('hands an eligible second IM message to the active Codex turn exactly once', async () => {
     const agent = new SteerableFakeAgent();
     const h = await createHarness({
       agent,
-      steering: 'auto',
       messageReply: 'text',
     });
     await startTestBridge(h);
@@ -116,6 +117,72 @@ describe('active-turn steering', () => {
 
     expect(agent.runOptions).toHaveLength(1);
     expect(lastMarkdown(h.channel)).toContain('FINAL_AFTER_STEER');
+  });
+
+  it('automatically merges an unmentioned follow-up in an exclusive human-agent group', async () => {
+    const agent = new SteerableFakeAgent();
+    const h = await createHarness({ agent, messageReply: 'text' });
+    await startTestBridge(h);
+
+    await h.channel.handlers.message?.(
+      message('om_group_first', 'start', { chatType: 'group', mentionedBot: true }),
+    );
+    await waitFor(() => agent.steeringRuns.length === 1);
+    await h.channel.handlers.message?.(
+      message('om_group_followup', 'also cover this', {
+        chatType: 'group',
+        mentionedBot: false,
+      }),
+    );
+
+    const run = agent.steeringRuns[0];
+    if (!run) throw new Error('expected the group run to be active');
+    expect(run.steerCalls).toHaveLength(1);
+    expect(run.steerCalls[0]?.requestId).toBe('im:om_group_followup');
+  });
+
+  it('does not treat a direct reply as addressing in a multi-person group', async () => {
+    const agent = new SteerableFakeAgent();
+    const h = await createHarness({
+      agent,
+      messageReply: 'text',
+      requireMentionInGroup: false,
+      groupHumanCount: 2,
+    });
+    await startTestBridge(h);
+
+    await h.channel.handlers.message?.(
+      message('om_multi_first', 'start', { chatType: 'group', mentionedBot: true }),
+    );
+    await waitFor(() => agent.steeringRuns.length === 1);
+    await h.channel.handlers.message?.(
+      message('om_multi_reply', 'reply context only', {
+        chatType: 'group',
+        mentionedBot: false,
+        replyToMessageId: 'om_multi_first',
+      }),
+    );
+
+    const run = agent.steeringRuns[0];
+    if (!run) throw new Error('expected the group run to be active');
+    expect(run.steerCalls).toHaveLength(0);
+  });
+});
+
+describe('new-task escape hatch', () => {
+  it('queues inline `/new` content as the first message of a fresh session', async () => {
+    const h = await createHarness({ messageReply: 'text' });
+    h.sessions.set('oc_dm', 'old-session', h.tmp.workspace);
+    await startTestBridge(h);
+
+    await h.channel.handlers.message?.(
+      message('om_new_task', '/new implement the automatic follow-up behavior'),
+    );
+    await waitFor(() => h.agent.runOptions.length === 1);
+
+    expect(h.sessions.getRaw('oc_dm')).toBeUndefined();
+    expect(h.agent.runOptions[0]?.prompt).toContain('implement the automatic follow-up behavior');
+    expect(h.agent.runOptions[0]?.prompt).not.toContain('/new implement');
   });
 });
 
@@ -478,7 +545,9 @@ async function createHarness(options: {
   agentKind?: 'claude' | 'codex';
   /** Inject a specialized adapter for active-turn lifecycle tests. */
   agent?: FakeAgentAdapter;
-  steering?: 'off' | 'shadow' | 'auto' | 'on';
+  requireMentionInGroup?: boolean;
+  groupHumanCount?: number;
+  groupBotCount?: number;
 } = {}): Promise<{
   tmp: TmpProfile;
   channel: FakeLarkChannel;
@@ -501,6 +570,10 @@ async function createHarness(options: {
     },
     access: {
       allowedUsers: ['ou_user'],
+      allowedChats: ['oc_group'],
+      ...(options.requireMentionInGroup !== undefined
+        ? { requireMentionInGroup: options.requireMentionInGroup }
+        : {}),
     },
     codex: {
       binaryPath: '/usr/local/bin/codex',
@@ -508,9 +581,6 @@ async function createHarness(options: {
     preferences: {
       cotMessages: 'off',
       ...(options.messageReply ? { messageReply: options.messageReply } : {}),
-    },
-    coordination: {
-      steering: options.steering ?? 'off',
     },
   });
   const profileConfig = {
@@ -653,6 +723,8 @@ function createFakeLarkChannel(harnessOptions: {
   reactionCreate?: () => Promise<{ data: { reaction_id: string } }>;
   stream?: StreamFn;
   send?: SendFn;
+  groupHumanCount?: number;
+  groupBotCount?: number;
 } = {}): FakeLarkChannel {
   const handlers: MessageHandlerMap = {};
   const sent: FakeLarkChannel['sent'] = [];
@@ -690,6 +762,17 @@ function createFakeLarkChannel(harnessOptions: {
     async disconnect() {},
     async getChatMode() {
       return 'group';
+    },
+    async getChatMembers() {
+      return Array.from({ length: harnessOptions.groupHumanCount ?? 1 }, (_, index) => ({
+        id: `ou_user_${index}`,
+      }));
+    },
+    async getChatBots() {
+      return Array.from({ length: harnessOptions.groupBotCount ?? 1 }, (_, index) => ({
+        id: `ou_bot_${index}`,
+        isBot: true as const,
+      }));
     },
     getConnectionStatus() {
       return { state: 'connected', reconnectAttempts: 0 };
@@ -746,17 +829,31 @@ function createControls(profileConfig: ReturnType<typeof createDefaultProfileCon
   };
 }
 
-function message(messageId: string, content: string): NormalizedMessage {
+function message(
+  messageId: string,
+  content: string,
+  options: {
+    chatType?: 'p2p' | 'group';
+    mentionedBot?: boolean;
+    replyToMessageId?: string;
+  } = {},
+): NormalizedMessage {
+  const chatType = options.chatType ?? 'p2p';
+  const mentionedBot = options.mentionedBot ?? false;
   return {
     messageId,
-    chatId: 'oc_dm',
-    chatType: 'p2p',
+    chatId: chatType === 'p2p' ? 'oc_dm' : 'oc_group',
+    chatType,
     senderId: 'ou_user',
     senderName: 'User',
     content,
     rawContentType: 'text',
     resources: [],
-    mentionedBot: false,
+    mentions: mentionedBot
+      ? [{ key: '@_user_1', openId: 'ou_bot', name: 'Bridge', isBot: true }]
+      : [],
+    mentionedBot,
+    ...(options.replyToMessageId ? { replyToMessageId: options.replyToMessageId } : {}),
     createTime: 1760000001000,
   } as unknown as NormalizedMessage;
 }

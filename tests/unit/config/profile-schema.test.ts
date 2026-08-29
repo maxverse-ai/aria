@@ -16,25 +16,17 @@ const app = {
 };
 
 describe('profile schema', () => {
-  it('defaults steering off and normalizes supported rollout modes', () => {
+  it('does not expose a persisted live-followup mode', () => {
     const fresh = createDefaultProfileConfig({ agentKind: 'claude', accounts: { app } });
-    expect(fresh.coordination).toEqual({ steering: 'off' });
+    expect(fresh).not.toHaveProperty('coordination');
 
-    const auto = normalizeProfileConfig({
+    const normalized = normalizeProfileConfig({
       schemaVersion: 2,
       agentKind: 'claude',
       accounts: { app },
       coordination: { steering: 'auto' },
     });
-    expect(auto.coordination).toEqual({ steering: 'auto' });
-
-    const invalid = normalizeProfileConfig({
-      schemaVersion: 2,
-      agentKind: 'claude',
-      accounts: { app },
-      coordination: { steering: 'surprise' },
-    });
-    expect(invalid.coordination).toEqual({ steering: 'off' });
+    expect(normalized).not.toHaveProperty('coordination');
   });
 
   it('defaults Claude sandbox to danger-full-access through canonical permissions', () => {

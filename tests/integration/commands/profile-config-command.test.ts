@@ -175,7 +175,12 @@ describe('profile-aware account and config commands', () => {
       candidate.profiles['codex-dev']?.preferences.serviceTier === 'fast',
     );
     expect(root.profiles['codex-dev']?.preferences.serviceTier).toBe('fast');
-    expect(h.controls.profileConfig.preferences.serviceTier).toBe('fast');
+    // The atomic config write is observable just before the live runtime
+    // reconciler swaps its in-memory projection. Wait for both halves of the
+    // management operation instead of racing that hand-off under a busy suite.
+    await vi.waitFor(() => {
+      expect(h.controls.profileConfig.preferences.serviceTier).toBe('fast');
+    });
   });
 
   it('requests a runtime engine switch and clears the previous engine model', async () => {

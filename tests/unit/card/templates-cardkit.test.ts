@@ -8,7 +8,6 @@ import {
   modelsCard,
   resumeCard,
   statusCard,
-  steeringCard,
   workspacesCard,
 } from '../../../src/card/templates';
 
@@ -19,7 +18,6 @@ const cards = [
     cwd: '/workspace',
     sessionStale: false,
     agentName: 'Codex',
-    steering: { preference: 'auto', capability: 'direct', activeRun: false },
     runtimeAccess: { label: 'sandbox', value: 'workspace-write' },
     activeRun: false,
     ownerState: 'ready',
@@ -62,11 +60,6 @@ const cards = [
     configuredTier: 'fast',
     fastOption: { value: 'fast', label: 'Fast' },
     source: '实时 Agent Runtime',
-  }),
-  steeringCard({
-    agent: 'codex',
-    current: 'auto',
-    capability: 'direct',
   }),
   helpCard('Codex'),
 ];

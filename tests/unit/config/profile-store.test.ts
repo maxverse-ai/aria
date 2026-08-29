@@ -127,7 +127,7 @@ describe('profile store canonical serialization', () => {
     expect(savedProfile.codex).toEqual(profile.codex);
     expect(savedProfile.attachments).toEqual(profile.attachments);
     expect(savedProfile.comments).toEqual(profile.comments);
-    expect(savedProfile.coordination).toEqual({ steering: 'off' });
+    expect(savedProfile).not.toHaveProperty('coordination');
     expect(savedProfile.larkCli).toEqual(profile.larkCli);
     expect(savedProfile.permissions).toEqual({
       defaultAccess: 'workspace',

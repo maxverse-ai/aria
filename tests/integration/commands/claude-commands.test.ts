@@ -21,7 +21,7 @@ interface Harness {
   agent: ReturnType<typeof createFakeAgent>;
   controls: Controls;
   cleanup(): Promise<void>;
-  run(content: string): Promise<boolean>;
+  run(content: string, onNewTask?: (content: string) => void): Promise<boolean>;
 }
 
 const cleanups: Array<() => Promise<void>> = [];
@@ -51,6 +51,19 @@ describe('Claude slash command visible behavior', () => {
     await expect(h.run('/reset')).resolves.toBe(true);
     expect(lastMarkdown(h.channel)).toBe('已开始新会话。');
     expect(h.sessions.getRaw('chat-1')).toBeUndefined();
+  });
+
+  it('starts a clean session and forwards inline `/new` task content to intake', async () => {
+    const h = await createHarness();
+    const tasks: string[] = [];
+    h.sessions.set('chat-1', 'old-session', h.tmp.workspace);
+
+    await expect(h.run('/new implement the revised routing', (task) => tasks.push(task)))
+      .resolves.toBe(true);
+
+    expect(h.sessions.getRaw('chat-1')).toBeUndefined();
+    expect(tasks).toEqual(['implement the revised routing']);
+    expect(lastMarkdown(h.channel)).toBe('已在新会话中提交新任务。');
   });
 
   it('keeps the per-scope timeout override when /new clears the resumable session', async () => {
@@ -333,7 +346,7 @@ async function createHarness(): Promise<Harness> {
     processId: 'proc-1',
   } satisfies Controls;
 
-  const run = (content: string): Promise<boolean> =>
+  const run = (content: string, onNewTask?: (content: string) => void): Promise<boolean> =>
     tryHandleCommand({
       channel: channel as unknown as CommandContext['channel'],
       msg: message(content),
@@ -344,6 +357,7 @@ async function createHarness(): Promise<Harness> {
       agent,
       activeRuns,
       controls,
+      ...(onNewTask ? { onNewTask } : {}),
     });
 
   const cleanup = async (): Promise<void> => {

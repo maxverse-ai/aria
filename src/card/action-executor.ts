@@ -20,7 +20,6 @@ export const CARD_ACTION_MODES = {
   'effort.set': 'background',
   'fast.refresh': 'background',
   'fast.set': 'background',
-  'steer.set': 'background',
   help: 'immediate',
   'models.refresh': 'background',
   'models.use': 'background',

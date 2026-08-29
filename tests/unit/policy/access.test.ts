@@ -182,10 +182,10 @@ describe('shouldRequireMentionForGroup', () => {
     ).toBe(false);
   });
 
-  it('preserves an explicit strict per-chat override for DM-like groups', () => {
+  it('keeps exclusive human-agent groups addressed regardless of storage source', () => {
     expect(
       shouldRequireMentionForGroup({ requireMention: true, source: 'chat-override' }, true),
-    ).toBe(true);
+    ).toBe(false);
   });
 
   it('does not require a mention when configuration disables it', () => {

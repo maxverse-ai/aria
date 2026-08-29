@@ -298,7 +298,7 @@ describe('DM-like group mention policy', () => {
     expect(h.agent.runOptions).toHaveLength(0);
   });
 
-  it('preserves an explicit per-chat strict override without querying members', async () => {
+  it('treats an exclusive human-agent group as addressed even with a strict stored override', async () => {
     const h = await createHarness();
     h.profileConfig.access.chatRequireMention = { oc_chat: true };
     await startTestBridge(h);
@@ -307,9 +307,9 @@ describe('DM-like group mention policy', () => {
       message({ messageId: 'om_explicit_strict', content: '仍然需要 at', mentionedBot: false }),
     );
 
-    expect(h.agent.runOptions).toHaveLength(0);
-    expect(h.channel.getChatMembers).not.toHaveBeenCalled();
-    expect(h.channel.getChatBots).not.toHaveBeenCalled();
+    await waitFor(() => h.agent.runOptions.length === 1);
+    expect(h.channel.getChatMembers).toHaveBeenCalledWith('oc_chat', { force: true });
+    expect(h.channel.getChatBots).toHaveBeenCalledWith('oc_chat', { force: true });
   });
 });
 

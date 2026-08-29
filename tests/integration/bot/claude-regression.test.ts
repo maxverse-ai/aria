@@ -61,7 +61,7 @@ describe('Claude IM regression boundaries', () => {
     // membership lookup used by the DM-like group exception.
     expect(source).toContain('groupMentionPolicyForChat(');
     expect(source).toContain('chatTopology.resolve(msg.chatId)');
-    expect(source).toContain('shouldRequireMentionForGroup(mentionPolicy, isDmLike)');
+    expect(source).toContain('shouldRequireMentionForGroup(mentionPolicy, addressing.addressedToAgent)');
     expect(source).toContain('!msg.mentionedBot');
     expect(source).toContain('msg.chatType !== \'p2p\'');
   });

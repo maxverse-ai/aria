@@ -1,238 +1,102 @@
-# Conversation coordination and steering
+# Conversation coordination
 
-> Status: the generic turn inbox, Codex live-turn steering, Feishu control,
-> final-reply coordination, and fallback semantics are implemented. The
-> send-time history freshness gate, duplicate-output gate, and multi-engine
-> transports remain future work.
+Aria treats follow-ups as normal conversation behavior, not as a mode users
+must configure. When an eligible message arrives during a supported active run,
+Aria automatically offers it to that run. If the engine cannot accept it, the
+same message remains queued for the next turn.
 
-## Goals and boundaries
+## Addressing model
 
-Coordination is a conversation concern, while delivery is an engine concern.
-Aria therefore keeps policy and ownership outside engine adapters and exposes
-steering as an optional runtime capability. An engine that does not support it
-must behave exactly as before: new messages remain queued for the next turn.
+One resolver determines whether a message is unambiguously directed at the
+current agent:
 
-The design follows four invariants:
+| Conversation shape | Addressed to the agent |
+|---|---|
+| P2P | Yes, implicitly |
+| Group with exactly one human and the current agent | Yes, implicitly |
+| Other group with a structured mention of the current bot | Yes, explicitly |
+| Other group without that mention | No |
 
-1. One inbound message has one owner. It is either queued, claimed for live
-   steering, or acknowledged after confirmed delivery.
-2. `accepted` means the engine transport acknowledged the input. Writing to a
-   pipe or starting an async task is not acceptance.
-3. Steering is an acceleration path, never the only correctness path. Every
-   non-accepted outcome releases the same message back to the next-turn queue.
-4. Final reply publication cannot overtake an already in-flight steering
-   request for the same run.
+A direct reply or quote contributes prompt context but does not address a bot.
+This distinction matters in multi-person groups: replying to an agent message
+without a structured mention is still ambient group traffic.
 
-## Reference review and deliberate boundaries
+The group mention preference controls whether ambient messages may start a
+future turn. It does not change the addressing model and therefore cannot make
+ambient group traffic modify an active run.
 
-The implementation borrows invariants, not project-specific orchestration:
-
-- The reviewed Grok Bot reconstruction keeps queue ownership outside its agent
-  core and has an explicit failure path for a consumed claimed injection. Aria
-  adopts that ownership shape as `TurnInbox.claim/acknowledge/release`. It does
-  not copy Grok Bot's subagent-specific interrupt-and-rerun mechanism because
-  Codex has a direct active-turn protocol.
-- The reviewed Raft Computer/Daemon packages model gated steering with a pure
-  reducer and delay delivery across unsafe tool, compaction, and review
-  boundaries. That distinction is preserved in `AgentSteeringMode` as
-  `direct | gated`; Aria currently advertises only Codex `direct`. A future
-  gated engine can add its own boundary state machine without putting
-  engine-specific phases in the conversation layer.
-- [Cumora](https://github.com/yetone/cumora) adds server-side seen cursors,
-  freshness preflight, and duplicate-output protection. Aria adopts its
-  deterministic-before-prompt principle, but not its PostgreSQL/Redis/server
-  ownership model. Feishu remains Aria's append-only message source, so a
-  database-transaction send gate is not available locally.
-
-This separation is why the shipped slice implements native steering and local
-ownership now, while keeping external-history freshness as a distinct later
-phase.
-
-## Shipped architecture
+## Ownership and fallback
 
 ```text
 Feishu message
       │
       ▼
-channel access + mention policy
+access + addressing
       │
       ▼
 TurnInbox (stable message-id ownership)
       │
-      ├── policy says queue ───────────────▶ next debounced turn
+      ├── no active/supported run ─────────▶ next debounced turn
       │
-      └── policy says attempt
+      └── eligible addressed follow-up
               │ claim(message)
               ▼
         TurnCoordinator
               │ optional AgentRun.steer()
               ▼
-        Codex App Server turn/steer
+        engine live-input transport
               │
-        ┌─────┴────────────────────────────┐
-        │ acknowledged                    │ deferred / rejected
-        ▼                                 ▼
-  acknowledge(message)              release(message)
-        │                                 │
-  current turn owns it              next turn owns it
-
-turn completes ─▶ TurnCoordinator.finalize ─▶ final reply send
-                         │
-                         └─ waits for already in-flight steering attempts
+        ┌─────┴───────────────────────┐
+        │ acknowledged               │ deferred / rejected
+        ▼                            ▼
+  acknowledge(message)         release(message)
+        │                            │
+  current turn owns it         next turn owns it
 ```
 
-### Layer ownership
+The implementation preserves four invariants:
 
-| Layer | Responsibility | Key files |
-|---|---|---|
-| Conversation | inbox ownership, finalization ordering, policy | `src/conversation/turn-inbox.ts`, `turn-coordinator.ts`, `steering-policy.ts` |
-| Agent contract | optional structured steering capability and outcomes | `src/agent/steering.ts`, `src/agent/types.ts`, `src/agent/capability.ts` |
-| Engine adapter | translate a confirmed attempt to the native protocol | `src/agent/engines/codex/app-server/runtime.ts` |
-| Lark adapter | access checks, prompt envelope, claim/ack/release wiring | `src/bot/channel.ts`, `src/bot/pending-queue.ts` |
-| Control plane | persisted policy and live reconciliation | `src/application/control/config-operations.ts` |
-| Lark UI | `/steer`, status line, CardKit callback lifecycle | `src/commands/index.ts`, `src/card/templates.ts`, `src/card/action-executor.ts` |
+1. A message has one owner: queued, claimed, or acknowledged.
+2. Acceptance requires an engine acknowledgement, not merely a local write.
+3. Every non-accepted attempt releases the original message to the next-turn
+   queue.
+4. Final reply publication waits for already in-flight live-input attempts for
+   that run.
 
-No Codex-specific branch exists in the conversation layer. Capability absence
-is represented by an omitted `AgentRun.steer`, not by a growing set of
-`agentKind === ...` checks.
+Text follow-ups are eligible when they are human-authored, addressed to the
+agent, contain no attachments or card/forward payload, are non-empty, and are
+at most 32 KiB. These checks do not expand chat access.
 
-## Contracts
+`/new <task>` is the explicit semantic escape hatch: it interrupts the current
+task, clears the resumable session, and submits the supplied content as a fresh
+task. `/new` without content only starts a fresh session.
 
-### Static capability
+## Engine contract
 
-`AgentCapability.steering` advertises what a plugin can create. Codex currently
-advertises `{ mode: "direct", textOnly: true }`; other engines omit it.
+The conversation layer uses the optional `AgentRun.steer(request)` contract as
+an internal transport abstraction. The name is intentionally not a product
+setting or user-visible state.
 
-### Concrete run capability
+Codex implements this contract with App Server `turn/steer`, including the
+active `threadId`, `expectedTurnId`, and a stable request id. A response is
+accepted only when it confirms the same active turn. Other engines omit the
+capability and automatically retain follow-ups for the next turn.
 
-`AgentRun.steering` and `AgentRun.steer(request)` describe what the active run
-can do. The request contains a stable `requestId`, the observed
-`expectedRunId`, and a prompt. Outcomes are explicit:
+## Observability and tests
 
-- `accepted`: engine acknowledgement received;
-- `deferred`: unsupported, no active run, turn not ready, or turn closing;
-- `rejected`: stale run, invalid input, or transport failure.
+The channel emits `live_followup_message` metrics and structured `followup`
+logs for accepted, queued, deferred, rejected, and claim-miss outcomes. Prompt
+text is never included in these records.
 
-The Lark adapter acknowledges an inbox claim only for `accepted`. All other
-outcomes release it.
+Tests cover addressing shapes, eligibility exclusions, inbox
+claim/acknowledge/release behavior, exact Codex protocol mapping, duplicate
+delivery, finalization ordering, exclusive-group live follow-ups, multi-person
+reply behavior, and unsupported-engine fallback.
 
-### Codex protocol mapping
+## Remaining work
 
-Codex uses its native App Server request:
-
-```json
-{
-  "method": "turn/steer",
-  "params": {
-    "threadId": "thread-id",
-    "input": [{ "type": "text", "text": "...", "text_elements": [] }],
-    "expectedTurnId": "turn-id"
-  }
-}
-```
-
-The adapter accepts the attempt only when the response returns the same active
-`turnId`. Requests are deduplicated by `requestId` for the lifetime of the run.
-See the [official Codex App Server documentation](https://developers.openai.com/codex/app-server).
-
-## Policy and Feishu control
-
-The profile field is:
-
-```json
-{
-  "coordination": {
-    "steering": "off"
-  }
-}
-```
-
-The default is deliberately `off`, so upgrading does not change message
-routing. Owner/admin users can use `/steer` or the low-risk
-`config.steering.set` management command.
-
-| Value | Behavior while a supported run is active |
-|---|---|
-| `off` | Queue every message for the next turn. |
-| `shadow` | Record messages that `auto` would steer, but leave them queued. |
-| `auto` | Attempt in P2P; in groups, attempt only when the bot was explicitly mentioned. |
-| `on` | Attempt every eligible text message that already passed normal access and mention intake policy. |
-
-The first release intentionally steers text only. Bot-authored messages,
-attachments, interactive/card payloads, merge-forward messages, empty input,
-and input over 32 KiB remain queued. Steering never expands who may invoke the
-bot and never bypasses group access policy.
-
-`/status` shows the configured preference, advertised engine capability, and
-whether the current scope has an active run. Unsupported engines say
-`unsupported` and keep next-turn behavior.
-
-## Final reply ordering and remaining freshness window
-
-`TurnCoordinator.finalize` marks the run closing, waits for steering requests
-that were already in flight, and only then executes the final send. The Codex
-adapter also marks the turn closing as soon as `turn/completed` arrives.
-
-This closes the local "acknowledgement races final send" window. It does not
-yet close the external history window: a Feishu message may arrive after the
-engine turn has completed and after ActiveRuns has unregistered it, but before
-the final message is published. That message is safely queued for the next
-turn, although the just-finished answer may be stale. A send-time history
-freshness gate is still required for strict multi-writer coordination.
-
-## Observability
-
-The channel records `steering_message` with an `outcome` and `reason`, and
-structured `steering.*` logs for shadow, accepted, deferred, rejected, and
-claim-miss paths. Logs contain scope/run identifiers through the existing
-sanitization layer and never include the steering prompt.
-
-## Phased roadmap
-
-### Phase 0 — ownership foundation (implemented)
-
-- Generic `TurnInbox<T>` with dedupe and claim/acknowledge/release.
-- `PendingQueue` reduced to a Lark-specific facade.
-- Optional, structured `AgentRun.steer` contract.
-- `TurnCoordinator` finalization barrier.
-
-### Phase 1 — Codex direct steering and control (implemented)
-
-- Native `turn/steer` with `expectedTurnId` and request dedupe.
-- `off | shadow | auto | on` persisted policy, default `off`.
-- Feishu `/steer` CardKit 2.0 control and `/status` visibility.
-- Process tests for exact JSON-RPC, duplicate delivery, and stale run rejection.
-
-### Phase 2 — send-time freshness and duplicate gates (not implemented)
-
-- Capture an input watermark per turn.
-- Fetch bounded chat/thread history immediately before final send.
-- Detect unseen non-self messages and exact normalized duplicate output.
-- Start in shadow mode, add fail-open metrics, then enforce after field data.
-- Reuse `TurnInbox` claims rather than `pending.cancel` coupling.
-
-### Phase 3 — more engine transports (not implemented)
-
-- Validate Claude Code stream-json duplex input before advertising support.
-- Let Kimi inherit only after protocol compatibility tests pass.
-- Research OpenCode server semantics; keep DSH and Pi unsupported until their
-  upstream transports can acknowledge live input.
-
-### Phase 4 — multi-agent coordination (not implemented)
-
-- Machine-level spawn pacing and provider-aware backoff.
-- Explicit task-claim cards with signed callbacks.
-- Bounded stalled-task takeover.
-- Keep prompt-level collaboration rules short and shape-based; deterministic
-  races remain code mechanisms.
-
-## Test strategy
-
-- Inbox: dedupe, ordered flush, claim acknowledgement, failed-attempt release.
-- Coordinator: unsupported fallback, exact run binding, finalization waits.
-- Codex process: protocol shape, successful acknowledgement, request dedupe,
-  stale run rejection, normal final completion.
-- Policy: all four rollout modes plus sender/content/size exclusions.
-- Lark: live second-message handoff, CardKit registry coverage, and
-  loading-to-success/failure lifecycle.
-- Regression: unsupported engines retain the original next-turn queue behavior.
+- Add a send-time chat-history freshness gate for messages arriving after the
+  engine turn closes but before its final reply is published.
+- Add normalized duplicate-output detection around that send gate.
+- Add live-input transports for other engines only when they can explicitly
+  acknowledge ownership.

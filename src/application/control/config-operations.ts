@@ -20,7 +20,6 @@ import type {
 import { ControlChangeError } from './change-types';
 import { ManagementCommandRegistry } from './management-command-registry';
 import type { ManagementRuntimeEffect } from './runtime-effect';
-import { STEERING_PREFERENCES } from '../../config/profile-schema';
 
 export const LOW_RISK_CONFIG_SETTINGS = [
   'require-mention',
@@ -31,13 +30,11 @@ export const LOW_RISK_CONFIG_SETTINGS = [
   'max-concurrent-runs',
   'run-idle-timeout',
   'meeting-enabled',
-  'steering',
 ] as const;
 
 export type LowRiskConfigSetting = (typeof LOW_RISK_CONFIG_SETTINGS)[number];
 
 export const SERVICE_TIER_SET_COMMAND = 'config.service-tier.set';
-export const STEERING_SET_COMMAND = 'config.steering.set';
 
 export interface LowRiskConfigSettingDescriptor {
   setting: LowRiskConfigSetting;
@@ -61,7 +58,6 @@ export const lowRiskConfigSettingDescriptors: readonly LowRiskConfigSettingDescr
   descriptor('max-concurrent-runs', 'config.max-concurrent-runs.set', 'integer 1..50'),
   descriptor('run-idle-timeout', 'config.run-idle-timeout.set', 'minutes 0..120 (0 disables)'),
   descriptor('meeting-enabled', 'config.meeting-enabled.set', 'true|false|on|off'),
-  descriptor('steering', STEERING_SET_COMMAND, 'off|shadow|auto|on'),
 ];
 
 export function configSettingsSnapshot(): ControlConfigSettingsSnapshot {
@@ -134,12 +130,6 @@ export const lowRiskConfigCommands: readonly ManagementCommandDefinition[] = [
     const after = booleanValue(value);
     if (before !== after) profile.meeting = { ...profile.meeting, enabled: after };
     return summary('meeting.enabled', before, after);
-  }),
-  operation(STEERING_SET_COMMAND, 'live', ({ profile, value }) => {
-    const before = profile.coordination.steering;
-    const after = enumValue(value, STEERING_PREFERENCES);
-    if (before !== after) profile.coordination = { ...profile.coordination, steering: after };
-    return summary('coordination.steering', before, after);
   }),
 ];
 
