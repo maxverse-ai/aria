@@ -5,7 +5,88 @@ is the package authority; npm is used only to resolve Aria's public runtime
 dependencies while installing a verified release tarball. The Aria package is
 not published to npm.
 
-## Boundaries
+## Consumer workflow
+
+### Bootstrap installation
+
+The copy-paste bootstrap commands live in the bilingual
+[README](../README.md#install). They perform three intentional steps:
+
+1. use an already authenticated `gh` client to select the newest complete,
+   published, immutable `internal-v*` prerelease;
+2. download only that release's standalone `aria-install.mjs` bootstrapper;
+3. let the bootstrapper independently resolve, download, verify, stage, smoke
+   test, and activate the release package.
+
+The bootstrapper accepts an optional exact stable version and an explicit
+force flag:
+
+```sh
+node aria-install.mjs --version <x.y.z>
+node aria-install.mjs --version <x.y.z> --force
+```
+
+`--force` is not a normal upgrade option. It permits an intentional downgrade
+and carries the plan's explicit override into live-activity safety checks.
+Without it, older targets and unsafe active-service transitions fail closed.
+
+After installation, verify that the stable launcher wins command resolution:
+
+```sh
+command -v aria
+aria --version
+```
+
+On PowerShell, use `Get-Command aria` for the first check. If an older npm/pnpm
+global command still wins, move the installer-reported command directory ahead
+of that global bin directory in `PATH` and open a new shell. The installer
+retains an adopted legacy version as a rollback baseline; it does not delete
+legacy files.
+
+### Upgrade and rollback
+
+The lifecycle is deliberately two-phase: `plan` resolves and verifies an exact
+target, while `apply` revalidates the expiring plan immediately before a state
+transition.
+
+```sh
+aria update check
+aria update plan
+aria update apply <plan-id>
+aria update status <operation-id>
+aria update rollback
+```
+
+- `aria update plan --version <x.y.z>` selects an exact complete immutable
+  release. The command prints the plan id, digest, expiry, and exact apply
+  command.
+- `apply` and `rollback` use a detached OS executor by default so a service
+  restart cannot terminate its own updater. `--foreground` is a recovery-only
+  escape hatch.
+- `status` without an id reads the latest journaled operation. Every command
+  also supports `--json` for automation.
+- `rollback` switches to the recorded previous version; it does not query a
+  mutable “previous release” alias.
+
+### Installation state
+
+Executable state is machine-level and intentionally separate from profile
+state. Defaults are:
+
+| Platform | Install root | Stable command |
+| --- | --- | --- |
+| Linux | `${XDG_DATA_HOME:-~/.local/share}/aria/cli` | `${XDG_BIN_HOME:-~/.local/bin}/aria` |
+| macOS | `~/Library/Application Support/Aria/cli` | `${XDG_BIN_HOME:-~/.local/bin}/aria` |
+| Windows | `%LOCALAPPDATA%\Aria\cli` | `%LOCALAPPDATA%\Aria\cli\bin\aria.cmd` |
+
+Within the install root, `install.json` is the atomic active/previous pointer;
+`versions/` contains commit-qualified installations; `plans/` and
+`operations/` hold expiring plans and durable journals; and `bin/launcher.mjs`
+is the stable service entrypoint. Override these roots only with
+`ARIA_INSTALL_HOME` and `ARIA_BIN_HOME`; `ARIA_HOME` remains profile/runtime
+state.
+
+## Architecture boundaries
 
 - `src/application/distribution/` owns release, plan, install-state, operation,
   update, and rollback contracts. It depends only on ports.
@@ -23,6 +104,10 @@ Profile state and executable state deliberately do not share a root:
   operation journals, the stable launcher, and `install.json`.
 - `ARIA_BIN_HOME`: optional stable command location.
 
+This separation lets profiles and encrypted credentials survive a CLI rollback,
+and lets one machine installation update every registered profile service
+without copying updater policy into the chat or engine layers.
+
 ## Release contract
 
 A consumable release must be a published, immutable GitHub prerelease whose tag
@@ -38,6 +123,11 @@ assets, including:
 The source adapter obtains credentials only by running `gh`. It never asks `gh`
 for a token and never persists GitHub credentials. Mutable, draft, incomplete,
 or incorrectly namespaced releases are invisible to consumers.
+
+The standalone bootstrapper is itself a release asset, not a source-checkout
+script. Release verification copies it into a dependency-free temporary
+directory and executes `--help`, so an installer that accidentally relies on
+the repository's `node_modules` cannot pass the release gate.
 
 Verification cross-checks independently resolved tag/commit metadata,
 `release.json`, the artifact manifest, the checksum file, and the actual
