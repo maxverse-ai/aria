@@ -1,4 +1,5 @@
 import type { RootConfig } from '../../config/profile-schema';
+import type { ManagementRuntimeEffect } from './runtime-effect';
 
 export const CONTROL_CHANGE_API_VERSION = 1 as const;
 
@@ -25,23 +26,46 @@ export interface ControlChangeSummary {
   after: ControlPlanScalar;
 }
 
+export interface ConfigMutation {
+  root: RootConfig;
+  changes: ControlChangeSummary[];
+}
+
+export interface ManagementCommandDefinition {
+  id: string;
+  version: 1;
+  risk: ControlChangeRisk;
+  effect: ManagementRuntimeEffect;
+  /** Pure deterministic transformation. Parameters must be non-secret. */
+  prepare(input: {
+    root: RootConfig;
+    profile: string;
+    parameters: ControlPlanParameters;
+  }): ConfigMutation;
+}
+
+/** @deprecated Compatibility input. New commands declare `effect`. */
 export interface ConfigChangeOperation {
   id: string;
   version: 1;
   risk: ControlChangeRisk;
-  /** Persisted changes require a bridge restart when no live-state adapter exists. */
   restartRequired: boolean;
   /** Pure deterministic transformation. Parameters must be non-secret. */
   prepare(input: {
     root: RootConfig;
     profile: string;
     parameters: ControlPlanParameters;
-  }): ConfigChangeCandidate;
+  }): ConfigMutation;
 }
 
-export interface ConfigChangeCandidate {
-  root: RootConfig;
-  changes: ControlChangeSummary[];
+export type ManagementCommandInput = ManagementCommandDefinition | ConfigChangeOperation;
+
+/** @deprecated Use `ConfigMutation`. */
+export type ConfigChangeCandidate = ConfigMutation;
+
+export interface ConfigChangeCommitResult {
+  applyResult: ControlChangeApplyResult;
+  effect: ManagementRuntimeEffect;
 }
 
 export interface ControlChangePlanSnapshot {
@@ -102,4 +126,6 @@ export class ControlChangeError extends Error {
 export interface StoredControlChangePlan extends ControlChangePlanSnapshot {
   /** Non-secret operation input. Deliberately omitted from public snapshots. */
   parameters: ControlPlanParameters;
+  /** Internal effect metadata. Optional for plans persisted before the mutation kernel. */
+  runtimeEffect?: ManagementRuntimeEffect;
 }

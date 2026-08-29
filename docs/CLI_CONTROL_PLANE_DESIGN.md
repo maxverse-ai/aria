@@ -1,8 +1,9 @@
 # Management control-plane design
 
-> Status: approved target architecture, implementation pending beyond the
-> shipped read-only and low-risk CLI surface in
-> [`CONTROL_PLANE.md`](CONTROL_PLANE.md). This document replaces the earlier
+> Status: approved target architecture, implementation in progress. The
+> read-only surface, low-risk CLI protocol, command registry, config repository
+> port, mutation type, and runtime-effect contract are implemented as recorded
+> in [`CONTROL_PLANE.md`](CONTROL_PLANE.md). This document replaces the earlier
 > CLI-centric runtime-binding and delegation roadmap.
 
 ## Scope
@@ -224,6 +225,10 @@ prompts, transcripts, unrestricted tool arguments/results, and private paths.
 - Route low-risk CLI operations through the kernel first.
 - Separate durable commit results from runtime reconciliation results.
 - Preserve current CLI JSON and human-readable compatibility.
+
+Implemented for the low-risk CLI path. Runtime reconciliation is currently a
+contract and a separate commit outcome; no adapter invokes runtime effects
+through it yet.
 
 ### Phase 2: trusted actor context
 

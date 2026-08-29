@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
+  lowRiskConfigCommandRegistry,
+  lowRiskConfigCommands,
   lowRiskConfigOperations,
   operationIdForSetting,
   parseSettingValue,
@@ -19,12 +21,20 @@ describe('low-risk config operations', () => {
   ] as const)('prepares %s through an explicit deterministic operation', (setting, value, field, after) => {
     const root = fixtureRoot();
     const id = operationIdForSetting(setting);
-    const operation = lowRiskConfigOperations.find((item) => item.id === id)!;
+    const operation = lowRiskConfigCommandRegistry.get(id)!;
 
     const candidate = operation.prepare({ root, profile: 'primary', parameters: { value } });
 
-    expect(operation).toMatchObject({ risk: 'low', restartRequired: true });
+    expect(operation).toMatchObject({ risk: 'low', effect: 'restart' });
     expect(candidate.changes).toEqual([expect.objectContaining({ field, after })]);
+  });
+
+  it('keeps the legacy restart-required operation view as a compatibility adapter', () => {
+    expect(lowRiskConfigCommands).toHaveLength(lowRiskConfigOperations.length);
+    expect(lowRiskConfigOperations.every((operation) => operation.restartRequired)).toBe(true);
+    expect(lowRiskConfigOperations.map((operation) => operation.id)).toEqual(
+      lowRiskConfigCommands.map((command) => command.id),
+    );
   });
 
   it('parses CLI values and rejects invalid setting values', () => {

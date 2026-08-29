@@ -107,6 +107,13 @@ plan, confirmation, or application steps.
 
 - `ConfigChangeService` is the shipped application boundary for low-risk CLI
   mutations.
+- `ManagementCommandRegistry` normalizes canonical commands with explicit
+  runtime effects. The legacy `restartRequired` operation shape remains a
+  compatibility input, while public v1 CLI DTOs remain unchanged.
+- `FileConfigRepository` owns desired-state reads, the shared configuration
+  lock, and atomic commits. `ConfigChangeService.commitPlan()` reports the
+  durable apply result separately from its `none | live | reconnect | restart`
+  runtime effect; actual reconciliation is a later phase.
 - `config-ops.ts` is the shared compatibility writer for Feishu and web
   configuration flows, not a second target architecture.
 - Runtime reconnect, restart, activity preflight, and engine replacement

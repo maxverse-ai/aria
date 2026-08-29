@@ -2,7 +2,7 @@ import { userInfo } from 'node:os';
 import {
   ConfigChangeService,
   configSettingsSnapshot,
-  lowRiskConfigOperations,
+  lowRiskConfigCommandRegistry,
   operationIdForSetting,
   parseSettingValue,
   type ControlActorContext,
@@ -92,7 +92,7 @@ export function formatApplyResult(result: ControlChangeApplyResult): string {
 function service(opts: Pick<ConfigChangeCliOptions, 'rootDir'>): ConfigChangeService {
   return new ConfigChangeService({
     rootDir: opts.rootDir ?? paths.rootDir,
-    operations: lowRiskConfigOperations,
+    registry: lowRiskConfigCommandRegistry,
   });
 }
 

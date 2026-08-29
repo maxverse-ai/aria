@@ -2,32 +2,38 @@ import { createHash, randomBytes } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { resolveAppPaths } from '../../config/app-paths';
 import type { RootConfig } from '../../config/profile-schema';
-import {
-  loadRootConfig,
-  readActiveProfile,
-  saveRootConfig,
-  withConfigFileLock,
-} from '../../config/profile-store';
 import { ControlChangePlanStore } from './change-plan-store';
+import { FileConfigRepository, type ConfigRepository } from './config-repository';
 import { configRevision } from './config-revision';
+import { ManagementCommandRegistry } from './management-command-registry';
+import { runtimeEffectRequiresRestart, type ManagementRuntimeEffect } from './runtime-effect';
 import {
   CONTROL_CHANGE_API_VERSION,
   ControlChangeError,
-  type ConfigChangeOperation,
+  type ConfigChangeCommitResult,
   type ControlActorContext,
   type ControlActorReference,
   type ControlChangeApplyResult,
   type ControlChangePlanSnapshot,
   type ControlChangeSummary,
+  type ManagementCommandInput,
   type ControlPlanParameters,
   type StoredControlChangePlan,
 } from './change-types';
 
 const DEFAULT_PLAN_TTL_MS = 15 * 60_000;
 
+interface PendingConfigCommit {
+  commit: ConfigChangeCommitResult;
+  nextRoot?: RootConfig;
+}
+
 export interface ConfigChangeServiceOptions {
   rootDir?: string;
-  operations?: readonly ConfigChangeOperation[];
+  registry?: ManagementCommandRegistry;
+  /** @deprecated Pass a registry. Retained for application API compatibility. */
+  operations?: readonly ManagementCommandInput[];
+  repository?: ConfigRepository;
   planTtlMs?: number;
   now?: () => Date;
   createId?: () => string;
@@ -46,20 +52,21 @@ export interface CreateConfigChangePlanInput {
  * generic JSON-patch escape hatch.
  */
 export class ConfigChangeService {
-  private readonly rootDir: string;
-  private readonly operations = new Map<string, ConfigChangeOperation>();
+  private readonly registry: ManagementCommandRegistry;
+  private readonly repository: ConfigRepository;
   private readonly store: ControlChangePlanStore;
   private readonly planTtlMs: number;
   private readonly now: () => Date;
   private readonly createId: () => string;
 
   constructor(options: ConfigChangeServiceOptions = {}) {
-    this.rootDir = resolveAppPaths({ rootDir: options.rootDir }).rootDir;
-    for (const operation of options.operations ?? []) {
-      if (this.operations.has(operation.id)) throw new Error(`duplicate operation: ${operation.id}`);
-      this.operations.set(operation.id, operation);
+    const rootDir = resolveAppPaths({ rootDir: options.rootDir }).rootDir;
+    if (options.registry && options.operations) {
+      throw new Error('pass either registry or operations, not both');
     }
-    this.store = new ControlChangePlanStore(this.rootDir);
+    this.registry = options.registry ?? new ManagementCommandRegistry(options.operations);
+    this.repository = options.repository ?? new FileConfigRepository(rootDir);
+    this.store = new ControlChangePlanStore(rootDir);
     this.planTtlMs = options.planTtlMs ?? DEFAULT_PLAN_TTL_MS;
     this.now = options.now ?? (() => new Date());
     this.createId = options.createId ?? (() => randomBytes(16).toString('hex'));
@@ -90,7 +97,7 @@ export class ConfigChangeService {
         id: operation.id,
         version: operation.version,
         risk: operation.risk,
-        restartRequired: operation.restartRequired,
+        restartRequired: runtimeEffectRequiresRestart(operation.effect),
       },
       status: 'planned',
       actor: actorReference(input.actor),
@@ -98,6 +105,7 @@ export class ConfigChangeService {
       targetRevision: configRevision(candidate.root),
       changes: structuredClone(candidate.changes),
       parameters,
+      runtimeEffect: operation.effect,
       createdAt: createdAt.toISOString(),
       expiresAt: new Date(createdAt.getTime() + this.planTtlMs).toISOString(),
     };
@@ -132,19 +140,22 @@ export class ConfigChangeService {
   }
 
   async applyPlan(id: string, actor: ControlActorContext): Promise<ControlChangeApplyResult> {
+    return (await this.commitPlan(id, actor)).applyResult;
+  }
+
+  /** Commit desired state and report its runtime effect without performing it. */
+  async commitPlan(id: string, actor: ControlActorContext): Promise<ConfigChangeCommitResult> {
     validateActor(actor);
-    const appPaths = resolveAppPaths({ rootDir: this.rootDir });
-    return withConfigFileLock(appPaths.configFile, async () =>
-      this.store.withLockedPlan(id, async (plan) => {
+    return this.repository.withLockedRoot(async (root) => {
+      const transaction = await this.store.withLockedPlan<PendingConfigCommit>(id, async (plan) => {
         requireActor(plan, actor);
         if (plan.status === 'applied' && plan.appliedAt) {
-          return { plan, result: applyResult(plan, false) };
+          return { plan, result: { commit: commitResult(plan, false) } };
         }
         if (plan.status !== 'confirmed') {
           throw new ControlChangeError('not-confirmed', `plan is not confirmed: ${id}`);
         }
         requireNotExpired(plan, this.now());
-        const root = await loadRootConfig(appPaths.configFile);
         if (!root) throw new ControlChangeError('invalid-plan', 'root config not found');
         const currentRevision = configRevision(root);
         const appliedAt = this.now().toISOString();
@@ -152,7 +163,7 @@ export class ConfigChangeService {
         // Recovery path: config committed, but the previous plan-state write failed.
         if (currentRevision === plan.targetRevision) {
           const recovered = { ...plan, status: 'applied' as const, appliedAt };
-          return { plan: recovered, result: applyResult(recovered, true) };
+          return { plan: recovered, result: { commit: commitResult(recovered, true) } };
         }
         if (currentRevision !== plan.baseRevision) {
           throw new ControlChangeError(
@@ -183,15 +194,21 @@ export class ConfigChangeService {
             `operation output changed since planning (${plan.targetRevision} -> ${actualTarget})`,
           );
         }
-        await saveRootConfig(candidate.root, appPaths.configFile);
         const applied = { ...plan, status: 'applied' as const, appliedAt };
-        return { plan: applied, result: applyResult(applied, false) };
-      }),
-    );
+        return {
+          plan: applied,
+          result: {
+            nextRoot: candidate.root,
+            commit: commitResult(applied, false, operation.effect),
+          },
+        };
+      });
+      return { nextRoot: transaction.nextRoot, result: transaction.commit };
+    });
   }
 
-  private requireOperation(id: string): ConfigChangeOperation {
-    const operation = this.operations.get(id);
+  private requireOperation(id: string) {
+    const operation = this.registry.get(id);
     if (!operation) {
       throw new ControlChangeError('operation-unavailable', `operation unavailable: ${id}`);
     }
@@ -199,10 +216,9 @@ export class ConfigChangeService {
   }
 
   private async resolveRoot(requestedProfile?: string): Promise<{ root: RootConfig; profile: string }> {
-    const appPaths = resolveAppPaths({ rootDir: this.rootDir });
-    const root = await loadRootConfig(appPaths.configFile);
+    const root = await this.repository.readRoot();
     if (!root) throw new ControlChangeError('invalid-plan', 'root config not found');
-    const active = (await readActiveProfile(this.rootDir)) ?? root.activeProfile;
+    const active = (await this.repository.readActiveProfile()) ?? root.activeProfile;
     const profile = requestedProfile ?? active;
     if (!root.profiles[profile]) {
       throw new ControlChangeError('profile-not-found', `profile not found: ${profile}`);
@@ -212,7 +228,7 @@ export class ConfigChangeService {
 }
 
 function publicPlan(plan: StoredControlChangePlan): ControlChangePlanSnapshot {
-  const { parameters: _parameters, ...snapshot } = plan;
+  const { parameters: _parameters, runtimeEffect: _runtimeEffect, ...snapshot } = plan;
   return structuredClone(snapshot);
 }
 
@@ -341,4 +357,12 @@ function applyResult(plan: StoredControlChangePlan, recovered: boolean): Control
     recovered,
     restartRequired: plan.operation.restartRequired,
   };
+}
+
+function commitResult(
+  plan: StoredControlChangePlan,
+  recovered: boolean,
+  effect: ManagementRuntimeEffect = plan.runtimeEffect ?? (plan.operation.restartRequired ? 'restart' : 'none'),
+): ConfigChangeCommitResult {
+  return { applyResult: applyResult(plan, recovered), effect };
 }
