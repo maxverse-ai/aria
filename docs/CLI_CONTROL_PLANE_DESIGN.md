@@ -5,8 +5,10 @@
 > port, mutation type, runtime-effect contract, and versioned Management API
 > facade are implemented. Commit/reconciliation separation and the running
 > profile reconciler are also implemented as recorded in
-> [`CONTROL_PLANE.md`](CONTROL_PLANE.md). This document replaces the earlier
-> CLI-centric runtime-binding and delegation roadmap.
+> [`CONTROL_PLANE.md`](CONTROL_PLANE.md). The Feishu `/config` preferences
+> form now uses that facade and reconciler; the remaining public adapters are
+> still migrating. This document replaces the earlier CLI-centric
+> runtime-binding and delegation roadmap.
 
 ## Scope
 
@@ -73,9 +75,9 @@ The repository is intentionally in a transitional state:
 | Writer | Current path | Target classification |
 | --- | --- | --- |
 | Low-risk CLI settings | `ManagementApi` over `ConfigChangeService` | Public Management API |
-| Feishu `/config` and cards | shared `config-ops.ts`, direct commit plus live refresh | Public adapter to migrate |
+| Feishu `/config` preferences form | `ManagementApi` aggregate command plus running-profile reconciliation | Public Management API |
+| Feishu access and account flows | shared `config-ops.ts`, direct commit plus live refresh | Public commands to migrate |
 | Local web console | shared `config-ops.ts`, direct commit plus live refresh | Public adapter to migrate |
-| Access and account flows | command/UI handlers through `config-ops.ts` | Public commands to migrate |
 | Engine switch | Supervisor-owned prepare, quiesce, commit, swap, rollback | Runtime effect behind a public command |
 | Profile bootstrap and repair | `profile-runtime.ts` and preflight persistence | Privileged infrastructure path |
 | Secret/material migration | profile bootstrap and keystore helpers | Privileged infrastructure path |
@@ -252,7 +254,8 @@ mutation kernel and returns commit and reconciliation outcomes independently.
 The foundation is implemented. The default reconciler defers effects for an
 adapter with no runtime ownership. A running-profile implementation applies an
 exact desired revision live, reconnects through the Supervisor, and defers a
-process restart. Public card and web writers do not use it yet.
+process restart. The `/config` preferences card now uses it; web and the
+remaining card writers do not yet.
 
 ### Phase 4: adapter migration
 
@@ -260,6 +263,12 @@ process restart. Public card and web writers do not use it yet.
   profile reconciler.
 - Preserve existing user behavior while deleting duplicated write decisions.
 - Keep adapter-specific parsing and rendering outside the application layer.
+
+In progress: `/config` preferences are one atomic
+`profile.preferences.update` command. Form parsing, lark-cli policy application
+and engine switching remain adapter/runtime concerns; the desired profile
+commit and live refresh now follow the shared management path. Access, account
+and web mutations remain compatibility writers for later slices.
 
 ### Phase 5: management command expansion
 

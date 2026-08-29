@@ -4,5 +4,17 @@ import { formatRootConfig } from '../../config/profile-store';
 
 /** Semantic revision of the normalized serializable root configuration. */
 export function configRevision(root: RootConfig): string {
-  return `sha256:${createHash('sha256').update(formatRootConfig(root)).digest('hex')}`;
+  const serializable = JSON.parse(formatRootConfig(root)) as unknown;
+  const canonical = JSON.stringify(sortObjectKeys(serializable));
+  return `sha256:${createHash('sha256').update(canonical).digest('hex')}`;
+}
+
+function sortObjectKeys(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(sortObjectKeys);
+  if (!value || typeof value !== 'object') return value;
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0)
+      .map(([key, item]) => [key, sortObjectKeys(item)]),
+  );
 }

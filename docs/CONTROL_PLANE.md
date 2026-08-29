@@ -9,16 +9,18 @@ are not shipped behavior unless identified below.
 Aria exposes supported management capabilities through one application-layer
 `ManagementApi`. Its v1 request envelopes carry `requestId`, actor, command,
 profile and typed input; its plan, commit and execute results are independently
-versioned. CLI commands are the currently shipped machine interface.
-Feishu cards and the local web console still share the older `config-ops.ts`
-write path and have not yet migrated; agent-driven flows can invoke the shipped
-CLI commands. The target is for every public entry point to become an adapter
-over the same registered commands.
+versioned. CLI commands are the currently shipped machine interface, and the
+Feishu `/config` preferences form is the first in-process card adapter over the
+same boundary. Other Feishu writers and the local web console still use the
+older `config-ops.ts` compatibility path; agent-driven flows can invoke the
+shipped CLI commands. The target is for every public entry point to become an
+adapter over the same registered commands.
 
 ```text
-CLI --------------------+--> Management API --> Config repository
-Card / Web (target) ----+                         |
-Agent + CLI ------------+                         +--> Runtime reconciler
+CLI ----------------------+--> Management API --> Config repository
+/config preferences card -+                         |
+Card / Web (remaining) ----+ (target)                +--> Runtime reconciler
+Agent + CLI ---------------+
 
 Runtime Admin IPC -----------------------------> Runtime lifecycle
 Native Read API -------------------------------> Read model and audit queries
@@ -102,11 +104,12 @@ running bridge's in-memory profile, its compatibility presenter explicitly
 reports `restartRequired: true`; persisted changes take effect after a safe
 restart. Canonical command metadata is transport-neutral: the first six
 settings declare `live`, while `meeting-enabled` declares `reconnect`.
-Cards and web adapters do not satisfy that target yet: their shared
-`config-ops.ts` compatibility path writes configuration and refreshes live
-state directly. They must migrate incrementally without changing current user
-behavior. Agent flows may use the staged CLI service and cannot bypass its
-plan, confirmation, or application steps.
+The `/config` preferences form executes one registered aggregate command and
+refreshes the exact committed revision through `ProfileRuntimeReconciler`.
+Other cards and the web adapter still use the `config-ops.ts` compatibility
+path and must migrate incrementally without changing current user behavior.
+Agent flows may use the staged CLI service and cannot bypass its plan,
+confirmation, or application steps.
 
 ## Current boundary summary
 
@@ -129,12 +132,13 @@ plan, confirmation, or application steps.
   reconciliation without repeating the write.
 - `ProfileRuntimeReconciler` can reload an exact committed revision into a
   running profile for `live`, invoke its connect-before-disconnect path for
-  `reconnect`, and defer process-level `restart`. Adapters have not cut over to
-  this implementation yet.
+  `reconnect`, and defer process-level `restart`. The `/config` preferences
+  adapter now uses this implementation and retries reconciliation separately
+  from its already-completed commit.
 - The CLI now uses `ManagementApi` while unwrapping its envelopes so existing
   public CLI JSON and human-readable output remain compatible.
-- `config-ops.ts` is the shared compatibility writer for Feishu and web
-  configuration flows, not a second target architecture.
+- `config-ops.ts` remains the compatibility writer for Feishu access/account
+  flows and web configuration, not a second target architecture.
 - Runtime reconnect, restart, activity preflight, and engine replacement
   belong to Runtime Admin IPC and the Supervisor.
 - Native Read is a scoped read/query transport and never a configuration

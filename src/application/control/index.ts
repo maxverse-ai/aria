@@ -145,3 +145,10 @@ export type {
   LowRiskConfigSetting,
   LowRiskConfigSettingDescriptor,
 } from './config-operations';
+export {
+  PROFILE_PREFERENCES_UPDATE_COMMAND,
+  profilePreferencesUpdateCommand,
+  profilePreferencesUpdateParameters,
+} from './profile-preferences-command';
+export type { ProfilePreferencesUpdateInput } from './profile-preferences-command';
+export { managementCommandRegistry, managementCommands } from './management-commands';

@@ -18,6 +18,15 @@ import {
 } from '../agent/models';
 import type { AgentAdapter } from '../agent/types';
 import type { EngineStatusSnapshot } from '../agent/runtime/types';
+import {
+  ConfigChangeService,
+  MANAGEMENT_API_VERSION,
+  ManagementApi,
+  PROFILE_PREFERENCES_UPDATE_COMMAND,
+  configRevision,
+  managementCommandRegistry,
+  profilePreferencesUpdateParameters,
+} from '../application/control';
 import type { ActiveRuns } from '../bot/active-runs';
 import {
   accountCurrentCard,
@@ -88,6 +97,7 @@ import { formatRelTime, type SessionSummary } from '../session/history';
 import type { CodexThreadHistoryEntry, ListCodexThreadHistoryOptions } from '../session/codex-history';
 import type { SessionCatalog, SessionCatalogIdentity } from '../session/catalog';
 import { isAlive, readAndPrune, resolveTarget } from '../runtime/registry';
+import { ProfileRuntimeReconciler } from '../runtime/profile-runtime-reconciler';
 import { readUiSidecar } from '../ui/sidecar';
 import { DEFAULT_RUN_STATUS_ITEMS, type RunStatusItemId } from '../run-status/items';
 import { compactRunStatusPreference, getRunStatusItems } from '../run-status/preferences';
@@ -2624,7 +2634,14 @@ async function submitConfig(ctx: CommandContext): Promise<void> {
         larkCliPolicyApplied = true;
         failureStep = 'config.save';
       }
-      await savePreferencesConfig(ctx, nextPreferences, requireMentionInGroup, larkCliIdentity, mode);
+      await savePreferencesConfig(
+        ctx,
+        nextPreferences,
+        requireMentionInGroup,
+        larkCliIdentity,
+        mode,
+        runStatusSelection.touched,
+      );
     } catch (err) {
       let rollbackFailed = false;
       if (larkCliIdentityChanged) {
@@ -2656,6 +2673,7 @@ async function submitConfig(ctx: CommandContext): Promise<void> {
           requireMentionInGroup,
           larkCliIdentity,
           mode,
+          runStatusSelection.touched,
         ).catch(() => undefined);
         await waitForSettle();
         await showResultCardInPlace(
@@ -2676,6 +2694,7 @@ async function submitConfig(ctx: CommandContext): Promise<void> {
             requireMentionInGroup,
             larkCliIdentity,
             mode,
+            runStatusSelection.touched,
           );
         } catch (rollbackErr) {
           modelRollbackFailed = true;
@@ -2855,14 +2874,70 @@ async function savePreferencesConfig(
   requireMentionInGroup: boolean,
   larkCliIdentity: ProfileConfig['larkCli']['identityPreset'],
   mode: ProfileMode,
+  runStatusTouched: boolean,
 ): Promise<void> {
-  return configOps.savePreferencesConfig(
-    ctx.controls,
-    preferences,
-    requireMentionInGroup,
-    larkCliIdentity,
-    mode,
+  const actor = { source: 'card' as const, principal: ctx.msg.senderId };
+  const api = new ManagementApi(
+    new ConfigChangeService({
+      rootDir: dirname(ctx.controls.configPath),
+      registry: managementCommandRegistry,
+    }),
+    new ProfileRuntimeReconciler(ctx.controls),
   );
+  const result = await api.execute({
+    schema: 'aria.management.execute.request.v1',
+    apiVersion: MANAGEMENT_API_VERSION,
+    requestId: randomUUID(),
+    actor,
+    profile: ctx.controls.profile,
+    command: PROFILE_PREFERENCES_UPDATE_COMMAND,
+    input: profilePreferencesUpdateParameters({
+      mode,
+      model: preferences.model,
+      messageReply: getMessageReplyMode({ ...ctx.controls.cfg, preferences }),
+      showToolCalls: getShowToolCalls({ ...ctx.controls.cfg, preferences }),
+      cotMessages: getCotMessages({ ...ctx.controls.cfg, preferences }),
+      runStatusTouched,
+      runStatusItems: getRunStatusItems(preferences),
+      maxConcurrentRuns: getMaxConcurrentRuns({ ...ctx.controls.cfg, preferences }),
+      runIdleTimeoutMinutes:
+        (getRunIdleTimeoutMs({ ...ctx.controls.cfg, preferences }) ?? 0) / 60_000,
+      requireMentionInGroup,
+      larkCliIdentity,
+      larkCliRecordedAt: nextLarkCliRecordedAt(
+        ctx.controls.profileConfig.larkCli.localUserImport?.attemptedAt,
+      ),
+    }),
+  });
+  if (result.reconciliation.status === 'applied') return;
+
+  const retry = await api.commit({
+    schema: 'aria.management.commit.request.v1',
+    apiVersion: MANAGEMENT_API_VERSION,
+    requestId: randomUUID(),
+    actor,
+    planId: result.planId,
+  });
+  if (retry.reconciliation.status !== 'applied') {
+    const currentRoot = await loadRootConfig(ctx.controls.configPath).catch(() => undefined);
+    log.warn('command', 'config-runtime-reconcile-incomplete', {
+      profile: ctx.controls.profile,
+      status: retry.reconciliation.status,
+      effect: retry.reconciliation.effect,
+      desiredRevision: result.applyResult.resultRevision,
+      ...(currentRoot ? { currentRevision: configRevision(currentRoot) } : {}),
+      ...('code' in retry.reconciliation ? { code: retry.reconciliation.code } : {}),
+      ...('reason' in retry.reconciliation ? { reason: retry.reconciliation.reason } : {}),
+    });
+  }
+}
+
+function nextLarkCliRecordedAt(previous: string | undefined): string {
+  const previousMs = previous ? Date.parse(previous) : Number.NaN;
+  const timestamp = Number.isNaN(previousMs)
+    ? Date.now()
+    : Math.max(Date.now(), previousMs + 1);
+  return new Date(timestamp).toISOString();
 }
 
 // ────────────── /meeting — in-meeting agent (智能体入会) ──────────────
