@@ -10,8 +10,9 @@ Aria exposes supported management capabilities through one application-layer
 `ManagementApi`. Its v1 request envelopes carry `requestId`, actor, command,
 profile and typed input; its plan, commit and execute results are independently
 versioned. CLI commands are the currently shipped machine interface. The
-Feishu `/config`, `/invite`, `/remove`, and `/account` flows plus local web
-settings/access mutations are in-process adapters over the same boundary.
+Feishu `/config`, `/invite`, `/remove`, `/account`, `/models`, `/effort`, and
+`/agent` flows plus local web settings/access mutations are in-process adapters
+over the same boundary.
 Agent-driven flows can invoke the shipped CLI commands. The target remains for
 every public entry point to use registered commands rather than stored-config
 paths.
@@ -21,9 +22,14 @@ CLI ----------------------+--> Management API --> Config repository
 /config preferences card -+                         |
 Web settings form ---------+                         +--> Runtime reconciler
 Access/account adapters ----+
+Model/reasoning adapters ----+
+Engine selection ------------+
 Agent + CLI ---------------+
 
-Runtime Admin IPC -----------------------------> Runtime lifecycle
+                          engine-switch effect
+                                   |
+                                   v
+Runtime Admin / Supervisor --------------------> Runtime lifecycle
 Native Read API -------------------------------> Read model and audit queries
 ```
 
@@ -138,8 +144,8 @@ plan, confirmation, or application steps.
   compatibility input, while public v1 CLI DTOs remain unchanged.
 - `FileConfigRepository` owns desired-state reads, the shared configuration
   lock, and atomic commits. `ConfigChangeService.commitPlan()` reports the
-  durable apply result separately from its `none | live | reconnect | restart`
-  runtime effect.
+  durable apply result separately from its
+  `none | live | reconnect | engine-switch | restart` runtime effect.
 - `ManagementApi` asks a `RuntimeReconciler` to apply that effect only after a
   successful commit and returns its `not-required | applied | deferred |
   failed` outcome separately. A reconciliation failure never rewrites or
@@ -147,10 +153,20 @@ plan, confirmation, or application steps.
   reconciliation without repeating the write.
 - `ProfileRuntimeReconciler` can reload an exact committed revision into a
   running profile for `live`, invoke its connect-before-disconnect path for
-  `reconnect`, and defer process-level `restart`. Settings and access adapters
-  use this implementation directly; `/account` deliberately defers its first
-  reconcile until the success card is visible, then retries the already-applied
-  plan without repeating the config write.
+  `reconnect`, and defer both Supervisor-owned `engine-switch` and process-level
+  `restart`. Settings, access, model and reasoning adapters use this
+  implementation directly; `/account` deliberately defers its first reconcile
+  until the success card is visible, then retries the already-applied plan
+  without repeating the config write.
+- `profile.model.update` owns legacy reasoning-map migration, and
+  `profile.reasoning.update` binds an effort to the exact engine and resolved
+  model observed by the adapter. Neither adapter writes `config.json` directly.
+- `profile.engine.update` changes only `agentKind` and the engine-local model.
+  The Supervisor proves a candidate runtime first, stages only missing inactive
+  plugin bootstrap config, quiesces runs, commits the command, then consumes
+  `engine-switch` through `EngineSwitchRuntimeReconciler`. Registry/lock/runtime
+  activation happens before the effect is reported applied; pre-swap failure
+  restores the previous desired engine with a reverse management command.
 - The CLI now uses `ManagementApi` while unwrapping its envelopes so existing
   public CLI JSON and human-readable output remain compatible.
 - `config-ops.ts` no longer contains public config writers. It retains only the
@@ -159,7 +175,8 @@ plan, confirmation, or application steps.
   adapter writes the encrypted profile keystore first; the command persists
   only a profile-scoped provider and SecretRef.
 - Runtime reconnect, restart, activity preflight, and engine replacement
-  belong to Runtime Admin IPC and the Supervisor.
+  belong to Runtime Admin and the Supervisor; they do not create a second
+  configuration writer.
 - Native Read is a scoped read/query transport and never a configuration
   writer.
 - Bootstrap, schema/layout migration, secret migration, and recovery are named

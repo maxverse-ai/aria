@@ -5,9 +5,10 @@
 > port, mutation type, runtime-effect contract, and versioned Management API
 > facade are implemented. Commit/reconciliation separation and the running
 > profile reconciler are also implemented as recorded in
-> [`CONTROL_PLANE.md`](CONTROL_PLANE.md). Feishu settings/access/account flows
-> and local web settings/access flows now use that facade and reconciler; model,
-> engine and profile lifecycle commands remain to migrate. This document replaces the earlier
+> [`CONTROL_PLANE.md`](CONTROL_PLANE.md). Feishu settings/access/account/model/
+> reasoning/engine flows and local web settings/access flows now use that
+> facade and the appropriate runtime reconciler; profile lifecycle commands
+> remain to migrate. This document replaces the earlier
 > CLI-centric runtime-binding and delegation roadmap.
 
 ## Scope
@@ -79,7 +80,9 @@ The repository is intentionally in a transitional state:
 | Local web settings form | `ManagementApi` aggregate command plus live/reconnect or deferred reconciliation | Public Management API |
 | Feishu access and account flows | `ManagementApi` sensitive commands plus live/reconnect reconciliation | Public Management API |
 | Local web access mutations | `ManagementApi` access command plus live/deferred reconciliation | Public Management API |
-| Engine switch | Supervisor-owned prepare, quiesce, commit, swap, rollback | Runtime effect behind a public command |
+| Feishu model and reasoning flows | `ManagementApi` model-scoped commands plus live reconciliation | Public Management API |
+| Engine switch | `profile.engine.update` commit plus Supervisor-owned prepare, quiesce, swap and rollback | Public command + Runtime Admin effect |
+| Inactive engine bootstrap | `stageEngineBootstrap` copies only the selected plugin's config field | Privileged infrastructure path |
 | Profile bootstrap and repair | `profile-runtime.ts` and preflight persistence | Privileged infrastructure path |
 | Secret/material migration | profile bootstrap and keystore helpers | Privileged infrastructure path |
 | Layout/schema migration | named migration code | Privileged infrastructure path |
@@ -148,10 +151,10 @@ ManagementCommandDefinition
   inputSchema
   outputSchema
   resourceResolver
-  risk                 read | low | high | destructive
+  risk                 low | sensitive | destructive
   requiredCapability
   confirmation         none | required
-  effect               none | live | reconnect | restart
+  effect               none | live | reconnect | engine-switch | restart
   prepare(input, snapshot) -> deterministic mutation
 ```
 
@@ -274,7 +277,13 @@ reports reconciliation as deferred. Feishu and Web access operations share
 `profile.access.update`; the Feishu account form stages its plaintext secret in
 the profile keystore and commits only an external reference through
 `profile.account.update`. Form parsing, credential validation, lark-cli policy
-application and engine switching remain adapter/runtime concerns.
+application and engine runtime activation remain adapter/runtime concerns.
+`/models` and `/effort` now commit through `profile.model.update` and
+`profile.reasoning.update`; their catalog validation stays in the adapter while
+legacy effort migration is deterministic command behavior. `/agent` commits
+`profile.engine.update`, while the Supervisor exclusively owns candidate
+readiness, run quiescing, diagnostic projection updates, runtime swap and
+rollback.
 
 ### Phase 5: management command expansion
 
@@ -284,8 +293,12 @@ application and engine switching remain adapter/runtime concerns.
 
 Access/account expansion is implemented. Both commands are classified
 `sensitive`, require explicit source-and-command-scoped adapter authorization,
-and publish no raw resource identifiers. Model/engine and profile lifecycle
-commands remain.
+and publish no raw resource identifiers. Model/reasoning commands are low-risk
+live changes. Engine selection is a low-risk desired-state command with the
+dedicated `engine-switch` effect: target bootstrap is staged as a narrow
+privileged prerequisite, the Supervisor consumes the effect only after commit,
+and a failed activation restores desired state through a reverse management
+command. Profile lifecycle commands remain.
 
 ### Phase 6: practical lifecycle completion
 

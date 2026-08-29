@@ -184,4 +184,22 @@ export {
   profileAccountUpdateParameters,
 } from './profile-account-command';
 export type { ProfileAccountUpdateInput } from './profile-account-command';
+export {
+  PROFILE_MODEL_UPDATE_COMMAND,
+  PROFILE_REASONING_UPDATE_COMMAND,
+  profileModelUpdateCommand,
+  profileModelUpdateParameters,
+  profileReasoningUpdateCommand,
+  profileReasoningUpdateParameters,
+} from './profile-model-command';
+export type {
+  ProfileModelUpdateInput,
+  ProfileReasoningUpdateInput,
+} from './profile-model-command';
+export {
+  PROFILE_ENGINE_UPDATE_COMMAND,
+  profileEngineUpdateCommand,
+  profileEngineUpdateParameters,
+} from './profile-engine-command';
+export type { ProfileEngineUpdateInput } from './profile-engine-command';
 export { managementCommandRegistry, managementCommands } from './management-commands';

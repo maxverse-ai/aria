@@ -1,9 +1,11 @@
+import { randomUUID } from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
 import pkg from '../../package.json';
 import { startChannel as realStartChannel, type BridgeChannel } from '../bot/channel';
 import type { AgentSwitchResult, Controls } from '../commands';
 import type { AppPaths } from '../config/app-paths';
 import { isComplete, type AppConfig } from '../config/schema';
-import type { AgentKind, ProfileConfig } from '../config/profile-schema';
+import type { AgentKind, ProfileConfig, RootConfig } from '../config/profile-schema';
 import { loadExternalEnginePlugins } from '../agent/plugin/registry';
 import type { EngineRuntime } from '../agent/runtime/types';
 import { log } from '../core/logger';
@@ -32,7 +34,11 @@ import {
   updateEntry,
   type ProcessEntry,
 } from './registry';
-import { commitEngineSwitch, prepareEngineSwitch } from './engine-switch';
+import {
+  EngineSwitchRuntimeReconciler,
+  prepareEngineSwitch,
+  stageEngineBootstrap,
+} from './engine-switch';
 import { ProfileRuntimeSlot } from './profile-runtime-slot';
 import { modelCatalog } from '../agent/model-catalog/service';
 import {
@@ -44,6 +50,17 @@ import type {
   NativeReadRuntimeFactory,
 } from './native-read-runtime';
 import { ProfileRuntimeReconciler } from './profile-runtime-reconciler';
+import {
+  ConfigChangeService,
+  MANAGEMENT_API_VERSION,
+  ManagementApi,
+  PROFILE_ENGINE_UPDATE_COMMAND,
+  configRevision,
+  managementCommandRegistry,
+  profileEngineUpdateParameters,
+  type ControlActorContext,
+  type RuntimeReconcileRequest,
+} from '../application/control';
 
 type StartChannelFn = typeof realStartChannel;
 
@@ -252,8 +269,8 @@ class ManagedProfile {
       async restart() {
         await self.restart();
       },
-      async switchAgent(targetAgentKind) {
-        return self.switchAgent(targetAgentKind);
+      async switchAgent(targetAgentKind, actor) {
+        return self.switchAgent(targetAgentKind, actor);
       },
       async engineStatus() {
         return self.runtimeSlot.statusSnapshot();
@@ -273,7 +290,10 @@ class ManagedProfile {
    * The candidate runtime is proven usable before config and diagnostic
    * projections are committed; failures keep the old runtime and bridge live.
    */
-  private switchAgent(targetAgentKind: AgentKind): Promise<AgentSwitchResult> {
+  private switchAgent(
+    targetAgentKind: AgentKind,
+    actor: ControlActorContext,
+  ): Promise<AgentSwitchResult> {
     const active = this.agentSwitchInFlight;
     if (active) {
       if (active.targetAgentKind === targetAgentKind) return active.promise;
@@ -285,14 +305,17 @@ class ManagedProfile {
     }
 
     let tracked!: Promise<AgentSwitchResult>;
-    tracked = this.performAgentSwitch(targetAgentKind).finally(() => {
+    tracked = this.performAgentSwitch(targetAgentKind, actor).finally(() => {
       if (this.agentSwitchInFlight?.promise === tracked) this.agentSwitchInFlight = undefined;
     });
     this.agentSwitchInFlight = { targetAgentKind, promise: tracked };
     return tracked;
   }
 
-  private async performAgentSwitch(targetAgentKind: AgentKind): Promise<AgentSwitchResult> {
+  private async performAgentSwitch(
+    targetAgentKind: AgentKind,
+    actor: ControlActorContext,
+  ): Promise<AgentSwitchResult> {
     const switchStartedAt = Date.now();
     const previousAgentKind = this.profileConfig.agentKind;
     if (targetAgentKind === previousAgentKind) {
@@ -329,13 +352,6 @@ class ManagedProfile {
       }
       previousProfileConfig = structuredClone(persistedProfile);
       const prepared = await prepareEngineSwitch(persistedProfile, targetAgentKind);
-      const next: AppConfig & ProfileConfig = {
-        ...this.cfg,
-        ...prepared.profileConfig,
-        // profileConfig may carry a SecretRef; preserve the live resolved
-        // account projection even though this switch does not reconnect it.
-        accounts: this.cfg.accounts,
-      };
       nextEngineRuntime = createProfileEngineRuntime(prepared.profileConfig, {
         ...this.appPaths,
         configPath: this.configPath,
@@ -352,51 +368,108 @@ class ManagedProfile {
       // new work is paused while old-runtime runs and preparations drain.
       resumeRuns = await this.bridge.quiesceAgentRuns('agent-switch');
 
-      const committed = await commitEngineSwitch({
+      const staged = await stageEngineBootstrap({
         configPath: this.configPath,
         profile: this.profile,
         expectedAgentKind: previousAgentKind,
-        profileConfig: prepared.profileConfig,
+        expectedProfileConfig: previousProfileConfig,
+        preparedProfileConfig: prepared.profileConfig,
+        targetAgentKind,
+      });
+      const stagedCandidate = await prepareEngineSwitch(staged.profileConfig, targetAgentKind);
+      if (!isDeepStrictEqual(stagedCandidate.profileConfig, prepared.profileConfig)) {
+        throw new Error('staged engine bootstrap changed the prepared runtime configuration');
+      }
+
+      const api = new ManagementApi(
+        new ConfigChangeService({
+          rootDir: this.appPaths.rootDir,
+          registry: managementCommandRegistry,
+        }),
+        new EngineSwitchRuntimeReconciler(async (request) => {
+          const committedRoot = await this.readCommittedEngineRevision(
+            request,
+            targetAgentKind,
+            prepared.profileConfig,
+          );
+          const committedProfile = committedRoot.profiles[this.profile]!;
+          const candidate = nextEngineRuntime;
+          if (!candidate) throw new Error('prepared engine runtime is unavailable');
+
+          // Registry pruning validates the current entry against lock metadata,
+          // so patch the entry while both still describe the previous engine,
+          // then advance the held-lock sidecars to the same target engine.
+          await updateEntry(
+            this.entry.id,
+            {
+              agentKind: targetAgentKind,
+              botName: this.bridge.channel.botIdentity?.name,
+            },
+            this.appPaths.userRegistryFile,
+          );
+          registryUpdated = true;
+          for (const lock of this.locks) {
+            await lock.updateMetadata({ agentKind: targetAgentKind });
+          }
+          metadataUpdated = true;
+
+          // Everything after this swap is synchronous or best-effort. A failed
+          // reconciliation therefore always leaves the old runtime active.
+          const previousEngineRuntime = this.runtimeSlot.swap(candidate);
+          const next: AppConfig & ProfileConfig = {
+            ...this.cfg,
+            ...committedProfile,
+            // ProfileConfig may carry a SecretRef; preserve the live resolved
+            // account projection because an engine switch does not reconnect it.
+            accounts: this.cfg.accounts,
+          };
+          this.cfg = next;
+          this.profileConfig = committedProfile;
+          this.engineRuntime = candidate;
+          this.controls.cfg = this.cfg;
+          this.controls.profileConfig = this.profileConfig;
+          modelCatalog.invalidate({ profileId: this.profile, engineId: previousAgentKind });
+          modelCatalog.invalidate({ profileId: this.profile, engineId: targetAgentKind });
+          nextEngineRuntime = undefined;
+          log.info('agent-switch', 'activated', {
+            profile: this.profile,
+            from: previousAgentKind,
+            to: targetAgentKind,
+            generation: this.runtimeSlot.currentGeneration(),
+            channelReused: true,
+            elapsedMs: Date.now() - switchStartedAt,
+          });
+          await previousEngineRuntime.dispose().catch((err) =>
+            log.warn('supervisor', 'engine-dispose-failed', {
+              profile: this.profile,
+              err: String(err),
+            }),
+          );
+        }),
+      );
+      const result = await api.execute({
+        schema: 'aria.management.execute.request.v1',
+        apiVersion: MANAGEMENT_API_VERSION,
+        requestId: randomUUID(),
+        actor,
+        profile: this.profile,
+        command: PROFILE_ENGINE_UPDATE_COMMAND,
+        input: profileEngineUpdateParameters({
+          expectedAgentKind: previousAgentKind,
+          expectedModel: previousProfileConfig.preferences.model ?? null,
+          targetAgentKind,
+          targetModel: null,
+        }),
       });
       configCommitted = true;
-
-      // Registry pruning validates the current entry against lock metadata,
-      // so patch the entry while both still describe the previous engine,
-      // then advance the held-lock sidecars to the same target engine.
-      await updateEntry(
-        this.entry.id,
-        {
-          agentKind: targetAgentKind,
-          botName: this.bridge.channel.botIdentity?.name,
-        },
-        this.appPaths.userRegistryFile,
-      );
-      registryUpdated = true;
-      for (const lock of this.locks) {
-        await lock.updateMetadata({ agentKind: targetAgentKind });
+      if (result.reconciliation.status !== 'applied') {
+        const detail = 'code' in result.reconciliation
+          ? result.reconciliation.code
+          : 'reason' in result.reconciliation
+            ? result.reconciliation.reason
+            : result.reconciliation.status;
+        throw new Error(`engine switch runtime reconciliation failed: ${detail}`);
       }
-      metadataUpdated = true;
-
-      const previousEngineRuntime = this.runtimeSlot.swap(nextEngineRuntime);
-      this.cfg = { ...next, preferences: committed.cfg.preferences };
-      this.profileConfig = committed.profileConfig;
-      this.engineRuntime = nextEngineRuntime;
-      this.controls.cfg = this.cfg;
-      this.controls.profileConfig = this.profileConfig;
-      modelCatalog.invalidate({ profileId: this.profile, engineId: previousAgentKind });
-      modelCatalog.invalidate({ profileId: this.profile, engineId: targetAgentKind });
-      nextEngineRuntime = undefined;
-      log.info('agent-switch', 'activated', {
-        profile: this.profile,
-        from: previousAgentKind,
-        to: targetAgentKind,
-        generation: this.runtimeSlot.currentGeneration(),
-        channelReused: true,
-        elapsedMs: Date.now() - switchStartedAt,
-      });
-      await previousEngineRuntime.dispose().catch((err) =>
-        log.warn('supervisor', 'engine-dispose-failed', { profile: this.profile, err: String(err) }),
-      );
       return {
         changed: true,
         previousAgentKind,
@@ -418,12 +491,11 @@ class ManagedProfile {
         );
       }
       if (configCommitted && previousProfileConfig) {
-        await commitEngineSwitch({
-          configPath: this.configPath,
-          profile: this.profile,
-          expectedAgentKind: targetAgentKind,
-          profileConfig: previousProfileConfig,
-        }).catch((rollbackErr) =>
+        await this.rollbackEngineConfig(
+          targetAgentKind,
+          previousProfileConfig,
+          actor,
+        ).catch((rollbackErr) =>
           log.fail('supervisor', rollbackErr, { step: 'engine-switch-config-rollback' }),
         );
       }
@@ -431,6 +503,74 @@ class ManagedProfile {
     } finally {
       resumeRuns?.();
       this.restarting = false;
+    }
+  }
+
+  private async readCommittedEngineRevision(
+    request: RuntimeReconcileRequest,
+    expectedAgentKind: AgentKind,
+    expectedProfileConfig?: ProfileConfig,
+  ): Promise<RootConfig> {
+    if (request.profile !== this.profile) {
+      throw new Error(`engine switch profile mismatch: ${request.profile}`);
+    }
+    const root = await loadRootConfig(this.configPath);
+    if (!root || configRevision(root) !== request.revision) {
+      throw new Error('engine switch desired revision mismatch');
+    }
+    const profile = root.profiles[this.profile];
+    if (!profile || profile.agentKind !== expectedAgentKind) {
+      throw new Error(`engine switch target is not committed: ${expectedAgentKind}`);
+    }
+    if (expectedProfileConfig && !isDeepStrictEqual(profile, expectedProfileConfig)) {
+      throw new Error('committed engine profile differs from the prepared candidate');
+    }
+    return root;
+  }
+
+  private async rollbackEngineConfig(
+    expectedAgentKind: AgentKind,
+    previousProfileConfig: ProfileConfig,
+    actor: ControlActorContext,
+  ): Promise<void> {
+    const api = new ManagementApi(
+      new ConfigChangeService({
+        rootDir: this.appPaths.rootDir,
+        registry: managementCommandRegistry,
+      }),
+      new EngineSwitchRuntimeReconciler(async (request) => {
+        const root = await this.readCommittedEngineRevision(
+          request,
+          previousProfileConfig.agentKind,
+        );
+        const restored = root.profiles[this.profile]!;
+        if (
+          (restored.preferences.model ?? null)
+          !== (previousProfileConfig.preferences.model ?? null)
+        ) {
+          throw new Error('engine switch rollback restored the wrong model');
+        }
+        if (this.profileConfig.agentKind !== previousProfileConfig.agentKind) {
+          throw new Error('engine switch rollback cannot reconcile an activated target runtime');
+        }
+      }),
+    );
+    const result = await api.execute({
+      schema: 'aria.management.execute.request.v1',
+      apiVersion: MANAGEMENT_API_VERSION,
+      requestId: randomUUID(),
+      actor,
+      profile: this.profile,
+      command: PROFILE_ENGINE_UPDATE_COMMAND,
+      input: profileEngineUpdateParameters({
+        expectedAgentKind,
+        expectedModel: null,
+        targetAgentKind: previousProfileConfig.agentKind,
+        targetModel: previousProfileConfig.preferences.model ?? null,
+      }),
+    });
+    if (result.reconciliation.status !== 'applied') {
+      throw new Error('engine switch desired-state rollback was not reconciled');
     }
   }
 

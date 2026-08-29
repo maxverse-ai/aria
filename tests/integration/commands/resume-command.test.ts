@@ -219,7 +219,10 @@ describe('agent-aware resume commands', () => {
         h.dispatchCard({ cmd: 'agent.use', arg: 'opencode' }, 'om_fake_1'),
       ).resolves.toBeUndefined();
 
-      await vi.waitFor(() => expect(h.controls.switchAgent).toHaveBeenCalledWith('opencode'));
+      await vi.waitFor(() => expect(h.controls.switchAgent).toHaveBeenCalledWith(
+        'opencode',
+        { source: 'card', principal: 'ou-user' },
+      ));
       expect(loadingUpdatesAtSwitch).toBe(1);
       let updates = h.channel.rawClient.requests.filter(
         (request) => request.method === 'cardkit.v1.card.update',
