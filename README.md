@@ -1,43 +1,150 @@
 # Aria
 
-> Every agent is an aria; together they become an opera.
+**English** | [简体中文](./README.zh.md)
 
-Aria brings your local coding agents (Claude Code, Codex, and more) into Feishu / Lark — and lets them work as a team.
+[![Focus](https://img.shields.io/badge/focus-local--first%20agent%20control-7C5CFC?style=flat-square&labelColor=171717)](#why-aria)
+[![Channel](https://img.shields.io/badge/channel-Feishu%20%7C%20Lark-00D6B9?style=flat-square&labelColor=171717)](#runtime-flow)
+[![Platforms](https://img.shields.io/badge/platforms-Windows%20%7C%20macOS%20%7C%20Linux-55DDE0?style=flat-square&labelColor=171717)](#supported-scope)
+[![Distribution](https://img.shields.io/badge/distribution-immutable%20GitHub%20Releases-F3B61F?style=flat-square&labelColor=171717)](#install)
 
-Forked from [lark-channel-bridge](https://github.com/zarazhangrui/lark-coding-agent-bridge) (MIT) as an independent evolution under [maxverse-ai](https://github.com/maxverse-ai).
+**A local-first control plane for coding agents in Feishu / Lark.**
 
-A lightweight bot that bridges Feishu / Lark messenger with your local Claude Code or Codex CLI. Run one command, scan a QR code to bind a PersonalAgent app, and talk to your local coding agent from chat.
+Aria turns Feishu / Lark into the interaction surface for coding agents that run
+on your own machine. The engine, tools, files, and credentials stay local;
+Aria owns message addressing, access control, profiles, sessions, workspaces,
+streaming delivery, turn coordination, background services, and safe version
+lifecycle operations.
 
-[中文 README](./README.zh.md)
+The sharp product contract is:
+
+> Send an addressed task from Feishu / Lark, route it to the correct local
+> agent and workspace, incorporate eligible follow-ups without losing queued
+> input, and publish the terminal answer only while it is still fresh.
 
 For a product walkthrough, see the [Feishu document](https://larkcommunity.feishu.cn/docx/OaRIdFIRFoLM3xxTmKwcetHqn5e).
 
-## What it does
+[Why Aria](#why-aria) | [Product contract](#product-contract) |
+[Runtime flow](#runtime-flow) | [Supported scope](#supported-scope) |
+[Quick start](#quick-start) | [Commands](#commands) |
+[Documentation](#documentation)
 
-- Forwards Feishu / Lark messages to local Claude Code or Codex CLI. Send a DM directly, or `@bot` in a group.
-- **Streaming card**: text replies and tool calls update on one Lark card in real time.
-- **COT process messages**: optionally send a process message with agent progress text and tool calls, then send the final answer separately.
-- **Session continuity**: each chat, topic, or document comment thread keeps its own session.
-- **Queueing, batching, and live follow-ups**: messages sent in quick succession are handled together. Eligible follow-ups addressed to an active supported agent are merged automatically; all other messages remain queued for the next turn.
-- **Multiple workspaces**: use `/cd` to switch the current project, and `/ws` to save and reuse common project directories.
-- **Images and files**: send them to the bot directly, and the bridge downloads them locally for the agent.
-- **Interactive cards**: `/help`, `/ws list`, and `/status` return cards with clickable buttons.
+## Why Aria
 
-## Prerequisites
+- **Local execution:** source trees, agent credentials, shell tools, and
+  attachments stay on the host that runs Aria; chat is the remote control, not
+  the compute plane.
+- **Capability-driven engines:** every engine plugin advertises its own
+  history, image, service-tier, and live-input capabilities. The UI renders
+  only controls the selected engine and model actually support.
+- **Safe steering and fallback:** eligible text sent during a Codex run can be
+  accepted by native `turn/steer`; an unsupported, delayed, or rejected input
+  remains owned by the next-turn queue instead of disappearing.
+- **Conversation isolation:** each chat, topic, or document-comment thread has
+  an independent session, while profiles isolate app credentials, agent state,
+  workspaces, logs, and lark-cli identity.
+- **Observable delivery:** streaming cards, optional COT process messages,
+  tool blocks, run status, and terminal freshness checks make the remote run
+  understandable without pretending provisional output is final.
+- **Operational safety:** immutable release metadata, byte verification,
+  stable launchers, detached updates, health checks, and transactional rollback
+  keep a running bot recoverable.
+- **Private by default:** the app owner is the only chat user initially;
+  explicit user, group, and admin grants expand access.
+
+## Product Contract
+
+These are stable product surfaces, not agent-specific shortcuts:
+
+| Surface | Contract |
+| --- | --- |
+| Feishu / Lark channel | Normalize DMs, groups, topics, comments, mentions, files, and card actions into addressed conversation input |
+| Profile | Bind one PersonalAgent app, one engine, isolated credentials/state, and a default or named workspace set |
+| Engine plugin | Probe and start a local CLI, advertise capabilities, stream events, resume compatible history, and dispose owned resources |
+| Turn coordinator | Batch initial input, preserve one-owner inbox semantics, offer eligible live follow-ups, and safely queue every fallback |
+| Delivery | Stream provisional progress, project agent-reported status, check final-reply freshness, and suppress conservative duplicates |
+| Policy | Apply chat access, group addressing, workspace validation, permission ceilings, and identity boundaries before execution |
+| Distribution | Resolve complete immutable releases, verify metadata and bytes, switch a stable launcher atomically, and roll back failed updates |
+
+Engine-specific behavior stays behind the engine contract. Feishu / Lark
+routing, access policy, coordination, and the updater do not branch on a
+hard-coded global “Fast” or “steering” switch.
+
+## Runtime Flow
+
+```text
+human in Feishu / Lark
+        │
+        ▼
+channel normalization → access + addressing → profile / session / workspace
+                                                  │
+                                                  ▼
+                                      capability-driven engine plugin
+                                                  │
+                                                  ▼
+                                        local coding-agent CLI
+                                                  │
+                    ┌─────────────────────────────┴──────────────────────┐
+                    ▼                                                    ▼
+        streamed progress + status                         addressed follow-up
+                    │                                      │
+                    │                         native steer if acknowledged;
+                    │                         otherwise retain for next turn
+                    └─────────────────────────────┬──────────────────────┘
+                                                  ▼
+                               inbox + bounded-thread freshness gate
+                                                  ▼
+                                           terminal reply
+```
+
+## Supported Scope
+
+| Built-in engine | Current live follow-up behavior | Engine-specific surface |
+| --- | --- | --- |
+| Claude Code | Retained for the next turn | Native history and compatible resume |
+| Codex CLI | Direct text steering through App Server `turn/steer` | Image input and model-reported service tiers such as Fast |
+| OpenCode | Retained for the next turn | Native history and live model discovery |
+| DeepSeek Harness | Retained for the next turn | Built-in headless adapter |
+| Kimi Code | Retained for the next turn | Claude-compatible transport and native history |
+| Pi | Retained for the next turn | Native history and reasoning controls |
+
+All built-in engines share channel routing, access control, profiles,
+workspaces, queue/freshness safety, streaming, and service management. Native
+steering is currently Codex text-only. Fast is not a generic Aria speed flag:
+it appears only when Codex App Server reports a compatible service tier for the
+selected model.
+
+The current product boundary is deliberately explicit:
+
+- one local host owns execution; Aria is not a hosted multi-tenant agent cloud;
+- Feishu / Lark PersonalAgent is the production channel today, with channel and
+  engine plugin contracts as the extension boundaries;
+- multi-person groups require a structured `@bot` for unambiguous addressing;
+- remote freshness history is bounded and fails open when unavailable or
+  truncated, so history failure never silently discards a terminal answer;
+- Aria is distributed from private immutable GitHub Releases and is not
+  published to npm.
+
+## Quick Start
+
+### Prerequisites
 
 - Node.js **>= 20.12.0**
 - At least one local agent installed and logged in:
   - Claude Code: `claude`, see https://docs.anthropic.com/en/docs/claude-code/quickstart
   - Codex CLI: `codex`, see https://developers.openai.com/codex/cli
   - OpenCode CLI: `opencode`, see https://opencode.ai/docs/
+  - DeepSeek Harness (`dsh`), Kimi Code (`kimi`), and Pi (`pi`) are also
+    built-in when their corresponding CLI is installed.
 - A Feishu / Lark **PersonalAgent** app. The first-run QR wizard can create and bind one for you.
 
-## Install
+### Install
 
 Aria is currently distributed from private, immutable GitHub Releases; the
 Aria package itself is not published to npm. First authenticate GitHub CLI with
 an account that can read `maxverse-ai/aria`, then download the standalone
 installer from the newest complete internal release:
+
+Linux / macOS:
 
 ```bash
 gh auth status
@@ -48,10 +155,35 @@ gh release download "$ARIA_TAG" --repo "$ARIA_REPOSITORY" --pattern aria-install
 node "$ARIA_INSTALL_TMP/aria-install.mjs"
 ```
 
+<details>
+<summary>Windows PowerShell</summary>
+
+```powershell
+gh auth status
+$AriaRepository = "maxverse-ai/aria"
+$AriaTag = gh api "repos/$AriaRepository/releases?per_page=100" --jq 'map(select(.draft == false and .prerelease == true and .immutable == true and (.tag_name | startswith("internal-v")))) | sort_by(.tag_name | ltrimstr("internal-v") | split(".") | map(tonumber)) | last.tag_name'
+$AriaInstallTmp = Join-Path ([System.IO.Path]::GetTempPath()) ("aria-install-" + [guid]::NewGuid())
+New-Item -ItemType Directory -Path $AriaInstallTmp | Out-Null
+gh release download $AriaTag --repo $AriaRepository --pattern aria-install.mjs --dir $AriaInstallTmp
+node (Join-Path $AriaInstallTmp "aria-install.mjs")
+```
+
+</details>
+
 The installer delegates credentials to `gh`; Aria never reads or stores a
 GitHub token. It installs versioned packages under a platform data directory
 and writes a stable `aria` launcher (normally `~/.local/bin/aria` on Linux and
-macOS). Add the printed command directory to `PATH` if needed.
+macOS). Add the printed command directory to `PATH` if needed, then verify the
+selected launcher and version:
+
+```bash
+command -v aria
+aria --version
+```
+
+To pin an exact immutable release, add `--version <x.y.z>` to the installer
+command. Use `--force` only for an intentional downgrade or when overriding an
+active-run safety check.
 
 To upgrade or roll back later:
 
@@ -68,7 +200,7 @@ running daemon cannot kill its own updater. Each apply rechecks live activity,
 release metadata, and package bytes; failed health checks restore the previous
 version and service definitions.
 
-## First run
+### First run
 
 ```bash
 aria run
@@ -97,7 +229,7 @@ aria start --app-id cli_xxx
 
 For Lark global apps, add `--tenant lark`.
 
-## Background service
+### Background service
 
 Use `run` for first-run setup and foreground debugging. After the bot can send and receive messages, stop the foreground process with `Ctrl-C`, then use an OS-managed service for background operation:
 
@@ -129,7 +261,7 @@ Platform mapping:
 
 Daemon logs are under `~/.aria/profiles/<profile>/logs/daemon/`.
 
-### Multiple profiles: Claude and Codex
+#### Multiple profiles: Claude and Codex
 
 By default, the bridge starts with the currently selected profile. Use `profile use <name>` to change it. Each profile keeps its own app credentials, sessions, working directories, and logs. Create multiple profiles only when you need to connect multiple PersonalAgent apps, or run Claude and Codex as separate bots:
 
@@ -150,11 +282,24 @@ aria status --profile codex
 ### Host CLI
 
 ```text
-aria run [--profile <name>] [--agent claude|codex] [--workspace <path>] [-c <config>]
+aria run [--profile <name>] [--agent <kind>] [--workspace <path>] [-c <config>]
+aria ui [--profile <name>] [--print]
+aria inspect [--profile <name>] [--hours <number>] [--json]
+aria control capabilities [--json]
+aria config show [--profile <name>] [--json]
+aria runtime status [--profile <name>] [--json]
+aria preflight restart [--profile <name>] [--json]
 aria ps
 aria kill <id|#>
 aria --help
 ```
+
+The first line runs a foreground bridge. The remaining read-only control-plane
+commands expose the browser console URL, lifecycle evidence, stable capability
+catalog, redacted effective config, managed runtime state, and restart safety
+without requiring consumers to parse Aria's internal files. See the
+[control-plane document](docs/CONTROL_PLANE.md) for the plan/confirm/apply
+configuration protocol.
 
 `profile use <name>` changes the profile used by later default starts. Use these profile management commands when running separate Claude / Codex bots, connecting multiple PersonalAgent apps, or doing scripted deployment:
 
@@ -365,17 +510,43 @@ Cloud-doc comments do not need a separate workspace binding or document allowlis
 
 **The agent says it cannot see an image I sent.** Upgrade to the latest version. Releases before 0.1.0 had a filename-dedup bug.
 
+**`aria` is still the old command, or is not found after installation.** Check
+`command -v aria` (or `Get-Command aria` in PowerShell), put the installer's
+printed command directory before an older npm/pnpm global bin directory in
+`PATH`, then open a new shell. The versioned installer preserves an adopted
+legacy global command as a rollback baseline; it does not delete it.
+
+<a id="documentation"></a>
+
+## Documentation
+
+| Need | Canonical document |
+| --- | --- |
+| Active-run follow-ups, group addressing, freshness, and duplicate suppression | [Conversation coordination](docs/COORDINATION.md) |
+| Codex App Server, native steering, live status, and service tiers | [Codex App Server runtime](docs/CODEX_APP_SERVER.md) |
+| Built-in and external engine contracts | [Engine plugins](docs/PLUGINS.md) |
+| Private Release installation, update transactions, stable launcher, and rollback | [CLI distribution architecture](docs/DISTRIBUTION.md) |
+| Profile state, managed workspaces, and engine-owned layout | [Workspace and state layout](docs/WORKSPACE_AND_STATE_LAYOUT.md) |
+| Control-plane commands and extension boundary | [Control plane](docs/CONTROL_PLANE.md) |
+| Contributor toolchain and required gates | [Toolchain](docs/TOOLCHAIN.md) |
+| Versioning and release policy | [Release policy](docs/RELEASE_POLICY.md) |
+
 ## Testing and CI
 
 Local checks:
 
 ```bash
+corepack pnpm ci:local
+
+# component gates for focused iteration
 pnpm test
 pnpm typecheck
 pnpm build
 ```
 
-`pnpm test` includes unit, integration, and process-level adapter tests. CI runs on macOS, Ubuntu, and Windows with `pnpm install --frozen-lockfile`, `pnpm test`, `pnpm typecheck`, and `pnpm build`.
+`ci:local` is the complete pre-integration gate. `pnpm test` includes unit,
+integration, and process-level adapter tests. CI runs on macOS, Ubuntu, and
+Windows with a frozen install, tests, typecheck, and production build.
 
 ## Optional telemetry
 
@@ -402,6 +573,13 @@ export default createAdapter;
 ```
 
 A missing module, a bad factory, or a throwing adapter all degrade to noop — telemetry can never stop the bridge from starting or break logging.
+
+## Project origin
+
+Aria was forked from
+[lark-channel-bridge](https://github.com/zarazhangrui/lark-coding-agent-bridge)
+(MIT) and now evolves independently under
+[maxverse-ai](https://github.com/maxverse-ai).
 
 ## License
 

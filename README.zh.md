@@ -1,42 +1,148 @@
 # Aria
 
-> 每个 agent 都是一段咏叹调，合起来是一部歌剧。
+**[English](./README.md)** | 简体中文
 
-Aria 把你的本地编码 agent（Claude Code、Codex 等）带进飞书 / Lark——并让它们像一个团队一样协作。
+[![定位](https://img.shields.io/badge/focus-local--first%20agent%20control-7C5CFC?style=flat-square&labelColor=171717)](#why-aria)
+[![入口](https://img.shields.io/badge/channel-Feishu%20%7C%20Lark-00D6B9?style=flat-square&labelColor=171717)](#runtime-flow)
+[![平台](https://img.shields.io/badge/platforms-Windows%20%7C%20macOS%20%7C%20Linux-55DDE0?style=flat-square&labelColor=171717)](#supported-scope)
+[![分发](https://img.shields.io/badge/distribution-immutable%20GitHub%20Releases-F3B61F?style=flat-square&labelColor=171717)](#install)
 
-本项目 fork 自 [lark-channel-bridge](https://github.com/zarazhangrui/lark-coding-agent-bridge)（MIT），在 [maxverse-ai](https://github.com/maxverse-ai) 下独立演化。
+**飞书 / Lark 里的本地优先编码 Agent 控制平面。**
 
-把飞书 / Lark 消息和本地 Claude Code 或 Codex CLI 打通的轻量 bot。用一条命令启动，扫码绑定 PersonalAgent 应用，然后在飞书里和本机编程助手对话，让它读图、处理文件、改代码。
+Aria 把飞书 / Lark 变成本机编码 Agent 的交互入口。引擎、工具、文件和凭据
+留在本机；Aria 负责消息寻址、访问控制、profile、会话、工作空间、流式展示、
+轮次协调、后台服务，以及安全的版本生命周期。
 
-[English README](./README.md)
+它的核心产品契约是：
+
+> 从飞书 / Lark 发出一项明确指向 Agent 的任务，把它路由到正确的本地 Agent
+> 与工作空间；运行中的追问不丢失、不重复，最终答案只在仍然新鲜时发布。
 
 关于能实现的效果，详情可以阅读[飞书文档](https://larkcommunity.feishu.cn/docx/OaRIdFIRFoLM3xxTmKwcetHqn5e)
 
-## 主要功能
+[为什么选择 Aria](#why-aria) | [产品契约](#product-contract) |
+[运行流程](#runtime-flow) | [支持范围](#supported-scope) |
+[快速开始](#quick-start) | [命令速查](#命令速查) |
+[文档导航](#documentation)
 
-- 在飞书私聊直接发消息，或在群里 `@bot`，把任务转给本机 Claude Code / Codex CLI。
-- **流式卡片**：文本回复和工具调用实时更新在同一张卡片上。
-- **COT 过程消息**：可选先发一条过程消息展示 agent 的阶段性文本和工具调用，再单独发送最终答案。
-- **会话延续**：每个聊天、话题或文档评论有自己的会话，不会互相串。
-- **排队、消息合并与运行中追问**：短时间连续发送的消息会合并处理；明确指向当前 Agent 的合格追问会自动合入运行中的任务，其余消息可靠排到下一轮。
-- **多工作空间**：用 `/cd` 切换当前项目，用 `/ws` 保存和复用常用项目目录。
-- **图片 / 文件**：直接发给 bot，bridge 下载到本地后交给本机 agent 处理。
-- **卡片按钮**：`/help`、`/ws list`、`/status` 返回可点击的交互卡片。
+<a id="why-aria"></a>
 
-## 前置条件
+## 为什么选择 Aria
+
+- **本地执行**：源码、Agent 凭据、Shell 工具和附件都留在运行 Aria 的主机；
+  聊天是遥控入口，不是计算平面。
+- **能力驱动的引擎**：每个引擎插件独立声明历史、图片、服务档位和实时输入
+  能力；界面只展示当前引擎与模型真实支持的控制项。
+- **安全 steering 与回退**：Codex 运行中的合格文本可以由原生
+  `turn/steer` 接收；不支持、延迟或拒绝的输入仍归下一轮队列所有，不会消失。
+- **对话隔离**：每个聊天、话题或文档评论线程都有独立会话；profile 则隔离
+  应用凭据、Agent 状态、工作空间、日志和 lark-cli 身份。
+- **过程可感知**：流式卡片、可选 COT 过程消息、工具块、运行状态和终态
+  freshness 检查，让远程运行可理解，也不会把临时输出伪装成最终答案。
+- **运维安全**：不可变 Release 元数据、字节校验、稳定 launcher、脱离服务
+  生命周期的更新器、健康检查和事务回滚，让运行中的 bot 可以恢复。
+- **默认私有**：初始只有应用 owner 能用；用户、群和管理员都需要显式放行。
+
+<a id="product-contract"></a>
+
+## 产品契约
+
+下面是稳定的产品边界，不是某个 Agent 的临时特判：
+
+| 表面 | 契约 |
+| --- | --- |
+| 飞书 / Lark Channel | 把私聊、群、话题、评论、mention、文件和卡片动作统一成带寻址语义的对话输入 |
+| Profile | 绑定一个 PersonalAgent 应用、一个引擎、隔离的凭据 / 状态，以及默认或命名工作空间集合 |
+| Engine Plugin | 探测并启动本地 CLI，声明能力，流式输出，恢复兼容历史，并释放自己持有的资源 |
+| Turn Coordinator | 合并首批输入，维持 inbox 单一所有权，尝试合格实时追问，并可靠排队所有回退输入 |
+| Delivery | 流式发送临时进度，投影 Agent 实际状态，检查最终回复新鲜度，并保守抑制重复答案 |
+| Policy | 执行聊天访问、群聊寻址、工作空间校验、权限上限和身份边界，再允许任务运行 |
+| Distribution | 解析完整不可变 Release，校验元数据与字节，原子切换稳定 launcher，并在失败时回滚 |
+
+Agent 专属行为被限制在引擎契约之后。飞书 / Lark 路由、访问策略、协调器和
+更新器不会围绕一个全局硬编码的“Fast”或“steering”开关分叉。
+
+<a id="runtime-flow"></a>
+
+## 运行流程
+
+```text
+飞书 / Lark 中的人类用户
+        │
+        ▼
+Channel 归一化 → 访问 + 寻址 → profile / session / workspace
+                                        │
+                                        ▼
+                               能力驱动的 Engine Plugin
+                                        │
+                                        ▼
+                                  本地编码 Agent CLI
+                                        │
+                  ┌─────────────────────┴──────────────────────┐
+                  ▼                                            ▼
+             流式进度 + 状态                              运行中追问
+                  │                              │
+                  │                  引擎确认后 native steer；
+                  │                  否则保留到下一轮
+                  └─────────────────────┬──────────────────────┘
+                                        ▼
+                          inbox + 有界线程历史 freshness gate
+                                        ▼
+                                     最终回复
+```
+
+<a id="supported-scope"></a>
+
+## 支持范围
+
+| 内置引擎 | 当前运行中追问行为 | 引擎专属表面 |
+| --- | --- | --- |
+| Claude Code | 保留到下一轮 | 原生历史和兼容恢复 |
+| Codex CLI | 通过 App Server `turn/steer` 直接接收文本 | 图片输入和模型上报的 Fast 等服务档位 |
+| OpenCode | 保留到下一轮 | 原生历史和实时模型发现 |
+| DeepSeek Harness | 保留到下一轮 | 内置无头适配器 |
+| Kimi Code | 保留到下一轮 | Claude 兼容传输与原生历史 |
+| Pi | 保留到下一轮 | 原生历史与推理强度控制 |
+
+所有内置引擎共享 Channel 路由、访问控制、profile、工作空间、队列 / freshness
+安全、流式展示和服务管理。原生 steering 当前仅支持 Codex 文本。Fast 不是
+Aria 的通用“加速开关”：只有 Codex App Server 为所选模型上报兼容服务档位时
+才会出现。
+
+当前产品边界保持明确：
+
+- 一个本地主机拥有执行过程；Aria 不是托管式多租户 Agent 云；
+- 当前生产 Channel 是飞书 / Lark PersonalAgent，Channel 与 Engine Plugin
+  契约是后续扩展边界；
+- 多人群必须结构化 `@bot` 才能完成明确寻址；
+- 远端 freshness 历史查询有界；不可用或截断时 fail-open，不会因为历史故障
+  静默丢掉最终答案；
+- Aria 仅通过私有不可变 GitHub Release 分发，不发布到 npm。
+
+<a id="quick-start"></a>
+
+## 快速开始
+
+### 前置条件
 
 - Node.js **>= 20.12.0**
 - 本机至少安装并登录一个 agent：
   - Claude Code：`claude`，安装说明：https://docs.anthropic.com/en/docs/claude-code/quickstart
   - Codex CLI：`codex`，安装说明：https://developers.openai.com/codex/cli
   - OpenCode CLI：`opencode`，安装说明：https://opencode.ai/docs/
+  - DeepSeek Harness（`dsh`）、Kimi Code（`kimi`）和 Pi（`pi`）也已内置；
+    安装对应 CLI 后即可选择。
 - 一个飞书 / Lark PersonalAgent 应用。首次启动的扫码向导可以帮你创建并绑定。
 
-## 安装
+<a id="install"></a>
+
+### 安装
 
 Aria 现阶段只通过私有且不可变的 GitHub Release 分发，Aria 包本身不发布到
 npm。先用有权读取 `maxverse-ai/aria` 的 GitHub 账号登录 `gh`，再从最新的
 完整内部版本下载独立安装器：
+
+Linux / macOS：
 
 ```bash
 gh auth status
@@ -47,9 +153,33 @@ gh release download "$ARIA_TAG" --repo "$ARIA_REPOSITORY" --pattern aria-install
 node "$ARIA_INSTALL_TMP/aria-install.mjs"
 ```
 
+<details>
+<summary>Windows PowerShell</summary>
+
+```powershell
+gh auth status
+$AriaRepository = "maxverse-ai/aria"
+$AriaTag = gh api "repos/$AriaRepository/releases?per_page=100" --jq 'map(select(.draft == false and .prerelease == true and .immutable == true and (.tag_name | startswith("internal-v")))) | sort_by(.tag_name | ltrimstr("internal-v") | split(".") | map(tonumber)) | last.tag_name'
+$AriaInstallTmp = Join-Path ([System.IO.Path]::GetTempPath()) ("aria-install-" + [guid]::NewGuid())
+New-Item -ItemType Directory -Path $AriaInstallTmp | Out-Null
+gh release download $AriaTag --repo $AriaRepository --pattern aria-install.mjs --dir $AriaInstallTmp
+node (Join-Path $AriaInstallTmp "aria-install.mjs")
+```
+
+</details>
+
 安装器把鉴权完全交给 `gh`，Aria 不读取也不保存 GitHub token。版本包安装在
 独立的平台数据目录，稳定的 `aria` 启动器通常写到 Linux/macOS 的
-`~/.local/bin/aria`；若该目录不在 `PATH`，按安装器提示加入即可。
+`~/.local/bin/aria`；若该目录不在 `PATH`，按安装器提示加入，然后验证当前
+命中的 launcher 和版本：
+
+```bash
+command -v aria
+aria --version
+```
+
+若要固定安装某个不可变版本，在安装器命令后加 `--version <x.y.z>`。只有明确
+降级，或有意覆盖活跃任务安全检查时才使用 `--force`。
 
 后续升级和回滚使用：
 
@@ -65,7 +195,7 @@ aria update rollback
 时杀掉自己的更新进程。执行阶段会重新检查活跃任务、Release 元数据与包字节；
 健康检查失败时自动恢复旧版本和旧服务状态。
 
-## 首次启动
+### 首次启动
 
 ```bash
 aria run
@@ -93,7 +223,7 @@ aria start --app-id cli_xxx
 
 Lark 国际版应用可加 `--tenant lark`。
 
-## 后台运行
+### 后台运行
 
 `run` 适合首次配置和前台调试。确认 bot 能正常收发消息后，先用 `Ctrl-C` 停掉前台进程，再用系统服务常驻后台：
 
@@ -124,7 +254,7 @@ aria unregister [--profile <name>]
 
 daemon 日志在 `~/.aria/profiles/<profile>/logs/daemon/`。
 
-### 多 profile：分别运行 Claude 和 Codex
+#### 多 profile：分别运行 Claude 和 Codex
 
 默认情况下，bridge 使用当前激活的 profile；可以通过 `profile use <name>` 切换。每个 profile 会维护独立的应用凭据、会话、工作目录和日志。只有在需要同时连接多个 PersonalAgent 应用，或分别运行 Claude 和 Codex 时，才需要创建多个 profile：
 
@@ -145,11 +275,22 @@ aria status --profile codex
 ### 宿主 CLI
 
 ```text
-aria run [--profile <name>] [--agent claude|codex] [--workspace <path>] [-c <config>]
+aria run [--profile <name>] [--agent <kind>] [--workspace <path>] [-c <config>]
+aria ui [--profile <name>] [--print]
+aria inspect [--profile <name>] [--hours <number>] [--json]
+aria control capabilities [--json]
+aria config show [--profile <name>] [--json]
+aria runtime status [--profile <name>] [--json]
+aria preflight restart [--profile <name>] [--json]
 aria ps
 aria kill <id|#>
 aria --help
 ```
+
+第一行运行前台 bridge。其余只读控制面命令分别提供浏览器控制台地址、生命周期
+证据、稳定能力目录、脱敏后的生效配置、托管运行时状态和重启安全检查，消费者
+无需解析 Aria 内部文件。配置的 plan / confirm / apply 协议见
+[控制平面文档](docs/CONTROL_PLANE.md)。
 
 `profile use <name>` 会切换后续默认启动使用的 profile。需要同时跑 Claude / Codex 两个 bot、连接多套 PersonalAgent 应用，或做脚本化部署时，再使用这些 profile 管理命令：
 
@@ -359,17 +500,42 @@ grep '"event":"enter"' ~/.aria/profiles/<profile>/logs/bridge-$(date +%Y%m%d).js
 
 **图片发过去 agent 说看不到**：升级到最新版，0.1.0 之前的版本有文件名去重 bug。
 
+**安装后 `aria` 仍然是旧命令，或者找不到命令**：先用 `command -v aria`
+（PowerShell 用 `Get-Command aria`）确认命中的路径，把安装器输出的命令目录放到
+旧 npm/pnpm 全局 bin 目录之前，然后重新打开终端。版本化安装器会把检测到的
+旧全局版本保留为回滚基线，不会主动删除。
+
+<a id="documentation"></a>
+
+## 文档导航
+
+| 需求 | 事实源文档 |
+| --- | --- |
+| 运行中追问、群聊寻址、freshness 与重复抑制 | [对话协调](docs/COORDINATION.md) |
+| Codex App Server、原生 steering、实时状态和服务档位 | [Codex App Server 运行时](docs/CODEX_APP_SERVER.md) |
+| 内置与外部引擎契约 | [Engine Plugin](docs/PLUGINS.md) |
+| 私有 Release 安装、更新事务、稳定 launcher 与回滚 | [CLI 分发架构](docs/DISTRIBUTION.md) |
+| Profile 状态、托管工作空间和引擎自有布局 | [工作空间与状态布局](docs/WORKSPACE_AND_STATE_LAYOUT.md) |
+| 控制面命令与扩展边界 | [控制平面](docs/CONTROL_PLANE.md) |
+| 贡献者工具链与必跑门禁 | [工具链](docs/TOOLCHAIN.md) |
+| 版本与发布策略 | [发布策略](docs/RELEASE_POLICY.md) |
+
 ## 测试与 CI
 
 本地检查：
 
 ```bash
+corepack pnpm ci:local
+
+# 聚焦迭代时可分别运行
 pnpm test
 pnpm typecheck
 pnpm build
 ```
 
-`pnpm test` 包含 unit、integration 和 process-level adapter 测试。CI 在 macOS、Ubuntu、Windows 上执行 `pnpm install --frozen-lockfile`、`pnpm test`、`pnpm typecheck` 和 `pnpm build`。
+`ci:local` 是合入前的完整本地门禁。`pnpm test` 包含 unit、integration 和
+process-level adapter 测试。CI 在 macOS、Ubuntu、Windows 上执行冻结安装、
+测试、typecheck 和生产构建。
 
 ## 可选：遥测（Telemetry）
 
@@ -396,6 +562,12 @@ export default createAdapter;
 ```
 
 模块不存在、工厂函数不合法、或者 adapter 抛错，都会降级为空操作——遥测永远不会阻止 bridge 启动，也不会打断日志。
+
+## 项目来源
+
+Aria fork 自
+[lark-channel-bridge](https://github.com/zarazhangrui/lark-coding-agent-bridge)
+（MIT），目前在 [maxverse-ai](https://github.com/maxverse-ai) 下独立演化。
 
 ## 许可
 
