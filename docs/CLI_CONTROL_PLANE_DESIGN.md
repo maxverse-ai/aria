@@ -7,8 +7,9 @@
 > profile reconciler are also implemented as recorded in
 > [`CONTROL_PLANE.md`](CONTROL_PLANE.md). Feishu settings/access/account/model/
 > reasoning/engine flows and local web settings/access flows now use that
-> facade and the appropriate runtime reconciler; profile lifecycle commands
-> remain to migrate. This document replaces the earlier
+> facade and the appropriate runtime reconciler. Profile activation now uses a
+> root-scoped command through the same facade; profile creation, archive, and
+> purge remain to migrate. This document replaces the earlier
 > CLI-centric runtime-binding and delegation roadmap.
 
 ## Scope
@@ -82,6 +83,8 @@ The repository is intentionally in a transitional state:
 | Local web access mutations | `ManagementApi` access command plus live/deferred reconciliation | Public Management API |
 | Feishu model and reasoning flows | `ManagementApi` model-scoped commands plus live reconciliation | Public Management API |
 | Engine switch | `profile.engine.update` commit plus Supervisor-owned prepare, quiesce, swap and rollback | Public command + Runtime Admin effect |
+| Profile activation | `profile.activate` through `ProfileLifecycleService`; root config is desired state and `active-profile` is a compatibility projection | Public Management API |
+| Profile archive and purge | direct CLI retention workflow | Public command plus lifecycle saga (pending) |
 | Inactive engine bootstrap | `stageEngineBootstrap` copies only the selected plugin's config field | Privileged infrastructure path |
 | Profile bootstrap and repair | `profile-runtime.ts` and preflight persistence | Privileged infrastructure path |
 | Secret/material migration | profile bootstrap and keystore helpers | Privileged infrastructure path |
@@ -202,6 +205,11 @@ Resource-scoped revisions prevent an unrelated profile or setting from
 invalidating a plan. The stored configuration is desired state; the runtime is
 applied state.
 
+Current v1 plans persist their resolved resource as either `root` or an exact
+`profile`; plans created before this field existed are interpreted as
+profile-scoped. Revisions remain root-wide until Phase 6 introduces narrower
+resource revisions.
+
 Commit and reconciliation have independent outcomes. A failed restart does
 not turn a successful durable commit into a reported write failure. The
 reconciler can retry from desired state without committing the command again.
@@ -298,7 +306,12 @@ live changes. Engine selection is a low-risk desired-state command with the
 dedicated `engine-switch` effect: target bootstrap is staged as a narrow
 privileged prerequisite, the Supervisor consumes the effect only after commit,
 and a failed activation restores desired state through a reverse management
-command. Profile lifecycle commands remain.
+command. Profile activation is implemented as the low-risk, root-scoped
+`profile.activate` command. CLI `profile use` and the Web activation endpoint
+share `ProfileLifecycleService`; neither adapter writes root configuration.
+`config.json.activeProfile` is the desired-state authority and the legacy
+`active-profile` file is a retryable compatibility projection. Creation,
+archive, and purge remain.
 
 ### Phase 6: practical lifecycle completion
 

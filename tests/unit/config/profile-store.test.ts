@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -6,7 +6,13 @@ import {
   createDefaultProfileConfig,
   type RootConfig,
 } from '../../../src/config/profile-schema';
-import { createRootConfig, loadRootConfig, saveRootConfig } from '../../../src/config/profile-store';
+import {
+  createRootConfig,
+  loadRootConfig,
+  readActiveProfile,
+  readActiveProfileProjection,
+  saveRootConfig,
+} from '../../../src/config/profile-store';
 
 const roots: string[] = [];
 
@@ -27,6 +33,16 @@ async function tmpRoot(): Promise<string> {
 }
 
 describe('profile store canonical serialization', () => {
+  it('uses root desired state instead of a stale active-profile projection', async () => {
+    const root = await tmpRoot();
+    const profile = createDefaultProfileConfig({ agentKind: 'claude', accounts: { app } });
+    await saveRootConfig(createRootConfig('claude', profile), join(root, 'config.json'));
+    await writeFile(join(root, 'active-profile'), 'stale\n', 'utf8');
+
+    await expect(readActiveProfile(root)).resolves.toBe('claude');
+    await expect(readActiveProfileProjection(root)).resolves.toBe('stale');
+  });
+
   it('saves stored root and profile config without unknown root fields or runtime-only profile fields', async () => {
     const root = await tmpRoot();
     const configPath = join(root, 'config.json');

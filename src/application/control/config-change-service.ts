@@ -15,6 +15,7 @@ import {
   type ControlActorReference,
   type ControlChangeApplyResult,
   type ControlChangePlanSnapshot,
+  type ControlChangeResource,
   type ControlChangeSummary,
   type ManagementCommandInput,
   type ManagementCommandDefinition,
@@ -44,7 +45,8 @@ export interface ConfigChangeServiceOptions {
 
 export interface ConfigChangeAuthorizationInput {
   actor: ControlActorContext;
-  command: Pick<ManagementCommandDefinition, 'id' | 'version' | 'risk'>;
+  command: Pick<ManagementCommandDefinition, 'id' | 'version' | 'risk' | 'resourceScope'>;
+  resource: ControlChangeResource;
 }
 
 export type ConfigChangeCommandAuthorizer = (
@@ -91,11 +93,13 @@ export class ConfigChangeService {
   async createPlan(input: CreateConfigChangePlanInput): Promise<ControlChangePlanSnapshot> {
     validateActor(input.actor);
     const operation = this.requireOperation(input.operationId);
+    const { root, profile, resource } = await this.resolveRoot(input.profile, operation);
     if (
       operation.risk !== 'low' &&
       !this.authorizeCommand?.({
         actor: input.actor,
         command: commandAuthorizationView(operation),
+        resource,
       })
     ) {
       throw new ControlChangeError(
@@ -103,16 +107,16 @@ export class ConfigChangeService {
         `risk policy is not available for operation: ${operation.id}`,
       );
     }
-    const { root, profile } = await this.resolveRoot(input.profile);
     const parameters = structuredClone(input.parameters ?? {});
     validateParameters(parameters, operation.parameterPrivacy ?? 'ordinary');
     const candidate = operation.prepare({
       root: structuredClone(root),
       profile,
+      resource,
       parameters,
       rootDir: this.rootDir,
     });
-    validateCandidate(root, candidate.root, profile, candidate.changes);
+    validateCandidate(root, candidate.root, resource, candidate.changes);
     assertSafePlanPayload(
       parameters,
       candidate.changes,
@@ -126,6 +130,7 @@ export class ConfigChangeService {
       apiVersion: CONTROL_CHANGE_API_VERSION,
       id: this.createId(),
       profile,
+      resource,
       operation: {
         id: operation.id,
         version: operation.version,
@@ -204,9 +209,6 @@ export class ConfigChangeService {
             `configuration changed since plan creation (${plan.baseRevision} -> ${currentRevision})`,
           );
         }
-        if (!root.profiles[plan.profile]) {
-          throw new ControlChangeError('profile-not-found', `profile not found: ${plan.profile}`);
-        }
         const operation = this.requireOperation(plan.operation.id);
         if (operation.version !== plan.operation.version) {
           throw new ControlChangeError(
@@ -214,13 +216,28 @@ export class ConfigChangeService {
             `operation version unavailable: ${plan.operation.id}@${plan.operation.version}`,
           );
         }
+        const resource = storedResource(plan);
+        const expectedResource = commandResource(operation, plan.profile);
+        if (!isDeepStrictEqual(resource, expectedResource)) {
+          throw new ControlChangeError(
+            'operation-unavailable',
+            `operation resource scope changed: ${plan.operation.id}@${plan.operation.version}`,
+          );
+        }
+        if (resource.kind === 'profile' && !root.profiles[resource.profile]) {
+          throw new ControlChangeError(
+            'profile-not-found',
+            `profile not found: ${resource.profile}`,
+          );
+        }
         const candidate = operation.prepare({
           root: structuredClone(root),
           profile: plan.profile,
+          resource,
           parameters: structuredClone(plan.parameters),
           rootDir: this.rootDir,
         });
-        validateCandidate(root, candidate.root, plan.profile, candidate.changes);
+        validateCandidate(root, candidate.root, resource, candidate.changes);
         const actualTarget = configRevision(candidate.root);
         if (actualTarget !== plan.targetRevision) {
           throw new ControlChangeError(
@@ -249,15 +266,24 @@ export class ConfigChangeService {
     return operation;
   }
 
-  private async resolveRoot(requestedProfile?: string): Promise<{ root: RootConfig; profile: string }> {
+  private async resolveRoot(
+    requestedProfile: string | undefined,
+    operation: ManagementCommandDefinition,
+  ): Promise<{ root: RootConfig; profile: string; resource: ControlChangeResource }> {
     const root = await this.repository.readRoot();
     if (!root) throw new ControlChangeError('invalid-plan', 'root config not found');
-    const active = (await this.repository.readActiveProfile()) ?? root.activeProfile;
-    const profile = requestedProfile ?? active;
-    if (!root.profiles[profile]) {
+    const rawProfile = requestedProfile ?? root.activeProfile;
+    let profile: string;
+    try {
+      profile = resolveAppPaths({ rootDir: this.rootDir, profile: rawProfile }).profile;
+    } catch {
+      throw new ControlChangeError('invalid-plan', `invalid profile name: ${rawProfile}`);
+    }
+    const resource = commandResource(operation, profile);
+    if (resource.kind === 'profile' && !root.profiles[profile]) {
       throw new ControlChangeError('profile-not-found', `profile not found: ${profile}`);
     }
-    return { root, profile };
+    return { root, profile, resource };
   }
 }
 
@@ -335,8 +361,13 @@ function assertSafePlanPayload(
 
 function commandAuthorizationView(
   command: ManagementCommandDefinition,
-): Pick<ManagementCommandDefinition, 'id' | 'version' | 'risk'> {
-  return { id: command.id, version: command.version, risk: command.risk };
+): Pick<ManagementCommandDefinition, 'id' | 'version' | 'risk' | 'resourceScope'> {
+  return {
+    id: command.id,
+    version: command.version,
+    risk: command.risk,
+    resourceScope: command.resourceScope ?? 'profile',
+  };
 }
 
 function collectStrings(value: unknown, output: Set<string>): void {
@@ -369,11 +400,26 @@ function requireNotExpired(plan: StoredControlChangePlan, now: Date): void {
 function validateCandidate(
   before: RootConfig,
   after: RootConfig,
-  profile: string,
+  resource: ControlChangeResource,
   changes: ControlChangeSummary[],
 ): void {
-  if (after.schemaVersion !== 2 || !after.profiles[profile]) {
-    throw new ControlChangeError('invalid-plan', 'operation returned an invalid root/profile configuration');
+  if (
+    after.schemaVersion !== 2 ||
+    !after.profiles ||
+    typeof after.profiles !== 'object' ||
+    !after.activeProfile ||
+    !after.profiles[after.activeProfile]
+  ) {
+    throw new ControlChangeError('invalid-plan', 'operation returned an invalid root configuration');
+  }
+  if (!Array.isArray(changes) || changes.some((item) => !item.field.trim())) {
+    throw new ControlChangeError('invalid-plan', 'operation returned invalid change summaries');
+  }
+  if (resource.kind === 'root') return;
+
+  const profile = resource.profile;
+  if (!after.profiles[profile]) {
+    throw new ControlChangeError('invalid-plan', 'operation returned an invalid profile configuration');
   }
   if (before.activeProfile !== after.activeProfile || before.schemaVersion !== after.schemaVersion) {
     throw new ControlChangeError('invalid-plan', 'profile operation may not change root identity fields');
@@ -391,9 +437,19 @@ function validateCandidate(
       throw new ControlChangeError('invalid-plan', `profile operation may not change profile: ${name}`);
     }
   }
-  if (!Array.isArray(changes) || changes.some((item) => !item.field.trim())) {
-    throw new ControlChangeError('invalid-plan', 'operation returned invalid change summaries');
-  }
+}
+
+function commandResource(
+  command: ManagementCommandDefinition,
+  profile: string,
+): ControlChangeResource {
+  return command.resourceScope === 'root'
+    ? { kind: 'root' }
+    : { kind: 'profile', profile };
+}
+
+function storedResource(plan: StoredControlChangePlan): ControlChangeResource {
+  return plan.resource ?? { kind: 'profile', profile: plan.profile };
 }
 
 function applyResult(plan: StoredControlChangePlan, recovered: boolean): ControlChangeApplyResult {

@@ -126,6 +126,7 @@ component only when first used.
 | Area | Owner | Lifecycle | Backup expectation |
 |---|---|---|---|
 | Root configuration | configuration layer | persistent | back up |
+| `active-profile` compatibility projection | profile lifecycle projector | derived, rebuildable | do not back up |
 | Profile identity | credential and identity adapters | persistent, sensitive | protected backup |
 | Profile state | state stores | persistent | back up when conversation continuity matters |
 | Engine state | engine plugin | engine-defined | plugin-defined |
@@ -137,6 +138,11 @@ component only when first used.
 
 No component may write into another component's area through an ad hoc path.
 All physical paths must come from the layout resolver.
+
+`config.json.activeProfile` is the canonical selected profile. The sibling
+`active-profile` file exists only for compatibility with older launchers and
+is projected from the exact committed root revision; normal readers must not
+use it to override root desired state.
 
 ## Managed workspace contract
 

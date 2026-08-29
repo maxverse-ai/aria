@@ -24,6 +24,7 @@ Web settings form ---------+                         +--> Runtime reconciler
 Access/account adapters ----+
 Model/reasoning adapters ----+
 Engine selection ------------+
+Profile activation -----------+
 Agent + CLI ---------------+
 
                           engine-switch effect
@@ -93,6 +94,9 @@ user-facing mutation operations.
   forbidden from command parameters and plan summaries.
 - A profile-scoped operation cannot change root identity fields, root secrets,
   the profile set or any other profile.
+- A root-scoped operation carries `{ kind: "root" }` in its plan and may
+  perform only its registered deterministic root transition. Older v1 plans
+  without an explicit resource remain profile-scoped for compatibility.
 
 ## Phase 3: low-risk CLI operations
 
@@ -167,6 +171,12 @@ plan, confirmation, or application steps.
   `engine-switch` through `EngineSwitchRuntimeReconciler`. Registry/lock/runtime
   activation happens before the effect is reported applied; pre-swap failure
   restores the previous desired engine with a reverse management command.
+- `profile.activate` is the first root-scoped lifecycle command. CLI and Web
+  call the shared `ProfileLifecycleService`, which commits
+  `config.json.activeProfile` through `ManagementApi` and then reconciles the
+  legacy `active-profile` file as a separate compatibility projection. Normal
+  reads use `config.json`; projection failure does not roll back or misreport
+  the durable desired-state commit.
 - The CLI now uses `ManagementApi` while unwrapping its envelopes so existing
   public CLI JSON and human-readable output remain compatible.
 - `config-ops.ts` no longer contains public config writers. It retains only the

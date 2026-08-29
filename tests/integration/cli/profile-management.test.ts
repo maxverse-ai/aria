@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -77,6 +77,29 @@ describe('profile management commands', () => {
     await expect(readFile(join(root, 'active-profile'), 'utf8')).resolves.toBe('codex-dev\n');
     expect(rootConfig.activeProfile).toBe('codex-dev');
     expect(await readFile(registryFile, 'utf8')).toBe(beforeRegistry);
+    const plans = (await readdir(join(root, 'control', 'plans')))
+      .filter((name) => name.endsWith('.json'));
+    expect(plans).toHaveLength(1);
+    const plan = JSON.parse(await readFile(join(root, 'control', 'plans', plans[0]!), 'utf8'));
+    expect(plan).toMatchObject({
+      profile: 'codex-dev',
+      resource: { kind: 'root' },
+      operation: { id: 'profile.activate' },
+      status: 'applied',
+      runtimeEffect: 'none',
+    });
+  });
+
+  it('repairs the compatibility projection without creating a no-op plan', async () => {
+    const root = await makeRoot();
+    await writeProfiles(root, 'codex-dev', ['claude', 'codex-dev']);
+    await writeFile(join(root, 'active-profile'), 'claude\n', 'utf8');
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    await runProfileUse('codex-dev', { rootDir: root });
+
+    await expect(readFile(join(root, 'active-profile'), 'utf8')).resolves.toBe('codex-dev\n');
+    await expect(readdir(join(root, 'control', 'plans'))).rejects.toMatchObject({ code: 'ENOENT' });
   });
 });
 

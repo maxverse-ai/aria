@@ -50,6 +50,10 @@ function validateCommand(input: ManagementCommandInput): void {
     ('parameterPrivacy' in input &&
       input.parameterPrivacy !== undefined &&
       !['ordinary', 'private-identifiers'].includes(input.parameterPrivacy)) ||
+    ('resourceScope' in input &&
+      input.resourceScope !== undefined &&
+      input.resourceScope !== 'profile' &&
+      input.resourceScope !== 'root') ||
     typeof input.prepare !== 'function'
   ) {
     throw new Error(`invalid management command: ${input.id || '<empty>'}`);

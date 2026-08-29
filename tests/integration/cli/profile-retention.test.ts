@@ -99,14 +99,17 @@ describe('profile retention and export', () => {
     await expect(stat(join(root, '.trash', 'codex-dev-20260525T123456Z'))).resolves.toBeDefined();
   });
 
-  it('refuses removal when active-profile points at a missing profile', async () => {
+  it('repairs a stale active-profile projection from canonical root state during removal', async () => {
     const root = await makeRoot();
     await writeProfiles(root, 'claude', ['claude', 'codex-dev']);
     await writeFile(join(root, 'active-profile'), 'missing\n', 'utf8');
 
-    await expect(runProfileRemove('codex-dev', { rootDir: root })).rejects.toThrow(
-      /active profile not found: missing/,
-    );
+    await runProfileRemove('codex-dev', { rootDir: root });
+
+    const config = await readRoot(root);
+    expect(config.activeProfile).toBe('claude');
+    expect(config.profiles['codex-dev']).toBeUndefined();
+    await expect(readFile(join(root, 'active-profile'), 'utf8')).resolves.toBe('claude\n');
   });
 
   it('archives the last active profile and clears root config so the name can be recreated', async () => {

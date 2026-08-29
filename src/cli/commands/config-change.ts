@@ -1,5 +1,4 @@
 import { randomUUID } from 'node:crypto';
-import { userInfo } from 'node:os';
 import {
   ConfigChangeService,
   MANAGEMENT_API_VERSION,
@@ -13,6 +12,7 @@ import {
   type ControlChangePlanSnapshot,
 } from '../../application/control';
 import { paths } from '../../config/paths';
+import { localCliActor } from '../control-actor';
 
 export interface ConfigChangeCliOptions {
   profile?: string;
@@ -128,11 +128,7 @@ function managementApi(opts: Pick<ConfigChangeCliOptions, 'rootDir'>): Managemen
 
 function actor(opts: Pick<ConfigChangeCliOptions, 'actor' | 'rootDir'>): ControlActorContext {
   if (opts.actor) return opts.actor;
-  const currentUser = userInfo();
-  return {
-    source: 'local-cli',
-    principal: `${process.platform}:${currentUser.uid}:${currentUser.username}:${opts.rootDir ?? paths.rootDir}`,
-  };
+  return localCliActor(opts.rootDir ?? paths.rootDir);
 }
 
 function print<T>(value: T, json: boolean | undefined, format: (value: T) => string): void {

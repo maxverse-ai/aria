@@ -68,6 +68,7 @@ function isStoredPlan(value: unknown): value is StoredControlChangePlan {
     plan.apiVersion === CONTROL_CHANGE_API_VERSION &&
     typeof plan.id === 'string' &&
     typeof plan.profile === 'string' &&
+    isResource(plan.resource) &&
     typeof plan.operation?.id === 'string' &&
     plan.operation.version === 1 &&
     (plan.operation.risk === 'low' || plan.operation.risk === 'sensitive' || plan.operation.risk === 'destructive') &&
@@ -83,4 +84,14 @@ function isStoredPlan(value: unknown): value is StoredControlChangePlan {
     typeof plan.expiresAt === 'string' &&
     Boolean(plan.parameters && typeof plan.parameters === 'object')
   );
+}
+
+function isResource(resource: unknown): boolean {
+  if (resource === undefined) return true;
+  if (!resource || typeof resource !== 'object') return false;
+  const candidate = resource as { kind?: unknown; profile?: unknown };
+  return candidate.kind === 'root' ||
+    (candidate.kind === 'profile' &&
+      typeof candidate.profile === 'string' &&
+      Boolean(candidate.profile));
 }

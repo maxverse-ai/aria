@@ -40,6 +40,7 @@ describe('ConfigChangeService', () => {
       schema: 'aria.control.change-plan.v1',
       id: planId,
       profile: 'primary',
+      resource: { kind: 'profile', profile: 'primary' },
       status: 'planned',
       operation: { id: operation.id, risk: 'low' },
       changes: [{ field: 'access.requireMentionInGroup', before: true, after: false }],

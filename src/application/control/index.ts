@@ -20,6 +20,7 @@ export type {
   ControlChangeApplyResult,
   ControlChangeErrorCode,
   ControlChangePlanSnapshot,
+  ControlChangeResource,
   ControlChangePlanStatus,
   ControlChangeRisk,
   ControlChangeSource,
@@ -29,6 +30,7 @@ export type {
   ManagementCommandDefinition,
   ManagementCommandInput,
   ManagementCommandPrepareInput,
+  ManagementResourceScope,
   ControlParameterPrivacy,
 } from './change-types';
 export { configRevision } from './config-revision';
@@ -203,3 +205,20 @@ export {
 } from './profile-engine-command';
 export type { ProfileEngineUpdateInput } from './profile-engine-command';
 export { managementCommandRegistry, managementCommands } from './management-commands';
+export {
+  PROFILE_ACTIVATE_COMMAND,
+  profileActivateCommand,
+} from './profile-lifecycle-command';
+export {
+  FileActiveProfileProjector,
+} from './active-profile-projector';
+export type {
+  ActiveProfileProjectionOutcome,
+  ActiveProfileProjectionRequest,
+  ActiveProfileProjector,
+} from './active-profile-projector';
+export { ProfileLifecycleService } from './profile-lifecycle-service';
+export type {
+  ProfileActivationResult,
+  ProfileLifecycleServiceOptions,
+} from './profile-lifecycle-service';
