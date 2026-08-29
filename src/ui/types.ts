@@ -6,9 +6,9 @@ import type { ManagedStatus } from '../runtime/supervisor';
 
 /**
  * The live per-profile runtime the console edits. The supervisor's `Controls`
- * for an online profile structurally satisfies this, so the console reads/writes
- * config through the same `config-ops` logic the chat `/config` form uses, and
- * changes apply live for any online profile.
+ * for an online profile structurally satisfies this. Web settings commit
+ * desired state through ManagementApi and reconcile this projection only after
+ * that commit succeeds.
  */
 export interface UiRuntime extends MutableProfileState {
   botOwnerId?: string;

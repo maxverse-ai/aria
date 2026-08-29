@@ -25,6 +25,7 @@ import {
   PROFILE_PREFERENCES_UPDATE_COMMAND,
   configRevision,
   managementCommandRegistry,
+  nextLarkCliRecordedAt,
   profilePreferencesUpdateParameters,
 } from '../application/control';
 import type { ActiveRuns } from '../bot/active-runs';
@@ -2634,7 +2635,7 @@ async function submitConfig(ctx: CommandContext): Promise<void> {
         larkCliPolicyApplied = true;
         failureStep = 'config.save';
       }
-      await savePreferencesConfig(
+      await commitPreferencesConfig(
         ctx,
         nextPreferences,
         requireMentionInGroup,
@@ -2667,7 +2668,7 @@ async function submitConfig(ctx: CommandContext): Promise<void> {
 
     if (agentChanged) {
       if (!ctx.controls.switchAgent) {
-        await savePreferencesConfig(
+        await commitPreferencesConfig(
           ctx,
           { ...nextPreferences, model: previousModel },
           requireMentionInGroup,
@@ -2688,7 +2689,7 @@ async function submitConfig(ctx: CommandContext): Promise<void> {
       } catch (err) {
         let modelRollbackFailed = false;
         try {
-          await savePreferencesConfig(
+          await commitPreferencesConfig(
             ctx,
             { ...nextPreferences, model: previousModel },
             requireMentionInGroup,
@@ -2868,7 +2869,7 @@ async function saveAccountConfig(
   return configOps.saveAccountConfig(ctx.controls, newCfg, plaintextSecret);
 }
 
-async function savePreferencesConfig(
+async function commitPreferencesConfig(
   ctx: CommandContext,
   preferences: AppPreferences,
   requireMentionInGroup: boolean,
@@ -2930,14 +2931,6 @@ async function savePreferencesConfig(
       ...('reason' in retry.reconciliation ? { reason: retry.reconciliation.reason } : {}),
     });
   }
-}
-
-function nextLarkCliRecordedAt(previous: string | undefined): string {
-  const previousMs = previous ? Date.parse(previous) : Number.NaN;
-  const timestamp = Number.isNaN(previousMs)
-    ? Date.now()
-    : Math.max(Date.now(), previousMs + 1);
-  return new Date(timestamp).toISOString();
 }
 
 // ────────────── /meeting — in-meeting agent (智能体入会) ──────────────

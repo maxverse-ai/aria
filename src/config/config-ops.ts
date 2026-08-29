@@ -8,16 +8,16 @@ import {
   withConfigFileLock,
 } from './profile-store';
 import { saveConfig } from './store';
-import { secretKeyForApp, type AppConfig, type AppPreferences } from './schema';
-import type { ProfileAccess, ProfileConfig, ProfileMode } from './profile-schema';
+import { secretKeyForApp, type AppConfig } from './schema';
+import type { ProfileAccess, ProfileConfig } from './profile-schema';
 import { applyLarkCliIdentityPolicy } from '../lark-cli/identity-policy';
 import { log, reportMetric } from '../core/logger';
 
 /**
  * The mutable per-profile runtime state these ops read and keep in sync. The
  * running bridge's `Controls` object structurally satisfies this. This is the
- * compatibility boundary for the local web UI and remaining chat
- * access/account flows. The `/config` preferences form has moved to
+ * compatibility boundary for the remaining chat/web access and account flows.
+ * Preferences in both `/config` and the web console have moved to
  * `ManagementApi`; later slices should continue shrinking this surface.
  * `cfg` / `profileConfig` are reassigned after a successful compatibility
  * save so the live process picks up changes without a restart.
@@ -151,63 +151,4 @@ export async function saveAccountConfig(
   await saveRootConfig(root, state.configPath);
   state.profileConfig = root.profiles[state.profile]!;
   state.cfg = runtimeProfileConfig(root, state.profile);
-}
-
-/**
- * Persist preferences + deployment mode + lark-cli identity + require-mention
- * under the config file lock, refreshing in-memory state. Stores the user's
- * identity selection verbatim (not the team-mode-forced effective preset) so
- * it comes back into effect when switching to personal mode.
- * @deprecated Retained for the web compatibility path until that adapter
- * migrates to `ManagementApi`.
- */
-export async function savePreferencesConfig(
-  state: MutableProfileState,
-  preferences: AppPreferences,
-  requireMentionInGroup: boolean,
-  larkCliIdentity: ProfileConfig['larkCli']['identityPreset'],
-  mode: ProfileMode,
-  /** In-meeting agent settings; omitted by callers that don't edit them. */
-  meeting?: ProfileConfig['meeting'],
-): Promise<void> {
-  const larkCli = {
-    identityPreset: larkCliIdentity,
-    localUserImport: {
-      status: 'not-needed' as const,
-      attemptedAt: new Date().toISOString(),
-      reason: larkCliIdentity === 'user-default' ? 'manual-user-default' : 'manual-bot-only',
-    },
-  };
-  await withConfigFileLock(state.configPath, async () => {
-    const root = await loadRootConfig(state.configPath);
-    if (!root) {
-      state.cfg.preferences = preferences;
-      state.profileConfig.larkCli = larkCli;
-      state.profileConfig.mode = mode;
-      if (meeting) state.profileConfig.meeting = meeting;
-      await saveConfig(state.cfg, state.configPath);
-      return;
-    }
-
-    const profile = root.profiles[state.profile];
-    if (!profile) throw new Error(`profile not found: ${state.profile}`);
-    const { requireMentionInGroup: _requireMention, access: _access, ...profilePreferences } = preferences;
-    root.profiles[state.profile] = {
-      ...profile,
-      mode,
-      preferences: {
-        ...profile.preferences,
-        ...profilePreferences,
-      },
-      access: {
-        ...profile.access,
-        requireMentionInGroup,
-      },
-      ...(meeting ? { meeting } : {}),
-      larkCli,
-    };
-    await saveRootConfig(root, state.configPath);
-    state.profileConfig = root.profiles[state.profile]!;
-    state.cfg = runtimeProfileConfig(root, state.profile);
-  });
 }

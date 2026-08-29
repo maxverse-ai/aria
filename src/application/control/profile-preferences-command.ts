@@ -73,6 +73,20 @@ export function profilePreferencesUpdateParameters(
   };
 }
 
+/**
+ * Produce a monotonic adapter timestamp for the lark-cli policy observation.
+ * Keeping this at the command boundary makes all aggregate adapters follow the
+ * same deterministic replay rule, even when the wall clock moves backwards.
+ */
+export function nextLarkCliRecordedAt(
+  previous: string | undefined,
+  now = Date.now(),
+): string {
+  const previousMs = previous ? Date.parse(previous) : Number.NaN;
+  const timestamp = Number.isNaN(previousMs) ? now : Math.max(now, previousMs + 1);
+  return new Date(timestamp).toISOString();
+}
+
 export const profilePreferencesUpdateCommand: ManagementCommandDefinition = {
   id: PROFILE_PREFERENCES_UPDATE_COMMAND,
   version: 1,
