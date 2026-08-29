@@ -1,205 +1,180 @@
-# Control plane architecture
+# Management control plane
 
-The current implementation status is recorded here. The approved target
-architecture and migration plan for trusted actors, authorization, adapters,
-runtime effects and audit are documented separately in
-[`CLI_CONTROL_PLANE_DESIGN.md`](CLI_CONTROL_PLANE_DESIGN.md). Those sections
-are not shipped behavior unless identified below.
+> Status: functional convergence is shipped. Public configuration changes from
+> the CLI, Feishu cards, and the local web console use the same versioned
+> `ManagementApi`. Remaining work is lifecycle housekeeping, durable management
+> audit, advanced actor verification, and removal of compatibility types.
 
-Aria exposes supported management capabilities through one application-layer
-`ManagementApi`. Its v1 request envelopes carry `requestId`, actor, command,
-profile and typed input; its plan, commit and execute results are independently
-versioned. CLI commands are the currently shipped machine interface. The
-Feishu `/config`, `/invite`, `/remove`, `/account`, `/models`, `/effort`, and
-`/agent` flows plus local web settings/access mutations are in-process adapters
-over the same boundary.
-Agent-driven flows can invoke the shipped CLI commands. The target remains for
-every public entry point to use registered commands rather than stored-config
-paths.
+This document is the single source of truth for the current architecture and
+its remaining work. The earlier CLI-centric roadmap is archived in
+[`CLI_CONTROL_PLANE_DESIGN.md`](CLI_CONTROL_PLANE_DESIGN.md).
+
+## Data flow
 
 ```text
-CLI ----------------------+--> Management API --> Config repository
-/config preferences card -+                         |
-Web settings form ---------+                         +--> Runtime reconciler
-Access/account adapters ----+
-Model/reasoning adapters ----+
-Engine selection ------------+
-Profile activation -----------+
-Agent + CLI ---------------+
+CLI / Feishu cards / Web / agent-driven CLI
+                    |
+                    v
+             ManagementApi v1
+                    |
+                    v
+          ConfigChangeService
+            |             |
+            v             v
+    command registry   durable plan store
+            |
+            v
+      FileConfigRepository
+      lock + atomic commit
+            |
+            +--------------------> committed desired state
+                                      |
+                                      v
+                              RuntimeReconciler
+                                      |
+                         live / reconnect / engine-switch / restart
+                                      |
+                                      v
+                           Runtime Admin / Supervisor
 
-                          engine-switch effect
-                                   |
-                                   v
-Runtime Admin / Supervisor --------------------> Runtime lifecycle
-Native Read API -------------------------------> Read model and audit queries
+Native Read API -----------------> scoped read model and audit queries
 ```
+
+Configuration commit and runtime reconciliation are separate outcomes. A
+successful commit remains successful when reconciliation is deferred or fails;
+the applied plan can be reconciled again without repeating the write.
+
+## Boundaries
+
+### Management API
+
+`ManagementApi` is the only public application boundary for product-managed
+configuration. Versioned requests carry `requestId`, actor, command, profile,
+and typed input. It exposes `plan`, `getPlan`, `confirm`, `commit`, and the
+trusted in-process convenience operation `execute`.
+
+`ConfigChangeService` owns plan and commit invariants. Commands are named,
+versioned, deterministic transformations registered in
+`ManagementCommandRegistry`; there is no public JSON Patch or stored-path
+escape hatch.
+
+### Runtime Admin and Supervisor
+
+Runtime administration owns activity preflight, reconnect, restart, engine
+replacement, health, and rollback. It consumes an effect only after desired
+state is committed. It does not authorize commands or persist configuration.
+
+### Native Read API
+
+Native Read owns scoped, redacted reads of profiles, sessions, messages, runs,
+identities, chats, and audit resources. It is never a configuration writer.
+
+## Mutation contract
+
+The shipped plan state machine is:
+
+```text
+planned -> confirmed -> applied
+```
+
+The important invariants are:
+
+- command risk is `low`, `sensitive`, or `destructive`; non-low-risk commands
+  require an explicit source-and-command-scoped adapter authorizer;
+- command scope is an exact profile or the root; profile commands cannot alter
+  root identity, the profile set, or another profile;
+- public plans contain redacted summaries and an actor fingerprint, never
+  credentials, raw actor/chat identifiers, or local paths;
+- planning is read-only; commit reacquires the shared root lock, verifies the
+  semantic revision, reruns the transformation, and rejects drift or conflict;
+- desired state is committed atomically before the plan becomes `applied`;
+  recovery detects a completed config write whose plan-status write failed;
+- root deletion is available only to an explicitly declared root-scoped
+  command capability.
+
+The current actor context is lightweight and supplied by a trusted adapter.
+Signed actor envelopes and replay protection are not shipped.
+
+## Shipped command groups
+
+| Capability | Canonical commands | Main adapters | Effect |
+| --- | --- | --- | --- |
+| Individual settings | registered `config.*.set` commands | staged CLI | `live` or `reconnect` |
+| Preference forms | `profile.preferences.update`, `profile.settings.update`, `profile.settings.update-reconnect` | `/config`, Web | `live` or `reconnect` |
+| Access and account | `profile.access.update`, `profile.account.update` | Feishu, Web | `live` or `reconnect` |
+| Model and reasoning | `profile.model.update`, `profile.reasoning.update` | `/models`, `/effort` | `live` |
+| Engine | `profile.engine.update` | `/agent` | `engine-switch` |
+| Profile lifecycle | `profile.activate`, `profile.create`, `profile.archive`, `profile.purge` | CLI; Web create/activate | `none` plus lifecycle saga/projection |
+
+Read-only CLI capabilities remain available through `aria control
+capabilities`, `aria profile show`, `aria config show`, and `aria runtime
+status`. The staged write workflow remains `config plan -> confirm -> apply`;
+existing text and JSON presenters are compatibility surfaces over the same API.
+
+## Runtime effects
+
+- `live`: load the exact committed revision into a running profile.
+- `reconnect`: use the Supervisor's connect-before-disconnect path.
+- `engine-switch`: prove the candidate runtime, quiesce runs, commit the
+  desired engine, then let the Supervisor swap or roll back.
+- `restart`: persist desired state and defer process-level restart to its
+  owner.
+- `none`: no engine reconciliation is required; a compatibility projection or
+  lifecycle saga may still have separate work.
+
+Offline profiles commit the same desired state and report reconciliation as
+deferred. `/account` stages plaintext in the profile keystore, commits only an
+external `SecretRef`, renders success, and then retries reconnect against the
+already-applied plan.
+
+## Profile lifecycle
+
+`ProfileLifecycleService` is shared by the CLI and Web adapters:
+
+- activation commits `config.json.activeProfile`; the legacy `active-profile`
+  file is a retryable projection, not the source of truth;
+- profile creation prepares credentials, engine configuration, and workspace
+  state first, then sends a normalized secret-reference-only definition to
+  `profile.create`;
+- the first profile uses a named privileged bootstrap because no management
+  root exists; every later profile creation uses a Management plan;
+- archive and purge stage profile-owned files under `.trash`, commit the root
+  command, restore staged files on commit failure, and finalize permanent purge
+  only after commit;
+- removing the last profile atomically deletes `config.json` instead of
+  persisting an invalid empty root.
+
+## Privileged infrastructure writes
+
+Bootstrap, credential/secret storage, inactive-engine preparation,
+schema/layout migration, repair, recovery, and workspace materialization are
+not user management commands. They stay behind narrow named infrastructure
+operations and never manufacture a human actor or fake confirmation.
+
+`config-ops.ts` contains no public config writer. It currently retains only the
+lark-cli identity side effect and a shared mutable runtime-projection type.
 
 ## Dependency rules
 
-- The control plane does not depend on Commander, CardKit, the web UI or agent
-  prompts.
-- Adapters parse input and format results; they do not implement policy.
-- Snapshots use explicit allowlists. Secrets, actor/chat identifiers and local
-  filesystem paths must not be exposed by default.
-- JSON contracts are versioned independently from the stored profile schema.
-- Management commands, runtime administration, and native reads have separate
-  contracts. One surface must not silently authorize or persist through
-  another.
+- Application and domain control code must not import Commander, CardKit,
+  Feishu SDKs, web UI types, prompts, or process-management implementations.
+- Adapters parse and render; they do not implement policy or persistence.
+- Management commands, Runtime Admin, and Native Read keep separate contracts.
+- Stored profile schema and public JSON contracts evolve independently.
+- Aria continues to run one engine runtime per profile.
 
-## Phase 1: read-only surface
+## Remaining work
 
-The initial surface intentionally changes no runtime behavior:
+1. Add explicit cancellation/rejection and expired-plan collection; narrow
+   root-wide revisions where unrelated changes still conflict.
+2. Persist management request, authorization, plan, commit, conflict, and
+   reconcile evidence through the existing audit boundary; add operator
+   diagnostics.
+3. Add signed actor envelopes, nonce/replay protection, and more advanced
+   authorization only when the functional need justifies them.
+4. Remove legacy operation/DTO inputs and compatibility projections through an
+   explicit compatibility decision.
 
-```text
-aria control capabilities [--json]
-aria profile show [name] [--json]
-aria config show [--profile <name>] [--json]
-aria runtime status [--profile <name>] [--json]
-```
-
-All four operations are local and read-only. Their JSON schemas are:
-
-- `aria.control.capabilities.v1`
-- `aria.control.profile.v1`
-- `aria.control.config.v1`
-- `aria.control.runtime.v1`
-
-## Phase 2: change protocol
-
-The shipped CLI change protocol enters through `ManagementApi`, which
-orchestrates `ConfigChangeService` and its versioned
-`plan -> confirm -> commit` workflow. This phase initially registered no
-user-facing mutation operations.
-
-- Operations are explicit, versioned and deterministic; there is no generic
-  JSON Patch or direct config-file escape hatch.
-- Plans carry semantic base and target revisions. Apply reruns the operation
-  under the shared config lock and fails closed on concurrent changes or
-  transformation drift.
-- The current semantic revision is visible through `aria config show --json`.
-- Root config persistence reuses the existing atomic writer. Plan state is
-  also atomically persisted, with a recovery path when config commit succeeds
-  before the plan status can be updated.
-- Trusted adapters must provide actor context. Only a fingerprint is stored or
-  returned, and the same actor must confirm and apply the plan.
-- Public plan snapshots omit operation parameters, secrets, raw actor IDs and
-  filesystem paths.
-- Protocol v1 fails closed for `sensitive` and `destructive` operations by
-  default. Shipped in-process access/account adapters install an explicit
-  source-and-command-scoped authorizer after their existing admin/local-console
-  gate; there is no generic sensitive-operation switch.
-- Commands may mark inputs as `private-identifiers`. Those identifiers are
-  retained only in the mode-0600 internal plan needed for deterministic replay;
-  public plans expose redacted count/value summaries. Credentials remain
-  forbidden from command parameters and plan summaries.
-- A profile-scoped operation cannot change root identity fields, root secrets,
-  the profile set or any other profile.
-- A root-scoped operation carries `{ kind: "root" }` in its plan and may
-  perform only its registered deterministic root transition. Older v1 plans
-  without an explicit resource remain profile-scoped for compatibility.
-
-## Phase 3: low-risk CLI operations
-
-The first explicit operations are available through the staged CLI workflow:
-
-```text
-aria config settings [--json]
-aria config plan <setting> <value> [--profile <name>] [--json]
-aria config plan-show <plan-id> [--json]
-aria config confirm <plan-id> [--json]
-aria config apply <plan-id> [--json]
-```
-
-Supported settings are `require-mention`, `show-tool-calls`, `message-reply`,
-`cot-messages`, `max-concurrent-runs`, `run-idle-timeout` and
-`meeting-enabled`, `service-tier`, and `steering`. `aria config settings` is the
-machine-readable source of truth for accepted values. Steering accepts `off`,
-`shadow`, `auto`, or `on`.
-
-The CLI creates no direct-write shortcut: plan, confirmation and application
-remain separate invocations. Because an external CLI process cannot refresh a
-running bridge's in-memory profile, its compatibility presenter explicitly
-reports `restartRequired: true`; persisted changes take effect after a safe
-restart. Canonical command metadata is transport-neutral: every setting except
-`meeting-enabled` declares `live`; `meeting-enabled` declares `reconnect`.
-The `/config` preferences form executes one registered aggregate command and
-refreshes the exact committed revision through `ProfileRuntimeReconciler`.
-The web settings form uses one larger aggregate contract so a form submission
-is still one atomic commit. Its live variant rejects `meeting.enabled` changes;
-the adapter selects the reconnect variant for those transitions. Offline
-profiles use the same command and explicitly defer runtime reconciliation.
-Access mutations use `profile.access.update`, retry revision conflicts, apply
-live for the hosting profile, and defer for offline profiles. Account changes
-stage plaintext only in the profile keystore, commit an external SecretRef via
-`profile.account.update`, and retry the committed reconnect after the success
-card renders. A secret-free `recordedAt` marker versions same-App credential
-rotations. Agent flows may use the staged CLI service and cannot bypass its
-plan, confirmation, or application steps.
-
-## Current boundary summary
-
-- `ManagementApi` is the shipped application boundary for CLI and trusted
-  in-process adapter mutations. It exposes versioned `plan`, `getPlan`,
-  `confirm`, `commit`, and one-call `execute` operations without importing CLI
-  or UI concerns.
-- `ConfigChangeService` is the mutation kernel behind that facade. It owns the
-  durable plan lifecycle and commit invariants, not transport request shapes.
-- `ManagementCommandRegistry` normalizes canonical commands with explicit
-  runtime effects. The legacy `restartRequired` operation shape remains a
-  compatibility input, while public v1 CLI DTOs remain unchanged.
-- `FileConfigRepository` owns desired-state reads, the shared configuration
-  lock, and atomic commits. `ConfigChangeService.commitPlan()` reports the
-  durable apply result separately from its
-  `none | live | reconnect | engine-switch | restart` runtime effect.
-- `ManagementApi` asks a `RuntimeReconciler` to apply that effect only after a
-  successful commit and returns its `not-required | applied | deferred |
-  failed` outcome separately. A reconciliation failure never rewrites or
-  misreports the durable commit; committing an already-applied plan retries
-  reconciliation without repeating the write.
-- `ProfileRuntimeReconciler` can reload an exact committed revision into a
-  running profile for `live`, invoke its connect-before-disconnect path for
-  `reconnect`, and defer both Supervisor-owned `engine-switch` and process-level
-  `restart`. Settings, access, model and reasoning adapters use this
-  implementation directly; `/account` deliberately defers its first reconcile
-  until the success card is visible, then retries the already-applied plan
-  without repeating the config write.
-- `profile.model.update` owns legacy reasoning-map migration, and
-  `profile.reasoning.update` binds an effort to the exact engine and resolved
-  model observed by the adapter. Neither adapter writes `config.json` directly.
-- `profile.engine.update` changes only `agentKind` and the engine-local model.
-  The Supervisor proves a candidate runtime first, stages only missing inactive
-  plugin bootstrap config, quiesces runs, commits the command, then consumes
-  `engine-switch` through `EngineSwitchRuntimeReconciler`. Registry/lock/runtime
-  activation happens before the effect is reported applied; pre-swap failure
-  restores the previous desired engine with a reverse management command.
-- `profile.activate` is the first root-scoped lifecycle command. CLI and Web
-  call the shared `ProfileLifecycleService`, which commits
-  `config.json.activeProfile` through `ManagementApi` and then reconciles the
-  legacy `active-profile` file as a separate compatibility projection. Normal
-  reads use `config.json`; projection failure does not roll back or misreport
-  the durable desired-state commit.
-- `profile.create`, `profile.archive`, and `profile.purge` complete the current
-  root-scoped profile lifecycle. Creation performs credential encryption,
-  engine bootstrap, and workspace preparation before the command and submits
-  only a normalized profile definition containing an external SecretRef. The
-  first profile initializes the absent root through the named bootstrap path;
-  every additive creation uses a Management plan. Archive and purge stage
-  profile-owned files before commit, restore them on commit failure, and keep
-  permanent cleanup and active-profile projection outcomes separate from the
-  durable desired-state result. The final profile is removed with an explicit
-  root-teardown command capability, never by persisting an empty root.
-- The CLI now uses `ManagementApi` while unwrapping its envelopes so existing
-  public CLI JSON and human-readable output remain compatible.
-- `config-ops.ts` no longer contains public config writers. It retains only the
-  lark-cli identity side effect and the shared mutable runtime projection type.
-- Plaintext App Secrets never enter Management API requests or plans. The
-  adapter writes the encrypted profile keystore first; the command persists
-  only a profile-scoped provider and SecretRef.
-- Runtime reconnect, restart, activity preflight, and engine replacement
-  belong to Runtime Admin and the Supervisor; they do not create a second
-  configuration writer.
-- Native Read is a scoped read/query transport and never a configuration
-  writer.
-- First-root bootstrap, schema/layout migration, secret migration, and recovery are named
-  privileged infrastructure writes. They do not impersonate a user or enter a
-  human confirmation flow.
+AgentSpace, per-user App Servers, runtime pooling, delegated credentials,
+cross-machine scheduling, and a generic credential broker are not part of this
+architecture. Any future work in those areas requires a separate decision.
