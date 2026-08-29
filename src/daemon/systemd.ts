@@ -10,6 +10,7 @@ import {
   systemdUnitPath,
 } from './paths';
 import { paths } from '../config/paths';
+import type { ServiceLaunchSpec } from './service-adapter';
 
 export interface UnitInputs {
   /** Absolute path to the node binary that should run the bridge. */
@@ -68,13 +69,17 @@ WantedBy=default.target
 `;
 }
 
-export async function writeUnit(profile: string, runArgs: string[] = ['run']): Promise<void> {
-  const bridgeEntryPath = process.argv[1];
+export async function writeUnit(
+  profile: string,
+  runArgs: string[] = ['run'],
+  launchSpec?: ServiceLaunchSpec,
+): Promise<void> {
+  const bridgeEntryPath = launchSpec?.bridgeEntryPath ?? process.argv[1];
   if (!bridgeEntryPath) {
     throw new Error('cannot determine bridge entry path (process.argv[1] is empty)');
   }
   const content = buildUnit({
-    nodePath: process.execPath,
+    nodePath: launchSpec?.nodePath ?? process.execPath,
     bridgeEntryPath,
     envPath: process.env.PATH ?? '',
     profile,

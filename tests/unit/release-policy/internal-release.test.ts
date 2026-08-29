@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   createInternalReleasePlan,
+  createReleaseManifest,
   internalTagForVersion,
   validateInternalReleaseContext,
 } from "../../../tools/internal-release.mjs";
@@ -49,6 +50,32 @@ describe("internal GitHub release planning", () => {
       version: "0.1.2",
       tag: "internal-v0.1.2",
       title: "Aria Internal v0.1.2",
+    });
+  });
+
+  it("creates a machine-readable install contract from the exact candidate", () => {
+    const packageJson = { name: "@maxverse-ai/aria", version: "0.1.2", engines: { node: ">=20.12.0" } };
+    const manifest = { tarball: "maxverse-ai-aria-0.1.2.tgz" };
+    const plan = {
+      ok: true,
+      tag: "internal-v0.1.2",
+      version: "0.1.2",
+      commit,
+    };
+    expect(createReleaseManifest({
+      packageJson,
+      plan,
+      manifest,
+      digest,
+      createdAt: "2026-08-29T00:00:00.000Z",
+    })).toMatchObject({
+      schemaVersion: 1,
+      channel: "internal",
+      tag: plan.tag,
+      commit,
+      sha256: digest,
+      nodeRange: ">=20.12.0",
+      stateSchemaVersion: 1,
     });
   });
 
@@ -104,6 +131,9 @@ describe("internal release workflow boundary", () => {
     expect(workflow).toContain("--prerelease=true");
     expect(workflow).toContain("--latest=false");
     expect(workflow).toContain("steps.internal.outputs.checksums");
+    expect(workflow).toContain("steps.internal.outputs.releaseManifest");
+    expect(workflow).toContain("steps.internal.outputs.installer");
+    expect(workflow).toContain(".immutable");
     expect(workflow).not.toContain("npm publish");
     expect(workflow).not.toContain("id-token: write");
     expect(workflow).not.toContain("NODE_AUTH_TOKEN");

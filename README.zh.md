@@ -34,11 +34,36 @@ Aria 把你的本地编码 agent（Claude Code、Codex 等）带进飞书 / Lark
 
 ## 安装
 
+Aria 现阶段只通过私有且不可变的 GitHub Release 分发，Aria 包本身不发布到
+npm。先用有权读取 `maxverse-ai/aria` 的 GitHub 账号登录 `gh`，再从最新的
+完整内部版本下载独立安装器：
+
 ```bash
-npm i -g @maxverse-ai/aria
-# 或
-pnpm add -g @maxverse-ai/aria
+gh auth status
+ARIA_REPOSITORY=maxverse-ai/aria
+ARIA_TAG="$(gh api "repos/$ARIA_REPOSITORY/releases?per_page=100" --jq 'map(select(.draft == false and .prerelease == true and .immutable == true and (.tag_name | startswith("internal-v")))) | sort_by(.tag_name | ltrimstr("internal-v") | split(".") | map(tonumber)) | last.tag_name')"
+ARIA_INSTALL_TMP="$(mktemp -d)"
+gh release download "$ARIA_TAG" --repo "$ARIA_REPOSITORY" --pattern aria-install.mjs --dir "$ARIA_INSTALL_TMP"
+node "$ARIA_INSTALL_TMP/aria-install.mjs"
 ```
+
+安装器把鉴权完全交给 `gh`，Aria 不读取也不保存 GitHub token。版本包安装在
+独立的平台数据目录，稳定的 `aria` 启动器通常写到 Linux/macOS 的
+`~/.local/bin/aria`；若该目录不在 `PATH`，按安装器提示加入即可。
+
+后续升级和回滚使用：
+
+```bash
+aria update check
+aria update plan
+aria update apply <plan-id>
+aria update status <operation-id>
+aria update rollback
+```
+
+`apply` 和 `rollback` 默认交给脱离 daemon 生命周期的系统执行器，避免服务重启
+时杀掉自己的更新进程。执行阶段会重新检查活跃任务、Release 元数据与包字节；
+健康检查失败时自动恢复旧版本和旧服务状态。
 
 ## 首次启动
 
@@ -78,7 +103,9 @@ aria status
 aria stop
 ```
 
-服务层命令必须先全局安装，不能直接用 `npx`。daemon 的 launchd plist / systemd unit / Windows 任务会记录 bridge CLI 的路径；如果这个路径来自 npm 临时缓存，缓存清掉后 daemon 就起不来。`run` 用 `npx` 单次启动没问题。
+使用服务层命令前，应先通过 GitHub Release 安装器完成版本化安装。daemon 定义
+只记录稳定 launcher，实际版本由原子写入的安装状态指针选择，所以升级和回滚
+不需要把服务绑定到某个易失的 npm 缓存路径。
 
 服务层命令按 profile 注册，每个 profile 有独立服务：
 

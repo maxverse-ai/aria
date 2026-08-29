@@ -12,6 +12,11 @@ export interface ServiceResult {
  * naturally async. Adapter methods can return either; callers await. */
 export type ServiceResultLike = ServiceResult | Promise<ServiceResult>;
 
+export interface ServiceLaunchSpec {
+  nodePath: string;
+  bridgeEntryPath: string;
+}
+
 /**
  * Platform-agnostic interface over OS service managers (launchd / systemd /
  * schtasks). All methods are best-effort idempotent — calling stop()
@@ -68,13 +73,13 @@ export interface ServiceAdapter {
   parseStatus(text: string): { pid?: string; lastExit?: string };
 }
 
-function makeLaunchdAdapter(profile: string, runArgs: string[]): ServiceAdapter {
+function makeLaunchdAdapter(profile: string, runArgs: string[], launchSpec?: ServiceLaunchSpec): ServiceAdapter {
   return {
     platformName: 'launchd (macOS)',
     fileExists: () => launchd.plistExists(profile),
     isRunning: () => launchd.isLoaded(profile),
     servicePath: () => launchAgentPlistPath(profile),
-    install: () => launchd.writePlist(profile, runArgs),
+    install: () => launchd.writePlist(profile, runArgs, launchSpec),
     // A previous `stop` may have left the job disabled in launchd's override
     // DB, where it would stay dead through bootstrap. Always enable first.
     start: () => {
@@ -102,14 +107,14 @@ function makeLaunchdAdapter(profile: string, runArgs: string[]): ServiceAdapter 
   };
 }
 
-function makeSystemdAdapter(profile: string, runArgs: string[]): ServiceAdapter {
+function makeSystemdAdapter(profile: string, runArgs: string[], launchSpec?: ServiceLaunchSpec): ServiceAdapter {
   return {
     platformName: 'systemd (Linux user)',
     fileExists: () => systemd.unitExists(profile),
     isRunning: () => systemd.isActive(profile),
     servicePath: () => systemdUnitPath(profile),
     install: async () => {
-      await systemd.writeUnit(profile, runArgs);
+      await systemd.writeUnit(profile, runArgs, launchSpec);
       // systemd needs daemon-reload after any unit file change.
       systemd.daemonReload();
     },
@@ -135,7 +140,7 @@ function makeSystemdAdapter(profile: string, runArgs: string[]): ServiceAdapter 
   };
 }
 
-function makeSchtasksAdapter(profile: string, runArgs: string[]): ServiceAdapter {
+function makeSchtasksAdapter(profile: string, runArgs: string[], launchSpec?: ServiceLaunchSpec): ServiceAdapter {
   return {
     platformName: 'Task Scheduler (Windows)',
     fileExists: () => schtasks.isTaskRegistered(profile),
@@ -145,7 +150,7 @@ function makeSchtasksAdapter(profile: string, runArgs: string[]): ServiceAdapter
     // The task name is what the user would search for in Task Scheduler UI.
     servicePath: () => windowsTaskName(profile),
     install: async () => {
-      const r = await schtasks.installTask(profile, runArgs);
+      const r = await schtasks.installTask(profile, runArgs, launchSpec);
       if (!r.ok) throw new Error(r.stderr || 'schtasks /Create failed');
     },
     // Mirror launchd: a previous `stop` disabled the task, and a disabled
@@ -187,9 +192,10 @@ function makeSchtasksAdapter(profile: string, runArgs: string[]): ServiceAdapter
 export function getServiceAdapter(
   profile = 'claude',
   runArgs: string[] = ['run'],
+  launchSpec?: ServiceLaunchSpec,
 ): ServiceAdapter | null {
-  if (process.platform === 'darwin') return makeLaunchdAdapter(profile, runArgs);
-  if (process.platform === 'linux') return makeSystemdAdapter(profile, runArgs);
-  if (process.platform === 'win32') return makeSchtasksAdapter(profile, runArgs);
+  if (process.platform === 'darwin') return makeLaunchdAdapter(profile, runArgs, launchSpec);
+  if (process.platform === 'linux') return makeSystemdAdapter(profile, runArgs, launchSpec);
+  if (process.platform === 'win32') return makeSchtasksAdapter(profile, runArgs, launchSpec);
   return null;
 }

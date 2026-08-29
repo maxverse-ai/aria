@@ -8,7 +8,18 @@ import { basename, dirname, isAbsolute, join, relative, resolve } from "node:pat
 import { fileURLToPath } from "node:url";
 
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
-const requiredPackageFiles = ["LICENSE", "README.md", "README.zh.md", "bin/aria.mjs", "dist/cli.js", "dist/index.d.ts", "dist/index.js", "package.json"];
+const requiredPackageFiles = [
+  "LICENSE",
+  "README.md",
+  "README.zh.md",
+  "bin/aria.mjs",
+  "dist/cli.js",
+  "dist/installer.js",
+  "dist/updater.js",
+  "dist/index.d.ts",
+  "dist/index.js",
+  "package.json",
+];
 const packageNamePattern = /^(?:@[a-z0-9][a-z0-9._~-]*\/)?[a-z0-9][a-z0-9._~-]*$/;
 
 function command(name) {

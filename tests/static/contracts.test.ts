@@ -54,4 +54,13 @@ describe('static architecture contracts', () => {
       expect(source, file).not.toMatch(/\bwriteFile\(/);
     }
   });
+
+  it('keeps distribution policy independent from GitHub, npm, filesystems, and service managers', () => {
+    for (const file of collectTsFiles('src/application/distribution')) {
+      const source = read(file);
+      expect(source, file).not.toMatch(/from ['"][^'"]*platform\//);
+      expect(source, file).not.toMatch(/node:child_process|node:fs|node:path/);
+      expect(source, file).not.toMatch(/GitHubRelease|systemd|launchctl|schtasks|npm install/);
+    }
+  });
 });
