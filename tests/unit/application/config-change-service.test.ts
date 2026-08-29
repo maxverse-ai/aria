@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   ConfigChangeService,
-  type ConfigChangeOperation,
+  type ManagementCommandDefinition,
   type ControlActorContext,
 } from '../../../src/application/control';
 import { resolveAppPaths } from '../../../src/config/app-paths';
@@ -49,13 +49,16 @@ describe('ConfigChangeService', () => {
     expect(JSON.stringify(plan)).not.toContain('ou_private_actor');
     expect(JSON.stringify(plan)).not.toContain('super-secret');
     expect(JSON.stringify(plan)).not.toContain('parameters');
+    expect(JSON.stringify(plan)).not.toContain('runtimeEffect');
     expect(beforeApply?.profiles.primary?.access.requireMentionInGroup).toBe(true);
 
     const confirmed = await service.confirmPlan(plan.id, actor);
     expect(confirmed.status).toBe('confirmed');
-    const result = await service.applyPlan(plan.id, actor);
+    const commit = await service.commitPlan(plan.id, actor);
+    const result = commit.applyResult;
     const afterApply = await loadRootConfig(fixture.configPath);
 
+    expect(commit.effect).toBe('restart');
     expect(result).toMatchObject({
       schema: 'aria.control.change-apply.v1',
       planId,
@@ -68,6 +71,7 @@ describe('ConfigChangeService', () => {
     const storedPlan = await readFile(join(fixture.root, 'control', 'plans', `${planId}.json`), 'utf8');
     expect(storedPlan).not.toContain('ou_private_actor');
     expect(storedPlan).not.toContain('super-secret');
+    expect(storedPlan).toContain('"runtimeEffect": "restart"');
   });
 
   it('requires explicit confirmation by the same actor', async () => {
@@ -162,11 +166,11 @@ describe('ConfigChangeService', () => {
   });
 });
 
-const operation: ConfigChangeOperation = {
+const operation: ManagementCommandDefinition = {
   id: 'test.access.require-mention',
   version: 1,
   risk: 'low',
-  restartRequired: true,
+  effect: 'restart',
   prepare({ root, profile, parameters }) {
     if (typeof parameters.value !== 'boolean') throw new Error('value must be boolean');
     const current = root.profiles[profile]!;
@@ -182,11 +186,11 @@ const operation: ConfigChangeOperation = {
   },
 };
 
-const crossProfileOperation: ConfigChangeOperation = {
+const crossProfileOperation: ManagementCommandDefinition = {
   id: 'test.cross-profile',
   version: 1,
   risk: 'low',
-  restartRequired: true,
+  effect: 'restart',
   prepare({ root, profile }) {
     root.profiles.secondary!.preferences.model = 'forbidden';
     root.profiles[profile]!.preferences.model = 'allowed';
@@ -194,11 +198,11 @@ const crossProfileOperation: ConfigChangeOperation = {
   },
 };
 
-const leakingOperation: ConfigChangeOperation = {
+const leakingOperation: ManagementCommandDefinition = {
   id: 'test.leaking-summary',
   version: 1,
   risk: 'low',
-  restartRequired: true,
+  effect: 'restart',
   prepare({ root, profile }) {
     root.profiles[profile]!.access.requireMentionInGroup = false;
     return {

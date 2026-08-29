@@ -8,10 +8,12 @@ import {
 } from '../../config/schema';
 import type {
   ConfigChangeOperation,
+  ManagementCommandDefinition,
   ControlPlanParameters,
   ControlPlanScalar,
 } from './change-types';
 import { ControlChangeError } from './change-types';
+import { ManagementCommandRegistry } from './management-command-registry';
 
 export const LOW_RISK_CONFIG_SETTINGS = [
   'require-mention',
@@ -56,7 +58,7 @@ export function configSettingsSnapshot(): ControlConfigSettingsSnapshot {
   };
 }
 
-export const lowRiskConfigOperations: readonly ConfigChangeOperation[] = [
+export const lowRiskConfigCommands: readonly ManagementCommandDefinition[] = [
   operation('config.require-mention.set', ({ profile, value }) => {
     const before = getRequireMentionInGroup(profile);
     const after = booleanValue(value);
@@ -112,6 +114,13 @@ export const lowRiskConfigOperations: readonly ConfigChangeOperation[] = [
   }),
 ];
 
+export const lowRiskConfigCommandRegistry = new ManagementCommandRegistry(lowRiskConfigCommands);
+
+/** @deprecated Use `lowRiskConfigCommands` or `lowRiskConfigCommandRegistry`. */
+export const lowRiskConfigOperations: readonly ConfigChangeOperation[] = lowRiskConfigCommands.map(
+  ({ effect: _effect, ...command }) => ({ ...command, restartRequired: true }),
+);
+
 const settingToOperation = new Map(
   lowRiskConfigSettingDescriptors.map((item) => [item.setting, item.operationId]),
 );
@@ -143,12 +152,12 @@ function operation(
     profile: import('../../config/profile-schema').ProfileConfig;
     value: ControlPlanScalar | undefined;
   }) => import('./change-types').ControlChangeSummary,
-): ConfigChangeOperation {
+): ManagementCommandDefinition {
   return {
     id,
     version: 1,
     risk: 'low',
-    restartRequired: true,
+    effect: 'restart',
     prepare({ root, profile, parameters }) {
       const current = root.profiles[profile];
       if (!current) throw new Error(`profile not found: ${profile}`);

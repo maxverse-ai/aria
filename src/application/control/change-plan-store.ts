@@ -7,6 +7,7 @@ import {
   ControlChangeError,
   type StoredControlChangePlan,
 } from './change-types';
+import { MANAGEMENT_RUNTIME_EFFECTS } from './runtime-effect';
 
 export class ControlChangePlanStore {
   constructor(private readonly rootDir: string) {}
@@ -71,6 +72,7 @@ function isStoredPlan(value: unknown): value is StoredControlChangePlan {
     plan.operation.version === 1 &&
     (plan.operation.risk === 'low' || plan.operation.risk === 'sensitive' || plan.operation.risk === 'destructive') &&
     typeof plan.operation.restartRequired === 'boolean' &&
+    (plan.runtimeEffect === undefined || MANAGEMENT_RUNTIME_EFFECTS.includes(plan.runtimeEffect)) &&
     (plan.status === 'planned' || plan.status === 'confirmed' || plan.status === 'applied') &&
     (plan.actor?.source === 'local-cli' || plan.actor?.source === 'agent' || plan.actor?.source === 'card' || plan.actor?.source === 'web') &&
     typeof plan.actor?.fingerprint === 'string' &&

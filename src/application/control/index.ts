@@ -12,7 +12,9 @@ export type {
 export { CONTROL_CHANGE_API_VERSION, ControlChangeError } from './change-types';
 export type {
   ConfigChangeCandidate,
+  ConfigChangeCommitResult,
   ConfigChangeOperation,
+  ConfigMutation,
   ControlActorContext,
   ControlActorReference,
   ControlChangeApplyResult,
@@ -24,8 +26,23 @@ export type {
   ControlChangeSummary,
   ControlPlanParameters,
   ControlPlanScalar,
+  ManagementCommandDefinition,
+  ManagementCommandInput,
 } from './change-types';
 export { configRevision } from './config-revision';
+export { FileConfigRepository } from './config-repository';
+export type { ConfigRepository, ConfigRepositoryTransaction } from './config-repository';
+export { ManagementCommandRegistry } from './management-command-registry';
+export {
+  MANAGEMENT_RUNTIME_EFFECTS,
+  runtimeEffectRequiresRestart,
+} from './runtime-effect';
+export type {
+  ManagementRuntimeEffect,
+  RuntimeReconcileOutcome,
+  RuntimeReconcileRequest,
+  RuntimeReconciler,
+} from './runtime-effect';
 export { ConfigChangeService } from './config-change-service';
 export type {
   ConfigChangeServiceOptions,
@@ -99,6 +116,8 @@ export type {
 export {
   LOW_RISK_CONFIG_SETTINGS,
   configSettingsSnapshot,
+  lowRiskConfigCommandRegistry,
+  lowRiskConfigCommands,
   lowRiskConfigSettingDescriptors,
   lowRiskConfigOperations,
   operationIdForSetting,
