@@ -11,21 +11,21 @@ import { createDefaultProfileConfig } from '../../../src/config/profile-schema';
 
 describe('low-risk config operations', () => {
   it.each([
-    ['require-mention', false, 'access.requireMentionInGroup', false],
-    ['show-tool-calls', false, 'preferences.showToolCalls', false],
-    ['message-reply', 'text', 'preferences.messageReply', 'text'],
-    ['cot-messages', 'brief', 'preferences.cotMessages', 'brief'],
-    ['max-concurrent-runs', 4, 'preferences.maxConcurrentRuns', 4],
-    ['run-idle-timeout', 12, 'preferences.runIdleTimeoutMinutes', 12],
-    ['meeting-enabled', true, 'meeting.enabled', true],
-  ] as const)('prepares %s through an explicit deterministic operation', (setting, value, field, after) => {
+    ['require-mention', false, 'access.requireMentionInGroup', false, 'live'],
+    ['show-tool-calls', false, 'preferences.showToolCalls', false, 'live'],
+    ['message-reply', 'text', 'preferences.messageReply', 'text', 'live'],
+    ['cot-messages', 'brief', 'preferences.cotMessages', 'brief', 'live'],
+    ['max-concurrent-runs', 4, 'preferences.maxConcurrentRuns', 4, 'live'],
+    ['run-idle-timeout', 12, 'preferences.runIdleTimeoutMinutes', 12, 'live'],
+    ['meeting-enabled', true, 'meeting.enabled', true, 'reconnect'],
+  ] as const)('prepares %s through an explicit deterministic operation', (setting, value, field, after, effect) => {
     const root = fixtureRoot();
     const id = operationIdForSetting(setting);
     const operation = lowRiskConfigCommandRegistry.get(id)!;
 
     const candidate = operation.prepare({ root, profile: 'primary', parameters: { value } });
 
-    expect(operation).toMatchObject({ risk: 'low', effect: 'restart' });
+    expect(operation).toMatchObject({ risk: 'low', effect });
     expect(candidate.changes).toEqual([expect.objectContaining({ field, after })]);
   });
 

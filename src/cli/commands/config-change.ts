@@ -49,7 +49,7 @@ export async function runConfigPlan(
     input: { value: parseSettingValue(setting, rawValue) },
     actor: currentActor,
   });
-  print(plan, opts.json, formatPlan);
+  print(cliPlan(plan), opts.json, formatPlan);
 }
 
 export async function runConfigPlanShow(
@@ -63,7 +63,7 @@ export async function runConfigPlanShow(
     planId,
     actor: actor(opts),
   });
-  print(plan, opts.json, formatPlan);
+  print(cliPlan(plan), opts.json, formatPlan);
 }
 
 export async function runConfigConfirm(
@@ -77,7 +77,7 @@ export async function runConfigConfirm(
     planId,
     actor: actor(opts),
   });
-  print(plan, opts.json, formatPlan);
+  print(cliPlan(plan), opts.json, formatPlan);
 }
 
 export async function runConfigApply(
@@ -91,7 +91,7 @@ export async function runConfigApply(
     planId,
     actor: actor(opts),
   });
-  print(applyResult, opts.json, formatApplyResult);
+  print(cliApplyResult(applyResult), opts.json, formatApplyResult);
 }
 
 export function formatPlan(plan: ControlChangePlanSnapshot): string {
@@ -141,4 +141,20 @@ function print<T>(value: T, json: boolean | undefined, format: (value: T) => str
 
 function display(value: string | number | boolean | null): string {
   return value === null ? 'null' : String(value);
+}
+
+/**
+ * The standalone CLI cannot update a bridge process's in-memory projection.
+ * Preserve the public v1 promise that these settings require a restart even
+ * when the canonical command can be reconciled live by an in-process adapter.
+ */
+function cliPlan(plan: ControlChangePlanSnapshot): ControlChangePlanSnapshot {
+  return {
+    ...plan,
+    operation: { ...plan.operation, restartRequired: true },
+  };
+}
+
+function cliApplyResult(result: ControlChangeApplyResult): ControlChangeApplyResult {
+  return { ...result, restartRequired: true };
 }

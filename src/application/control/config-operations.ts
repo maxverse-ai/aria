@@ -14,6 +14,7 @@ import type {
 } from './change-types';
 import { ControlChangeError } from './change-types';
 import { ManagementCommandRegistry } from './management-command-registry';
+import type { ManagementRuntimeEffect } from './runtime-effect';
 
 export const LOW_RISK_CONFIG_SETTINGS = [
   'require-mention',
@@ -59,19 +60,19 @@ export function configSettingsSnapshot(): ControlConfigSettingsSnapshot {
 }
 
 export const lowRiskConfigCommands: readonly ManagementCommandDefinition[] = [
-  operation('config.require-mention.set', ({ profile, value }) => {
+  operation('config.require-mention.set', 'live', ({ profile, value }) => {
     const before = getRequireMentionInGroup(profile);
     const after = booleanValue(value);
     if (before !== after) profile.access = { ...profile.access, requireMentionInGroup: after };
     return summary('access.requireMentionInGroup', before, after);
   }),
-  operation('config.show-tool-calls.set', ({ profile, value }) => {
+  operation('config.show-tool-calls.set', 'live', ({ profile, value }) => {
     const before = getShowToolCalls(profile);
     const after = booleanValue(value);
     if (before !== after) profile.preferences = { ...profile.preferences, showToolCalls: after };
     return summary('preferences.showToolCalls', before, after);
   }),
-  operation('config.message-reply.set', ({ profile, value }) => {
+  operation('config.message-reply.set', 'live', ({ profile, value }) => {
     const before = getMessageReplyMode(profile);
     const after = enumValue(value, ['card', 'markdown', 'text'] as const);
     if (before !== after) {
@@ -83,19 +84,19 @@ export const lowRiskConfigCommands: readonly ManagementCommandDefinition[] = [
     }
     return summary('preferences.messageReply', before, after);
   }),
-  operation('config.cot-messages.set', ({ profile, value }) => {
+  operation('config.cot-messages.set', 'live', ({ profile, value }) => {
     const before = getCotMessages(profile);
     const after = enumValue(value, ['off', 'brief', 'detailed'] as const);
     if (before !== after) profile.preferences = { ...profile.preferences, cotMessages: after };
     return summary('preferences.cotMessages', before, after);
   }),
-  operation('config.max-concurrent-runs.set', ({ profile, value }) => {
+  operation('config.max-concurrent-runs.set', 'live', ({ profile, value }) => {
     const before = getMaxConcurrentRuns(profile);
     const after = integerValue(value, 1, 50);
     if (before !== after) profile.preferences = { ...profile.preferences, maxConcurrentRuns: after };
     return summary('preferences.maxConcurrentRuns', before, after);
   }),
-  operation('config.run-idle-timeout.set', ({ profile, value }) => {
+  operation('config.run-idle-timeout.set', 'live', ({ profile, value }) => {
     const before = (getRunIdleTimeoutMs(profile) ?? 0) / 60_000;
     const after = integerValue(value, 0, 120);
     if (before !== after) {
@@ -106,7 +107,7 @@ export const lowRiskConfigCommands: readonly ManagementCommandDefinition[] = [
     }
     return summary('preferences.runIdleTimeoutMinutes', before, after);
   }),
-  operation('config.meeting-enabled.set', ({ profile, value }) => {
+  operation('config.meeting-enabled.set', 'reconnect', ({ profile, value }) => {
     const before = profile.meeting.enabled;
     const after = booleanValue(value);
     if (before !== after) profile.meeting = { ...profile.meeting, enabled: after };
@@ -148,6 +149,7 @@ export function parseSettingValue(setting: string, raw: string): ControlPlanScal
 
 function operation(
   id: string,
+  effect: ManagementRuntimeEffect,
   mutate: (input: {
     profile: import('../../config/profile-schema').ProfileConfig;
     value: ControlPlanScalar | undefined;
@@ -157,7 +159,7 @@ function operation(
     id,
     version: 1,
     risk: 'low',
-    effect: 'restart',
+    effect,
     prepare({ root, profile, parameters }) {
       const current = root.profiles[profile];
       if (!current) throw new Error(`profile not found: ${profile}`);
