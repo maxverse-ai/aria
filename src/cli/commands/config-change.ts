@@ -1,6 +1,9 @@
+import { randomUUID } from 'node:crypto';
 import { userInfo } from 'node:os';
 import {
   ConfigChangeService,
+  MANAGEMENT_API_VERSION,
+  ManagementApi,
   configSettingsSnapshot,
   lowRiskConfigCommandRegistry,
   operationIdForSetting,
@@ -36,11 +39,15 @@ export async function runConfigPlan(
   rawValue: string,
   opts: ConfigChangeCliOptions = {},
 ): Promise<void> {
-  const plan = await service(opts).createPlan({
+  const currentActor = actor(opts);
+  const { plan } = await managementApi(opts).plan({
+    schema: 'aria.management.plan.request.v1',
+    apiVersion: MANAGEMENT_API_VERSION,
+    requestId: randomUUID(),
     profile: opts.profile,
-    operationId: operationIdForSetting(setting),
-    parameters: { value: parseSettingValue(setting, rawValue) },
-    actor: actor(opts),
+    command: operationIdForSetting(setting),
+    input: { value: parseSettingValue(setting, rawValue) },
+    actor: currentActor,
   });
   print(plan, opts.json, formatPlan);
 }
@@ -49,21 +56,42 @@ export async function runConfigPlanShow(
   planId: string,
   opts: ConfigChangeCliOptions = {},
 ): Promise<void> {
-  print(await service(opts).getPlan(planId), opts.json, formatPlan);
+  const { plan } = await managementApi(opts).getPlan({
+    schema: 'aria.management.plan-read.request.v1',
+    apiVersion: MANAGEMENT_API_VERSION,
+    requestId: randomUUID(),
+    planId,
+    actor: actor(opts),
+  });
+  print(plan, opts.json, formatPlan);
 }
 
 export async function runConfigConfirm(
   planId: string,
   opts: ConfigChangeCliOptions = {},
 ): Promise<void> {
-  print(await service(opts).confirmPlan(planId, actor(opts)), opts.json, formatPlan);
+  const { plan } = await managementApi(opts).confirm({
+    schema: 'aria.management.confirm.request.v1',
+    apiVersion: MANAGEMENT_API_VERSION,
+    requestId: randomUUID(),
+    planId,
+    actor: actor(opts),
+  });
+  print(plan, opts.json, formatPlan);
 }
 
 export async function runConfigApply(
   planId: string,
   opts: ConfigChangeCliOptions = {},
 ): Promise<void> {
-  print(await service(opts).applyPlan(planId, actor(opts)), opts.json, formatApplyResult);
+  const { applyResult } = await managementApi(opts).commit({
+    schema: 'aria.management.commit.request.v1',
+    apiVersion: MANAGEMENT_API_VERSION,
+    requestId: randomUUID(),
+    planId,
+    actor: actor(opts),
+  });
+  print(applyResult, opts.json, formatApplyResult);
 }
 
 export function formatPlan(plan: ControlChangePlanSnapshot): string {
@@ -89,11 +117,13 @@ export function formatApplyResult(result: ControlChangeApplyResult): string {
   ].join('\n');
 }
 
-function service(opts: Pick<ConfigChangeCliOptions, 'rootDir'>): ConfigChangeService {
-  return new ConfigChangeService({
-    rootDir: opts.rootDir ?? paths.rootDir,
-    registry: lowRiskConfigCommandRegistry,
-  });
+function managementApi(opts: Pick<ConfigChangeCliOptions, 'rootDir'>): ManagementApi {
+  return new ManagementApi(
+    new ConfigChangeService({
+      rootDir: opts.rootDir ?? paths.rootDir,
+      registry: lowRiskConfigCommandRegistry,
+    }),
+  );
 }
 
 function actor(opts: Pick<ConfigChangeCliOptions, 'actor' | 'rootDir'>): ControlActorContext {

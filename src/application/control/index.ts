@@ -49,6 +49,22 @@ export type {
   CreateConfigChangePlanInput,
 } from './config-change-service';
 export {
+  MANAGEMENT_API_VERSION,
+  ManagementApi,
+  ManagementApiError,
+} from './management-api';
+export type {
+  ManagementApiErrorCode,
+  ManagementCommitRequest,
+  ManagementCommitResult,
+  ManagementConfirmRequest,
+  ManagementExecuteRequest,
+  ManagementExecuteResult,
+  ManagementPlanReadRequest,
+  ManagementPlanRequest,
+  ManagementPlanResult,
+} from './management-api';
+export {
   NATIVE_AUDIT_ACTIONS,
   NATIVE_READ_API_VERSION,
   NATIVE_READ_RESOURCE_TYPES,
