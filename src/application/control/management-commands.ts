@@ -7,6 +7,11 @@ import {
 } from './profile-settings-command';
 import { profileAccessUpdateCommand } from './profile-access-command';
 import { profileAccountUpdateCommand } from './profile-account-command';
+import {
+  profileModelUpdateCommand,
+  profileReasoningUpdateCommand,
+} from './profile-model-command';
+import { profileEngineUpdateCommand } from './profile-engine-command';
 
 /** Full public command catalog shared by in-process management adapters. */
 export const managementCommands = [
@@ -16,6 +21,9 @@ export const managementCommands = [
   profileSettingsReconnectCommand,
   profileAccessUpdateCommand,
   profileAccountUpdateCommand,
+  profileModelUpdateCommand,
+  profileReasoningUpdateCommand,
+  profileEngineUpdateCommand,
 ] as const;
 
 export const managementCommandRegistry = new ManagementCommandRegistry(managementCommands);

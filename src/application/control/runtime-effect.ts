@@ -1,4 +1,10 @@
-export const MANAGEMENT_RUNTIME_EFFECTS = ['none', 'live', 'reconnect', 'restart'] as const;
+export const MANAGEMENT_RUNTIME_EFFECTS = [
+  'none',
+  'live',
+  'reconnect',
+  'engine-switch',
+  'restart',
+] as const;
 
 export type ManagementRuntimeEffect = (typeof MANAGEMENT_RUNTIME_EFFECTS)[number];
 

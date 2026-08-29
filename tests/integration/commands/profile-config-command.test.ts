@@ -190,7 +190,10 @@ describe('profile-aware account and config commands', () => {
       message_reply: 'text',
     });
     await vi.advanceTimersByTimeAsync(1000);
-    await vi.waitFor(() => expect(h.controls.switchAgent).toHaveBeenCalledWith('codex'));
+    await vi.waitFor(() => expect(h.controls.switchAgent).toHaveBeenCalledWith(
+      'codex',
+      { source: 'card', principal: 'ou-admin' },
+    ));
 
     const root = await readRoot(h.rootDir);
     expect(root.profiles.claude?.preferences.model).toBeUndefined();
@@ -209,7 +212,10 @@ describe('profile-aware account and config commands', () => {
       message_reply: 'text',
     });
     await vi.advanceTimersByTimeAsync(1000);
-    await vi.waitFor(() => expect(h.controls.switchAgent).toHaveBeenCalledWith('codex'));
+    await vi.waitFor(() => expect(h.controls.switchAgent).toHaveBeenCalledWith(
+      'codex',
+      { source: 'card', principal: 'ou-admin' },
+    ));
     await vi.waitFor(async () => {
       const root = await readRoot(h.rootDir);
       expect(root.profiles.claude?.preferences.model).toBe('claude-opus-4-8');

@@ -33,6 +33,13 @@ export class ProfileRuntimeReconciler implements RuntimeReconciler {
     if (request.effect === 'restart') {
       return { status: 'deferred', effect: 'restart', reason: 'process-restart-required' };
     }
+    if (request.effect === 'engine-switch') {
+      return {
+        status: 'deferred',
+        effect: 'engine-switch',
+        reason: 'supervisor-engine-switch-required',
+      };
+    }
 
     const root = await this.readExpectedRevision(request);
     if (!root) {

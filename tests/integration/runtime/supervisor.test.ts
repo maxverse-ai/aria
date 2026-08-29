@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -14,6 +14,7 @@ import { FakeAgentAdapter } from '../../helpers/fake-agent';
 import { resolveAppPaths } from '../../../src/config/app-paths';
 import { readRuntimeLockMeta } from '../../../src/runtime/locks';
 import { readAndPrune } from '../../../src/runtime/registry';
+import type { ControlActorContext } from '../../../src/application/control';
 
 const roots: string[] = [];
 const started: string[] = [];
@@ -27,6 +28,7 @@ let sup: Supervisor;
 let failedAgent: string | undefined;
 let blockedAgent: string | undefined;
 let releaseBlockedAgent: (() => void) | undefined;
+const actor: ControlActorContext = { source: 'agent', principal: 'ou-engine-admin' };
 
 function app(id: string) {
   return { id, secret: '${APP_SECRET}', tenant: 'feishu' as const };
@@ -186,7 +188,7 @@ describe('Supervisor', () => {
 
     await sup.startProfile('claude');
     const controls = sup.controlsFor('claude')!;
-    const result = await controls.switchAgent!('switch-test');
+    const result = await controls.switchAgent!('switch-test', actor);
 
     expect(result).toMatchObject({
       changed: true,
@@ -207,6 +209,12 @@ describe('Supervisor', () => {
     expect((await readRuntimeLockMeta(paths.profileLockFile))?.agentKind).toBe('switch-test');
     expect((await readRuntimeLockMeta(paths.appLockFile('cli_a')))?.agentKind).toBe('switch-test');
     expect(readAndPrune(paths.userRegistryFile)[0]?.agentKind).toBe('switch-test');
+    const plans = (await readdir(join(root, 'control', 'plans')))
+      .filter((name) => name.endsWith('.json'));
+    expect(plans).toHaveLength(1);
+    expect(await readFile(join(root, 'control', 'plans', plans[0]!), 'utf8')).toContain(
+      '"id": "profile.engine.update"',
+    );
 
     await sup.stopProfile('claude');
     expect(disposedAgents).toEqual(['switch-test']);
@@ -217,7 +225,9 @@ describe('Supervisor', () => {
     failedAgent = 'switch-fail';
     await sup.startProfile('claude');
 
-    await expect(sup.controlsFor('claude')!.switchAgent!('switch-fail')).rejects.toThrow();
+    await expect(
+      sup.controlsFor('claude')!.switchAgent!('switch-fail', actor),
+    ).rejects.toThrow();
 
     const paths = resolveAppPaths({ rootDir: root, profile: 'claude' });
     expect(sup.list()[0]?.agentKind).toBe('claude');
@@ -237,12 +247,12 @@ describe('Supervisor', () => {
     await rm(configPath);
 
     await expect(
-      sup.controlsFor('claude')!.switchAgent!('switch-after-read-failure'),
+      sup.controlsFor('claude')!.switchAgent!('switch-after-read-failure', actor),
     ).rejects.toThrow(/profile not found/);
 
     await saveRootConfig(saved!, configPath);
     await expect(
-      sup.controlsFor('claude')!.switchAgent!('switch-after-read-failure'),
+      sup.controlsFor('claude')!.switchAgent!('switch-after-read-failure', actor),
     ).resolves.toMatchObject({ currentAgentKind: 'switch-after-read-failure' });
   });
 
@@ -253,10 +263,10 @@ describe('Supervisor', () => {
     await sup.startProfile('claude');
 
     const controls = sup.controlsFor('claude')!;
-    const first = controls.switchAgent!('switch-slow');
+    const first = controls.switchAgent!('switch-slow', actor);
     await expect.poll(() => createdAgents.filter((id) => id === 'switch-slow').length).toBe(1);
-    const sameTarget = controls.switchAgent!('switch-slow');
-    await expect(controls.switchAgent!('switch-conflict')).rejects.toThrow(
+    const sameTarget = controls.switchAgent!('switch-slow', actor);
+    await expect(controls.switchAgent!('switch-conflict', actor)).rejects.toThrow(
       /switch to switch-slow is already in progress/,
     );
 

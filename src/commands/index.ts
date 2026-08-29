@@ -27,7 +27,9 @@ import {
   ManagementApi,
   PROFILE_ACCESS_UPDATE_COMMAND,
   PROFILE_ACCOUNT_UPDATE_COMMAND,
+  PROFILE_MODEL_UPDATE_COMMAND,
   PROFILE_PREFERENCES_UPDATE_COMMAND,
+  PROFILE_REASONING_UPDATE_COMMAND,
   SERVICE_TIER_SET_COMMAND,
   applyProfileAccessUpdate,
   authorizeAdapterCommands,
@@ -37,7 +39,9 @@ import {
   nextLarkCliRecordedAt,
   profileAccessUpdateParameters,
   profileAccountUpdateParameters,
+  profileModelUpdateParameters,
   profilePreferencesUpdateParameters,
+  profileReasoningUpdateParameters,
   type ControlActorContext,
   type ProfileAccessUpdateInput,
 } from '../application/control';
@@ -106,7 +110,7 @@ import {
 } from '../policy/access';
 import { ensureSecretsGetterWrapper } from '../config/store';
 import { setSecret } from '../config/keystore';
-import { loadRootConfig, runtimeProfileConfig, saveRootConfig } from '../config/profile-store';
+import { loadRootConfig, runtimeProfileConfig } from '../config/profile-store';
 import * as configOps from '../config/config-ops';
 import { log, reportMetric } from '../core/logger';
 import { renderCard } from '../card/run-renderer';
@@ -169,7 +173,10 @@ export interface Controls {
    * config, reconnect with the new credentials. */
   restart(opts?: { wait?: boolean }): Promise<void>;
   /** Atomically replace the profile's default engine and live adapter. */
-  switchAgent?(targetAgentKind: string): Promise<AgentSwitchResult>;
+  switchAgent?(
+    targetAgentKind: string,
+    actor: ControlActorContext,
+  ): Promise<AgentSwitchResult>;
   /** Optional live metadata from the profile-owned engine runtime. */
   engineStatus?(): Promise<EngineStatusSnapshot | undefined>;
   /** Optional live model catalog from the profile-owned engine runtime. */
@@ -852,7 +859,8 @@ async function handleAgent(args: string, ctx: CommandContext): Promise<void> {
         currentKind,
         targetKind,
         targetDisplayName: plugin.displayName,
-        switchAgent: ctx.controls.switchAgent!,
+        switchAgent: (targetAgentKind) =>
+          ctx.controls.switchAgent!(targetAgentKind, managementActor(ctx)),
       });
     await task();
     return;
@@ -910,7 +918,7 @@ async function runModelsCardFlow(
     if (target !== DEFAULT_MODEL && !options.some((option) => option.value === target)) {
       throw new Error(`未知模型：${target}。请重新刷新模型列表。`);
     }
-    await setProfilePreference(ctx, 'model', target);
+    await setModelPreference(ctx, target);
     const reasoning = await reasoningStateForContext(ctx);
     await finishManagedFlowCard(
       flow,
@@ -948,7 +956,7 @@ async function handleModelsCore(args: string, ctx: CommandContext): Promise<void
       );
       return;
     }
-    await setProfilePreference(ctx, 'model', value);
+    await setModelPreference(ctx, value);
     if (ctx.fromCardAction) {
       await handleModels('', ctx);
       return;
@@ -1099,29 +1107,28 @@ async function setReasoningPreference(
   value: string,
   resolvedModel?: string,
 ): Promise<void> {
-  const model = ctx.controls.profileConfig.preferences.model ?? DEFAULT_MODEL;
+  const selectedModel = ctx.controls.profileConfig.preferences.model ?? DEFAULT_MODEL;
+  const actualModel = resolvedModel ?? selectedModel;
   const key = reasoningPreferenceKey(
     ctx.controls.profileConfig.agentKind,
-    resolvedModel ?? model,
+    actualModel,
   );
-  const nextMap = {
-    ...ctx.controls.profileConfig.preferences.reasoningEffortByModel,
-    [key]: value,
-  };
-  const root = await loadRootConfig(ctx.controls.configPath);
-  if (root) {
-    const profile = root.profiles[ctx.controls.profile];
-    if (profile) {
-      profile.preferences = {
-        ...profile.preferences,
-        reasoningEffort: value,
-        reasoningEffortByModel: nextMap,
-      };
-      await saveRootConfig(root, ctx.controls.configPath);
-    }
+  if (
+    ctx.controls.profileConfig.preferences.reasoningEffort === value
+    && ctx.controls.profileConfig.preferences.reasoningEffortByModel?.[key] === value
+  ) {
+    return;
   }
-  ctx.controls.profileConfig.preferences.reasoningEffort = value;
-  ctx.controls.profileConfig.preferences.reasoningEffortByModel = nextMap;
+  await executeManagementCommand(
+    ctx,
+    PROFILE_REASONING_UPDATE_COMMAND,
+    profileReasoningUpdateParameters({
+      agentKind: ctx.controls.profileConfig.agentKind,
+      selectedModel,
+      resolvedModel: actualModel,
+      effort: value,
+    }),
+  );
 }
 
 async function handleFast(args: string, ctx: CommandContext): Promise<void> {
@@ -1283,41 +1290,22 @@ async function setFastPreference(
   await executeManagementCommand(ctx, SERVICE_TIER_SET_COMMAND, { value });
 }
 
-async function setProfilePreference(
-  ctx: CommandContext,
-  key: 'model' | 'reasoningEffort',
-  value: string,
-): Promise<void> {
+async function setModelPreference(ctx: CommandContext, value: string): Promise<void> {
   const legacyReasoning = ctx.controls.profileConfig.preferences.reasoningEffort;
-  const migratedReasoningMap =
-    key === 'model'
-    && !ctx.controls.profileConfig.preferences.reasoningEffortByModel
-    && legacyReasoning
-      ? {
-          [reasoningPreferenceKey(
-            ctx.controls.profileConfig.agentKind,
-            ctx.controls.profileConfig.preferences.model ?? DEFAULT_MODEL,
-          )]: legacyReasoning,
-        }
-      : undefined;
-  const root = await loadRootConfig(ctx.controls.configPath);
-  if (root) {
-    const profile = root.profiles[ctx.controls.profile];
-    if (profile) {
-      profile.preferences = {
-        ...profile.preferences,
-        ...(migratedReasoningMap
-          ? { reasoningEffortByModel: migratedReasoningMap }
-          : {}),
-        [key]: value,
-      };
-      await saveRootConfig(root, ctx.controls.configPath);
-    }
+  const needsLegacyMigration =
+    ctx.controls.profileConfig.preferences.reasoningEffortByModel === undefined
+    && Boolean(legacyReasoning);
+  if (
+    (ctx.controls.profileConfig.preferences.model ?? DEFAULT_MODEL) === value
+    && !needsLegacyMigration
+  ) {
+    return;
   }
-  if (migratedReasoningMap) {
-    ctx.controls.profileConfig.preferences.reasoningEffortByModel = migratedReasoningMap;
-  }
-  (ctx.controls.profileConfig.preferences as Record<string, unknown>)[key] = value;
+  await executeManagementCommand(
+    ctx,
+    PROFILE_MODEL_UPDATE_COMMAND,
+    profileModelUpdateParameters({ model: value }),
+  );
 }
 
 async function handleResume(args: string, ctx: CommandContext): Promise<void> {
@@ -2930,7 +2918,7 @@ async function submitConfig(ctx: CommandContext): Promise<void> {
         return;
       }
       try {
-        await ctx.controls.switchAgent(agentKind);
+        await ctx.controls.switchAgent(agentKind, managementActor(ctx));
       } catch (err) {
         let modelRollbackFailed = false;
         try {
@@ -3200,10 +3188,7 @@ async function executeManagementCommand(
   command: string,
   input: Record<string, string | number | boolean | null>,
 ): Promise<void> {
-  const actor: ControlActorContext = {
-    source: ctx.fromCardAction ? 'card' : 'agent',
-    principal: ctx.msg.senderId,
-  };
+  const actor = managementActor(ctx);
   const api = new ManagementApi(
     new ConfigChangeService({
       rootDir: dirname(ctx.controls.configPath),
@@ -3241,6 +3226,13 @@ async function executeManagementCommand(
       ...('reason' in retry.reconciliation ? { reason: retry.reconciliation.reason } : {}),
     });
   }
+}
+
+function managementActor(ctx: CommandContext): ControlActorContext {
+  return {
+    source: ctx.fromCardAction ? 'card' : 'agent',
+    principal: ctx.msg.senderId,
+  };
 }
 
 // ────────────── /meeting — in-meeting agent (智能体入会) ──────────────

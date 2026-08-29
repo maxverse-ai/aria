@@ -10,8 +10,9 @@ import {
   saveRootConfig,
 } from '../../../src/config/profile-store';
 import {
-  commitEngineSwitch,
+  EngineSwitchRuntimeReconciler,
   prepareEngineSwitch,
+  stageEngineBootstrap,
 } from '../../../src/runtime/engine-switch';
 import { FakeAgentAdapter } from '../../helpers/fake-agent';
 
@@ -28,6 +29,8 @@ const targetPlugin = {
   sessionKind: 'engine-switch-session',
   supportsNativeHistory: false,
   probes: [],
+  configField: 'codex',
+  bootstrapConfig: async () => ({ binaryPath: 'engine-switch-target' }),
   capability: (profile: ReturnType<typeof createDefaultProfileConfig>) => ({
     agentId: 'engine-switch-target',
     sessionKind: 'engine-switch-session',
@@ -48,7 +51,7 @@ function registerTarget(): void {
   registerEnginePlugin(targetPlugin);
 }
 
-describe('engine switch preparation and commit', () => {
+describe('engine switch preparation and runtime administration', () => {
   it('builds an isolated candidate and clears the previous engine model', async () => {
     registerTarget();
     const current = createDefaultProfileConfig({ agentKind: 'claude', accounts: { app } });
@@ -62,32 +65,63 @@ describe('engine switch preparation and commit', () => {
     expect(prepared.profileConfig.preferences.model).toBeUndefined();
   });
 
-  it('commits under an optimistic agent check and rejects stale writers', async () => {
+  it('stages only inactive bootstrap config and rejects stale writers', async () => {
     registerTarget();
     const rootDir = await mkdtemp(join(tmpdir(), 'engine-switch-'));
     roots.push(rootDir);
     const configPath = join(rootDir, 'config.json');
     const current = createDefaultProfileConfig({ agentKind: 'claude', accounts: { app } });
     await saveRootConfig(createRootConfig('aria', current), configPath);
-    const prepared = await prepareEngineSwitch(current, 'engine-switch-target');
+    const persisted = (await loadRootConfig(configPath))!.profiles.aria!;
+    const prepared = await prepareEngineSwitch(persisted, 'engine-switch-target');
 
-    await commitEngineSwitch({
+    const staged = await stageEngineBootstrap({
       configPath,
       profile: 'aria',
       expectedAgentKind: 'claude',
-      profileConfig: prepared.profileConfig,
+      expectedProfileConfig: persisted,
+      preparedProfileConfig: prepared.profileConfig,
+      targetAgentKind: 'engine-switch-target',
     });
-    expect((await loadRootConfig(configPath))?.profiles.aria?.agentKind).toBe(
-      'engine-switch-target',
-    );
+    expect(staged.profileConfig.agentKind).toBe('claude');
+    expect(staged.profileConfig.codex?.binaryPath).toBe('engine-switch-target');
+    expect((await loadRootConfig(configPath))?.profiles.aria).toMatchObject({
+      agentKind: 'claude',
+      codex: { binaryPath: 'engine-switch-target' },
+    });
 
     await expect(
-      commitEngineSwitch({
+      stageEngineBootstrap({
         configPath,
         profile: 'aria',
         expectedAgentKind: 'claude',
-        profileConfig: current,
+        expectedProfileConfig: persisted,
+        preparedProfileConfig: prepared.profileConfig,
+        targetAgentKind: 'engine-switch-target',
       }),
-    ).rejects.toThrow(/changed concurrently/);
+    ).rejects.toThrow(/configuration changed concurrently/);
+  });
+
+  it('accepts only the engine-switch runtime effect', async () => {
+    const seen: string[] = [];
+    const reconciler = new EngineSwitchRuntimeReconciler(async (request) => {
+      seen.push(request.revision);
+    });
+
+    await expect(reconciler.reconcile({
+      profile: 'aria',
+      effect: 'engine-switch',
+      revision: 'sha256:target',
+    })).resolves.toEqual({ status: 'applied', effect: 'engine-switch' });
+    await expect(reconciler.reconcile({
+      profile: 'aria',
+      effect: 'reconnect',
+      revision: 'sha256:other',
+    })).resolves.toEqual({
+      status: 'failed',
+      effect: 'reconnect',
+      code: 'engine-switch-effect-required',
+    });
+    expect(seen).toEqual(['sha256:target']);
   });
 });

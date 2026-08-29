@@ -79,6 +79,15 @@ describe('ProfileRuntimeReconciler', () => {
       reason: 'process-restart-required',
     });
     await expect(reconciler.reconcile({
+      profile: 'primary',
+      effect: 'engine-switch',
+      revision: configRevision(fixture.rootConfig),
+    })).resolves.toEqual({
+      status: 'deferred',
+      effect: 'engine-switch',
+      reason: 'supervisor-engine-switch-required',
+    });
+    await expect(reconciler.reconcile({
       profile: 'secondary',
       effect: 'live',
       revision: configRevision(fixture.rootConfig),
