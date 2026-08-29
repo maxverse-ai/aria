@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { NormalizedMessage } from '@larksuite/channel';
+import type { ConversationInput } from '../../../src/bot/conversation-input.js';
 import { ActiveRuns } from '../../../src/bot/active-runs.js';
 import { PendingQueue } from '../../../src/bot/pending-queue.js';
 import type { AgentRun } from '../../../src/agent/types.js';
@@ -19,8 +20,8 @@ describe('runtime activity sources', () => {
   it('counts pending messages and blocked scopes without exposing content', () => {
     const pending = new PendingQueue(60_000, () => {});
     pending.block('scope-a');
-    pending.push('scope-a', {} as NormalizedMessage);
-    pending.push('scope-a', {} as NormalizedMessage);
+    pending.push('scope-a', input({} as NormalizedMessage));
+    pending.push('scope-a', input({} as NormalizedMessage));
     expect(pending.activitySnapshot()).toEqual({
       pendingMessages: 2,
       pendingScopes: 1,
@@ -42,6 +43,13 @@ describe('runtime activity sources', () => {
     expect(broker.activitySnapshot()).toEqual({ outboundInFlight: 0, streamingReplies: 0 });
   });
 });
+
+function input(message: NormalizedMessage): ConversationInput {
+  return {
+    message,
+    addressing: { addressedToAgent: true, kind: 'direct-message' },
+  };
+}
 
 function fakeRun(runId: string): AgentRun {
   return {

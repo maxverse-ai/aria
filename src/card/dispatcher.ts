@@ -14,6 +14,7 @@ import type { SessionStore } from '../session/store';
 import type { WorkspaceStore } from '../workspace/store';
 import { commandSessionCatalogIdentity } from '../bot/session-catalog-identity';
 import { lookupMessageThreadId } from '../bot/thread-id';
+import { toConversationInput } from '../bot/conversation-input';
 import { executeCardAction } from './action-executor';
 import type { LoadedOutboundPolicy } from '../outbound/plugin';
 
@@ -212,7 +213,10 @@ function forwardToAgent(
     mentionedBot: false,
     createTime: Date.now(),
   };
-  deps.pending.push(scope, synthetic);
+  deps.pending.push(scope, toConversationInput(synthetic, {
+    addressedToAgent: true,
+    kind: mode === 'p2p' ? 'direct-message' : 'interactive-callback',
+  }));
 }
 
 function verifyBridgeToken(

@@ -175,6 +175,8 @@ Codex Fast uses the live model capability catalog: `/fast on` enables it, `/fast
 
 During a supported active run, eligible text follow-ups addressed to the agent are merged automatically. Aria removes a message from the next-turn queue only after the engine acknowledges it; unsupported, deferred, or rejected attempts safely remain queued. Use `/new <task>` when the message should begin a separate task instead.
 
+Before publishing a terminal reply, Aria also checks the local inbox and a bounded snapshot of the exact chat or topic thread. New addressed human input holds the stale reply and continues in the next turn; a verbatim matching answer from another bot suppresses the duplicate. Ambient multi-person group traffic does not hold replies, and unavailable or truncated history fails open.
+
 ## Reply Display and COT
 
 `/config` controls three presentation settings:

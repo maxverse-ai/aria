@@ -1,8 +1,9 @@
 import type { NormalizedMessage } from '@larksuite/channel';
 import { log } from '../core/logger';
 import { TurnInbox, type TurnInboxClaim } from '../conversation/turn-inbox';
+import type { ConversationInput } from './conversation-input';
 
-export type FlushHandler = (scope: string, batch: NormalizedMessage[]) => void;
+export type FlushHandler = (scope: string, batch: ConversationInput[]) => void;
 
 /**
  * Per-scope debounce queue. `scope` is the session scope string (typically
@@ -17,7 +18,7 @@ export type FlushHandler = (scope: string, batch: NormalizedMessage[]) => void;
  * Commands should bypass this queue — they're cheap and should be responsive.
  */
 export class PendingQueue {
-  private readonly inbox: TurnInbox<NormalizedMessage>;
+  private readonly inbox: TurnInbox<ConversationInput>;
   private anonymousId = 0;
   private readonly anonymousKeys = new WeakMap<NormalizedMessage, string>();
 
@@ -31,28 +32,36 @@ export class PendingQueue {
     });
   }
 
-  push(scope: string, msg: NormalizedMessage): number {
-    return this.inbox.offer(scope, this.keyFor(msg), msg).size;
+  push(scope: string, input: ConversationInput): number {
+    return this.inbox.offer(scope, this.keyFor(input.message), input).size;
   }
 
   claim(
     scope: string,
-    messages: readonly NormalizedMessage[],
+    inputs: readonly ConversationInput[],
     claimId: string,
-  ): TurnInboxClaim<NormalizedMessage> | undefined {
-    return this.inbox.claim(scope, messages.map((message) => this.keyFor(message)), claimId);
+  ): TurnInboxClaim<ConversationInput> | undefined {
+    return this.inbox.claim(
+      scope,
+      inputs.map((input) => this.keyFor(input.message)),
+      claimId,
+    );
   }
 
-  acknowledge(claim: TurnInboxClaim<NormalizedMessage>): number {
+  acknowledge(claim: TurnInboxClaim<ConversationInput>): number {
     return this.inbox.acknowledge(claim);
   }
 
-  release(claim: TurnInboxClaim<NormalizedMessage>): number {
+  release(claim: TurnInboxClaim<ConversationInput>): number {
     return this.inbox.release(claim);
   }
 
-  cancel(scope: string): NormalizedMessage[] {
+  cancel(scope: string): ConversationInput[] {
     return this.inbox.cancel(scope);
+  }
+
+  snapshot(scope: string): ConversationInput[] {
+    return this.inbox.snapshot(scope);
   }
 
   cancelAll(): void {

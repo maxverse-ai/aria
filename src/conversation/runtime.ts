@@ -18,7 +18,12 @@ import type { GovernanceAuditSink } from '../runtime/governance-audit';
 import type { SessionCatalog } from '../session/catalog';
 import type { SessionStore } from '../session/store';
 import type { WorkspaceStore } from '../workspace/store';
-import { TurnCoordinator, type TrySteerInput } from './turn-coordinator';
+import {
+  TurnCoordinator,
+  type BeginTurnInput,
+  type TrySteerInput,
+  type TurnFinalizationContext,
+} from './turn-coordinator';
 import type { AgentSteeringOutcome } from '../agent/steering';
 
 export interface ConversationRuntimeDeps {
@@ -142,7 +147,15 @@ export class ConversationRuntime {
     return this.turns.trySteer(input);
   }
 
-  finalizeTurn<T>(scopeId: string, runId: string, operation: () => Promise<T>): Promise<T> {
+  beginTurn(input: BeginTurnInput): void {
+    this.turns.begin(input);
+  }
+
+  finalizeTurn<T>(
+    scopeId: string,
+    runId: string,
+    operation: (context: TurnFinalizationContext) => Promise<T>,
+  ): Promise<T> {
     return this.turns.finalize(scopeId, runId, operation);
   }
 

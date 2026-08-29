@@ -62,8 +62,8 @@ describe('signed card callback dispatch', () => {
 
     const queued = h.pending.cancel('oc_group');
     expect(queued).toHaveLength(1);
-    expect(queued[0]?.content).toBe('[card-click] {"choice":"a","form_value":{"note":"from form"}}');
-    expect(queued[0]?.chatType).toBe('group');
+    expect(queued[0]?.message.content).toBe('[card-click] {"choice":"a","form_value":{"note":"from form"}}');
+    expect(queued[0]?.message.chatType).toBe('group');
   });
 
   it('scopes topic-group callbacks by the carrier message thread_id', async () => {
@@ -84,7 +84,7 @@ describe('signed card callback dispatch', () => {
     expect(h.pending.cancel('oc_group')).toHaveLength(0);
     const queued = h.pending.cancel('oc_group:th_topic');
     expect(queued).toHaveLength(1);
-    expect(queued[0]?.content).toBe('[card-click] {"choice":"a"}');
+    expect(queued[0]?.message.content).toBe('[card-click] {"choice":"a"}');
   });
 
   it('rejects bridge callbacks when callback auth is unavailable', async () => {

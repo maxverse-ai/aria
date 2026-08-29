@@ -3,6 +3,7 @@ import { isDmLikeTopology, type ChatTopology } from './chat-topology';
 export type AddressingKind =
   | 'direct-message'
   | 'structured-mention'
+  | 'interactive-callback'
   | 'exclusive-group'
   | 'ambient-group'
   | 'unknown-group';

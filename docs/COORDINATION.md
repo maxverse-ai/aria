@@ -82,21 +82,72 @@ active `threadId`, `expectedTurnId`, and a stable request id. A response is
 accepted only when it confirms the same active turn. Other engines omit the
 capability and automatically retain follow-ups for the next turn.
 
+## Final-reply freshness
+
+Live-input transport and send-time freshness share the addressing resolver but
+have deliberately different eligibility. A human attachment, card action,
+forward, oversized text message, or message sent to an engine without live
+input cannot be merged into the active turn; when addressed, it must still
+hold that turn's terminal reply for the next turn. Ambient group traffic and
+empty pings do neither.
+
+```text
+engine terminal
+      │ close live-input admission + await in-flight acknowledgements
+      ▼
+local TurnInbox snapshot
+      │ no unseen addressed input
+      ▼
+bounded chat/thread history snapshot
+      │
+      ├── addressed human input ─▶ retain in TurnInbox + hold final
+      ├── exact other-bot output ─▶ suppress duplicate final
+      ├── unavailable/truncated ─▶ fail open
+      └── complete and clear ─────▶ publish final
+```
+
+The turn ledger keeps the initial batch ids and ids acknowledged by live input
+as a set. It does not advance a single high-water mark when steering succeeds:
+otherwise an earlier unsteerable attachment could be hidden by a later
+accepted text follow-up.
+
+The REST backstop is scoped to the exact chat or topic thread. Remote messages
+are normalized into the same `ConversationInput` envelope and run through the
+same access and addressing rules before they can hold a reply. A recovered
+human message is offered to the existing inbox before suppression, preserving
+next-turn ownership. Both result count and wait time are bounded. History
+errors, timeout, or snapshot truncation fail open; they never silently discard
+a final reply.
+
+Card and markdown streams are provisional until the same terminal commit. A
+stale streamed terminal is recalled, while dedicated final replies are gated
+before send. The next turn receives a small handoff marker that distinguishes a
+withheld draft, a recalled draft, and an unconfirmed recall. It never tells the
+agent that the user could not have seen content after a stream was already
+opened, and it preserves the warning that earlier tool side effects may still
+exist.
+
+Duplicate detection is intentionally conservative: only other-bot output is
+eligible, and bodies must match after Unicode normalization, CRLF normalization
+and edge trimming. Internal whitespace is not collapsed. Run-status metadata
+is excluded from the local draft body.
+
 ## Observability and tests
 
-The channel emits `live_followup_message` metrics and structured `followup`
-logs for accepted, queued, deferred, rejected, and claim-miss outcomes. Prompt
-text is never included in these records.
+The channel emits `live_followup_message` and `final_reply_freshness` metrics,
+plus structured `followup` and `freshness` logs. Outcomes include accepted,
+queued, held-local, held-remote, duplicate, fresh, and fail-open. Prompt and
+reply text is never included in these records.
 
 Tests cover addressing shapes, eligibility exclusions, inbox
-claim/acknowledge/release behavior, exact Codex protocol mapping, duplicate
-delivery, finalization ordering, exclusive-group live follow-ups, multi-person
-reply behavior, and unsupported-engine fallback.
+claim/acknowledge/release behavior, exact Codex protocol mapping, finalization
+ordering, accepted-input ledgers, attachment-before-text ordering, exclusive
+and multi-person groups, topic isolation, REST recovery, streamed-terminal
+recall, conservative duplicate detection, and fail-open behavior.
 
 ## Remaining work
 
-- Add a send-time chat-history freshness gate for messages arriving after the
-  engine turn closes but before its final reply is published.
-- Add normalized duplicate-output detection around that send gate.
+- Add cross-agent claim/lease coordination if simultaneous bots must guarantee
+  a single winner rather than relying on conservative history detection.
 - Add live-input transports for other engines only when they can explicitly
   acknowledge ownership.
