@@ -30,6 +30,7 @@ describe('DshAdapter process contract', () => {
 
     const run = new DshAdapter({ binary, profileStateDir: dir }).run({
       runId: 'run-dsh',
+      scopeId: 'scope-dsh',
       prompt: 'hello',
       cwd,
     });
@@ -52,6 +53,7 @@ describe('DshAdapter process contract', () => {
 
     const run = new DshAdapter({ binary, profileStateDir: dir }).run({
       runId: 'run-dsh-fail',
+      scopeId: 'scope-dsh',
       prompt: 'boom',
       cwd,
     });

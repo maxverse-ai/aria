@@ -10,6 +10,7 @@ import {
 } from '../../../src/config/profile-store';
 import { Supervisor } from '../../../src/runtime/supervisor';
 import { registerEnginePlugin } from '../../../src/agent/plugin/registry';
+import { defineEngineRuntimeDescriptor } from '../../../src/agent/runtime/types';
 import { FakeAgentAdapter } from '../../helpers/fake-agent';
 import { resolveAppPaths } from '../../../src/config/app-paths';
 import { readRuntimeLockMeta } from '../../../src/runtime/locks';
@@ -63,6 +64,7 @@ function registerFakeEngine(id: string): void {
       };
       return {
         engineId: id,
+        descriptor: defineEngineRuntimeDescriptor({ engineId: id, topology: 'one-shot' }),
         execution,
         dispose: async () => {
           disposedAgents.push(id);

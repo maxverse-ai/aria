@@ -109,6 +109,7 @@ describe('Claude stream-json reader behavior', () => {
 
     const run = new ClaudeAdapter({ binary: binary.path }).run({
       runId: 'run-reader',
+      scopeId: 'scope-claude',
       prompt: 'hi',
       cwd: tmpdir(),
     });

@@ -2,6 +2,9 @@
 
 Aria's Codex engine uses one managed `codex app-server --stdio` process per
 profile. The App Server is the only supported Codex execution transport.
+Its runtime descriptor advertises `profile-daemon` topology and only the
+semantic capabilities Aria currently wires; App Server method names remain
+private to the Codex runtime.
 
 The earlier user-specific App Server proposal is archived and was never
 implemented. It is retained only as historical context in

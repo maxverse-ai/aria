@@ -16,8 +16,9 @@ describe('agent type contract', () => {
     expect(source).toMatch(/type:\s*'error'[^|]*terminationReason:\s*'failed'\s*\|\s*'interrupted'\s*\|\s*'timeout'/s);
   });
 
-  it('requires runId on run options and run handles', () => {
+  it('requires run and conversation identity on run options', () => {
     expect(source).toMatch(/interface AgentRunOptions[^}]*runId:\s*string/s);
+    expect(source).toMatch(/interface AgentRunOptions[^}]*scopeId:\s*string/s);
     expect(source).toMatch(/interface AgentRun[^}]*readonly runId:\s*string/s);
     expect(source).toMatch(/interface AgentRunOptions[^}]*threadId\?:\s*string/s);
   });

@@ -51,6 +51,7 @@ describe('Codex startup compatibility with legacy binary metadata', () => {
     await expect(
       agent.prepareRun?.({
         runId: 'run-1',
+        scopeId: 'scope-codex',
         prompt: 'hello',
         cwd: h.workspace,
       }),

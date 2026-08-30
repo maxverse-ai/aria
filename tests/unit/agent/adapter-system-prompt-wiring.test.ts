@@ -48,7 +48,7 @@ describe('ClaudeAdapter system prompt wiring', () => {
     const adapter = new ClaudeAdapter();
     adapter.setBotIdentity({ openId: 'ou_bot_self', name: 'Bridge' });
 
-    adapter.run({ runId: 'r1', prompt: 'hi', cwd: '/tmp' });
+    adapter.run({ runId: 'r1', scopeId: 'scope-test', prompt: 'hi', cwd: '/tmp' });
 
     // The prompt goes via stdin, never argv (cmd.exe would mangle it on Windows).
     expect(await readAll(child.stdin)).toBe('hi');
@@ -62,7 +62,7 @@ describe('ClaudeAdapter system prompt wiring', () => {
     spawnMock.spawnProcess.mockReturnValue(child);
     const adapter = new ClaudeAdapter();
 
-    adapter.run({ runId: 'r1', prompt: 'hi', cwd: '/tmp' });
+    adapter.run({ runId: 'r1', scopeId: 'scope-test', prompt: 'hi', cwd: '/tmp' });
 
     expect(await readAll(child.stdin)).toBe('hi');
     expect(systemPromptFileContent()).toBe(buildBridgeSystemPrompt(undefined));

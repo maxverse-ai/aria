@@ -2,7 +2,11 @@ import type { AppPaths } from '../../config/app-paths';
 import type { ProfileConfig } from '../../config/profile-schema';
 import type { AgentCapability } from '../capability';
 import { BUILTIN_ENGINE_PLUGINS } from '../engines';
-import type { EngineRuntime } from '../runtime/types';
+import {
+  assertEngineRuntimeDescriptor,
+  defineEngineRuntimeDescriptor,
+  type EngineRuntime,
+} from '../runtime/types';
 import type { EnginePlugin, EnginePluginContext, EnginePluginPackage, EngineProbe } from './types';
 
 const plugins = new Map<string, EnginePlugin>();
@@ -77,6 +81,19 @@ export function capabilityFor(id: string, profile: ProfileConfig): AgentCapabili
 
 export function createEngineRuntime(id: string, ctx: EnginePluginContext): EngineRuntime {
   const runtime = requireEnginePlugin(id).createRuntime(ctx);
+  // Keep already-compiled pre-v1 external plugins loadable. Missing metadata
+  // is normalized conservatively and never inferred from the engine id.
+  const descriptor = runtime?.descriptor ?? defineEngineRuntimeDescriptor({
+    engineId: id,
+    topology: 'one-shot',
+  });
+  try {
+    assertEngineRuntimeDescriptor(descriptor, id);
+  } catch (err) {
+    throw new Error(
+      `engine plugin ${id} returned an invalid runtime: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
   if (
     !runtime ||
     runtime.engineId !== id ||
@@ -90,6 +107,7 @@ export function createEngineRuntime(id: string, ctx: EnginePluginContext): Engin
   let disposed = false;
   return {
     engineId: runtime.engineId,
+    descriptor,
     execution: runtime.execution,
     ...(runtime.statusSnapshot
       ? { statusSnapshot: () => runtime.statusSnapshot!() }
