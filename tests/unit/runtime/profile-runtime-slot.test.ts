@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import type { EngineRuntime } from '../../../src/agent/runtime/types';
+import {
+  defineEngineRuntimeDescriptor,
+  type EngineRuntime,
+} from '../../../src/agent/runtime/types';
 import { ProfileRuntimeSlot } from '../../../src/runtime/profile-runtime-slot';
 import { FakeAgentAdapter } from '../../helpers/fake-agent';
 
@@ -12,10 +15,12 @@ describe('ProfileRuntimeSlot', () => {
 
     stableAdapter.setBotIdentity?.({ openId: 'ou_bot', name: 'Aria' });
     expect(stableAdapter.id).toBe('first');
+    expect(slot.descriptor().engineId).toBe('first');
 
     expect(slot.swap(second)).toBe(first);
     expect(slot.execution).toBe(stableAdapter);
     expect(stableAdapter.id).toBe('second');
+    expect(slot.descriptor().engineId).toBe('second');
     expect(slot.currentGeneration()).toBe(2);
     expect((second.execution as FakeAgentAdapter).botIdentity).toEqual({
       openId: 'ou_bot',
@@ -62,6 +67,7 @@ describe('ProfileRuntimeSlot', () => {
 function runtime(id: string): EngineRuntime {
   return {
     engineId: id,
+    descriptor: defineEngineRuntimeDescriptor({ engineId: id, topology: 'one-shot' }),
     execution: new FakeAgentAdapter({ id, displayName: id }),
     dispose: async () => undefined,
   };

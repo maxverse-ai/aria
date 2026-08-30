@@ -5,6 +5,7 @@ import type { EnginePlugin } from '../../../src/agent/plugin/types.js';
 import { listEngineModels } from '../../../src/agent/model-catalog/index.js';
 import { registerEnginePlugin } from '../../../src/agent/plugin/registry.js';
 import type { AgentAdapter } from '../../../src/agent/types.js';
+import { defineEngineRuntimeDescriptor } from '../../../src/agent/runtime/types.js';
 
 const app = { id: 'cli_test', secret: '${APP_SECRET}', tenant: 'feishu' as const };
 
@@ -28,6 +29,10 @@ describe('engine model cache', () => {
       }),
       createRuntime: () => ({
         engineId: 'fake-models',
+        descriptor: defineEngineRuntimeDescriptor({
+          engineId: 'fake-models',
+          topology: 'one-shot',
+        }),
         execution: {
           id: 'fake-models',
           displayName: 'Fake Models',

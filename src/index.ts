@@ -66,9 +66,24 @@ export type {
 // internal; plugin packages only implement these contracts.
 export type { AgentAdapter, AgentEvent, AgentRun, AgentRunOptions } from './agent/types';
 export type {
+  DefineEngineRuntimeDescriptorInput,
+  EngineControlFeature,
+  EngineInputKind,
+  EngineInteractionFeature,
+  EngineLiveInputMode,
   EngineRuntime,
+  EngineRuntimeCapabilities,
+  EngineRuntimeDescriptor,
+  EngineRuntimeTopology,
+  EngineSessionFeature,
   EngineStatusSnapshot,
+  EngineTelemetryFeature,
   EngineUsageWindow,
+} from './agent/runtime/types';
+export {
+  ENGINE_RUNTIME_CONTRACT_VERSION,
+  assertEngineRuntimeDescriptor,
+  defineEngineRuntimeDescriptor,
 } from './agent/runtime/types';
 export type {
   EnginePlugin,

@@ -29,6 +29,7 @@ describe('RunExecutor policy runtime options', () => {
 
     expect(agent.runOptions[0]).toMatchObject({
       runId: 'run-policy',
+      scopeId: 'scope-policy',
       sandbox: 'workspace-write',
       permissionMode: 'acceptEdits',
     });

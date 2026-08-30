@@ -4,6 +4,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createDefaultProfileConfig } from '../../../src/config/profile-schema.js';
 import type { AgentAdapter } from '../../../src/agent/types.js';
+import { defineEngineRuntimeDescriptor } from '../../../src/agent/runtime/types.js';
+import { FakeAgentAdapter } from '../../helpers/fake-agent.js';
 import type { EnginePlugin } from '../../../src/agent/plugin/types.js';
 import {
   capabilityFor,
@@ -90,6 +92,10 @@ describe('engine plugin registry', () => {
       }),
       createRuntime: () => ({
         engineId: 'fake-engine',
+        descriptor: defineEngineRuntimeDescriptor({
+          engineId: 'fake-engine',
+          topology: 'one-shot',
+        }),
         execution: fakeAdapter,
         dispose: async () => undefined,
       }),
@@ -103,6 +109,40 @@ describe('engine plugin registry', () => {
 
   it('throws for unknown engine ids', () => {
     expect(() => requireEnginePlugin('missing-engine')).toThrow(/unsupported agent engine/);
+  });
+
+  it('rejects a runtime descriptor owned by another engine', () => {
+    const id = 'invalid-runtime-descriptor';
+    registerEnginePlugin({
+      id,
+      displayName: 'Invalid Runtime Descriptor',
+      sessionKind: 'invalid-session',
+      supportsNativeHistory: false,
+      probes: [],
+      capability: (profile) => ({
+        agentId: id,
+        sessionKind: 'invalid-session',
+        promptInjection: 'stdin-prefix',
+        systemPrompt: '',
+        supportsNativeHistory: false,
+        callback: { marker: '__bridge_cb', legacyMarkers: [] },
+        permissions: { maxAccess: profile.permissions.maxAccess },
+      }),
+      createRuntime: () => ({
+        engineId: id,
+        descriptor: defineEngineRuntimeDescriptor({
+          engineId: 'another-engine',
+          topology: 'one-shot',
+        }),
+        execution: new FakeAgentAdapter({ id }),
+        dispose: async () => undefined,
+      }),
+    });
+
+    expect(() => createEngineRuntime(id, {
+      profileConfig: createDefaultProfileConfig({ agentKind: 'claude', accounts: { app } }),
+      appPaths: { profileDir: '/tmp/aria' },
+    })).toThrow(/invalid runtime.*does not match/);
   });
 
   it('loads and unloads an external engine plugin package', async () => {
@@ -155,6 +195,12 @@ describe('engine plugin registry', () => {
       const runtime = createEngineRuntime('ext-engine', {
         profileConfig: createDefaultProfileConfig({ agentKind: 'claude', accounts: { app } }),
         appPaths: { profileDir: dir },
+      });
+      expect(runtime.descriptor).toMatchObject({
+        contractVersion: 1,
+        engineId: 'ext-engine',
+        topology: 'one-shot',
+        capabilities: { liveInput: { mode: 'none' } },
       });
 
       const events: string[] = [];

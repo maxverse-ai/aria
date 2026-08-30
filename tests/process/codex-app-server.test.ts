@@ -23,13 +23,26 @@ describe('Codex App Server runtime', () => {
       sandbox: 'workspace-write',
     });
 
+    expect(runtime.descriptor).toMatchObject({
+      contractVersion: 1,
+      engineId: 'codex',
+      topology: 'profile-daemon',
+      capabilities: {
+        inputs: ['text', 'image'],
+        liveInput: { mode: 'direct', inputs: ['text'] },
+        interactions: [],
+      },
+    });
+
     await runtime.execution.prepareRun?.({
       runId: 'unused',
+      scopeId: 'scope-codex',
       prompt: '',
       cwd: root,
     });
     const run = runtime.execution.run({
       runId: 'run-1',
+      scopeId: 'scope-codex',
       prompt: 'hello',
       cwd: root,
     });
@@ -113,6 +126,7 @@ describe('Codex App Server runtime', () => {
     });
     const run = runtime.execution.run({
       runId: 'run-messages',
+      scopeId: 'scope-codex',
       prompt: 'multi-message',
       cwd: root,
     });
@@ -149,6 +163,7 @@ describe('Codex App Server runtime', () => {
     runtime.execution.setBotIdentity?.({ openId: 'ou_bot_self', name: 'Bridge' });
     const run = runtime.execution.run({
       runId: 'run-identity',
+      scopeId: 'scope-codex',
       prompt: 'hello',
       cwd: root,
     });
@@ -171,6 +186,7 @@ describe('Codex App Server runtime', () => {
     });
     const run = runtime.execution.run({
       runId: 'run-fragments',
+      scopeId: 'scope-codex',
       prompt: 'fragmented-final',
       cwd: root,
     });
@@ -196,6 +212,7 @@ describe('Codex App Server runtime', () => {
     });
     const run = runtime.execution.run({
       runId: 'run-throughput',
+      scopeId: 'scope-codex',
       prompt: 'measured-throughput',
       cwd: root,
     });
@@ -230,6 +247,7 @@ describe('Codex App Server runtime', () => {
     });
     const run = runtime.execution.run({
       runId: 'run-stop',
+      scopeId: 'scope-codex',
       prompt: 'hold',
       cwd: root,
     });
@@ -264,6 +282,7 @@ describe('Codex App Server runtime', () => {
     });
     const run = runtime.execution.run({
       runId: 'run-steer',
+      scopeId: 'scope-codex',
       prompt: 'hold-for-steer',
       cwd: root,
     });
@@ -312,6 +331,7 @@ describe('Codex App Server runtime', () => {
     });
     const run = runtime.execution.run({
       runId: 'run-effort',
+      scopeId: 'scope-codex',
       prompt: 'hello',
       cwd: root,
       reasoningEffort: 'medium',
@@ -337,6 +357,7 @@ describe('Codex App Server runtime', () => {
     });
     const run = runtime.execution.run({
       runId: 'run-fast',
+      scopeId: 'scope-codex',
       prompt: 'hello',
       cwd: root,
       serviceTier: 'fast',
@@ -366,6 +387,7 @@ describe('Codex App Server runtime', () => {
     });
     const run = runtime.execution.run({
       runId: 'run-standard',
+      scopeId: 'scope-codex',
       prompt: 'hello',
       cwd: root,
       serviceTier: null,
@@ -396,6 +418,7 @@ describe('Codex App Server runtime', () => {
 
     const failed = runtime.execution.run({
       runId: 'run-crash',
+      scopeId: 'scope-codex',
       prompt: 'crash',
       cwd: root,
       threadId: 'thread-existing',
@@ -419,6 +442,7 @@ describe('Codex App Server runtime', () => {
 
     const resumed = runtime.execution.run({
       runId: 'run-resumed',
+      scopeId: 'scope-codex',
       prompt: 'continue',
       cwd: root,
       threadId: 'thread-existing',

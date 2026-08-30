@@ -30,6 +30,7 @@ describe('ClaudeAdapter process contract', () => {
 
     const run = new ClaudeAdapter({ binary: fake.path }).run({
       runId: 'run-fresh',
+      scopeId: 'scope-claude',
       prompt: 'hello',
       cwd: fake.dir,
       permissionMode: 'acceptEdits',
@@ -87,6 +88,7 @@ describe('ClaudeAdapter process contract', () => {
       },
     }).run({
       runId: 'run-profile-env',
+      scopeId: 'scope-claude',
       prompt: 'profile',
       cwd: fake.dir,
     });
@@ -111,6 +113,7 @@ describe('ClaudeAdapter process contract', () => {
 
     const run = new ClaudeAdapter({ binary: fake.path }).run({
       runId: 'run-resume',
+      scopeId: 'scope-claude',
       prompt: 'continue',
       cwd: fake.dir,
       sessionId: 'sess-old',
@@ -136,6 +139,7 @@ describe('ClaudeAdapter process contract', () => {
 
     const run = new ClaudeAdapter({ binary: fake.path }).run({
       runId: 'run-fail',
+      scopeId: 'scope-claude',
       prompt: 'fail',
       cwd: fake.dir,
     });
@@ -161,6 +165,7 @@ describe('ClaudeAdapter process contract', () => {
       cleanup.push(fake.dir);
       run = new ClaudeAdapter({ binary: fake.path }).run({
         runId: 'run-missing',
+        scopeId: 'scope-claude',
         prompt: 'hi',
         cwd: fake.dir,
       });
@@ -168,6 +173,7 @@ describe('ClaudeAdapter process contract', () => {
       const missing = join(tmpdir(), `missing-claude-${Date.now()}`);
       run = new ClaudeAdapter({ binary: missing }).run({
         runId: 'run-missing',
+        scopeId: 'scope-claude',
         prompt: 'hi',
         cwd: tmpdir(),
       });
@@ -191,6 +197,7 @@ describe('ClaudeAdapter process contract', () => {
 
     const run = new ClaudeAdapter({ binary: fake.path }).run({
       runId: 'run-tail',
+      scopeId: 'scope-claude',
       prompt: 'tail',
       cwd: fake.dir,
     });
@@ -207,7 +214,11 @@ describe('ClaudeAdapter process contract', () => {
 
   it('requires cwd to be resolved by policy before spawning', () => {
     expect(() =>
-      new ClaudeAdapter({ binary: 'unused' }).run({ runId: 'run-no-cwd', prompt: 'hi' }),
+      new ClaudeAdapter({ binary: 'unused' }).run({
+        runId: 'run-no-cwd',
+        scopeId: 'scope-claude',
+        prompt: 'hi',
+      }),
     ).toThrow(/cwd is required/);
   });
 });

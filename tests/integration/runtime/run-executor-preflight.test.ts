@@ -23,7 +23,10 @@ describe('RunExecutor prepareRun preflight', () => {
       policy: policy(h.tmp.workspace),
     });
 
-    expect(h.agent.order).toEqual(['prepare:run-1', 'run:run-1']);
+    expect(h.agent.order).toEqual([
+      'prepare:run-1:scope-1',
+      'run:run-1:scope-1',
+    ]);
     expect(h.pool.snapshot()).toMatchObject({ active: 1, waiting: 0 });
     await collect(execution.subscribe());
   });
@@ -41,7 +44,7 @@ describe('RunExecutor prepareRun preflight', () => {
         policy: policy(h.tmp.workspace),
       }),
     ).rejects.toMatchObject({ code: 'agent-prepare-failed' });
-    expect(h.agent.order).toEqual(['prepare:run-1']);
+    expect(h.agent.order).toEqual(['prepare:run-1:scope-1']);
     expect(h.pool.snapshot()).toMatchObject({ active: 0, waiting: 0 });
     expect(h.activeRuns.get('scope-1')).toBeUndefined();
   });
@@ -84,12 +87,12 @@ class PreparingAgent extends FakeAgentAdapter {
   }
 
   async prepareRun(opts: AgentRunOptions): Promise<void> {
-    this.order.push(`prepare:${opts.runId}`);
+    this.order.push(`prepare:${opts.runId}:${opts.scopeId}`);
     if (this.prepareError) throw this.prepareError;
   }
 
   override run(opts: AgentRunOptions) {
-    this.order.push(`run:${opts.runId}`);
+    this.order.push(`run:${opts.runId}:${opts.scopeId}`);
     return super.run(opts);
   }
 }

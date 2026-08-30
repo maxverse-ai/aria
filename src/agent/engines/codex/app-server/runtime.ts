@@ -1,7 +1,12 @@
 import type { SandboxMode } from '../../../../config/profile-schema';
 import type { ModelOption } from '../../../models';
 import { checkAgentAvailability, type AgentAvailability } from '../../../preflight';
-import type { EngineRuntime, EngineStatusSnapshot, EngineUsageWindow } from '../../../runtime/types';
+import {
+  defineEngineRuntimeDescriptor,
+  type EngineRuntime,
+  type EngineStatusSnapshot,
+  type EngineUsageWindow,
+} from '../../../runtime/types';
 import type { AgentAdapter, AgentBotIdentity, AgentEvent, AgentRun, AgentRunOptions } from '../../../types';
 import type { AgentSteeringOutcome, AgentSteeringRequest } from '../../../steering';
 import { prefixBridgeSystemPrompt } from '../../../bridge-system-prompt';
@@ -35,6 +40,18 @@ export interface CodexAppServerRuntimeOptions {
 
 export class CodexAppServerRuntime implements EngineRuntime {
   readonly engineId = 'codex';
+  readonly descriptor = defineEngineRuntimeDescriptor({
+    engineId: this.engineId,
+    topology: 'profile-daemon',
+    capabilities: {
+      inputs: ['text', 'image'],
+      liveInput: { mode: 'direct', inputs: ['text'] },
+      sessions: ['resume'],
+      controls: ['interrupt', 'model', 'reasoning', 'service-tier'],
+      interactions: [],
+      telemetry: ['usage', 'context', 'rate-limits'],
+    },
+  });
   readonly execution: AgentAdapter;
 
   private clientPromise: Promise<CodexAppServerClient> | undefined;

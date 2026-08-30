@@ -59,6 +59,8 @@ export const CLAUDE_DEFAULT_PERMISSION_MODE: ClaudePermissionMode = 'bypassPermi
 
 export interface AgentRunOptions {
   runId: string;
+  /** Stable conversation scope used by runtimes that retain session workers. */
+  scopeId: string;
   prompt: string;
   cwd?: string;
   sessionId?: string;

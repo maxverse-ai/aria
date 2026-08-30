@@ -1,5 +1,9 @@
 import type { AgentAdapter, AgentBotIdentity, AgentRun, AgentRunOptions } from '../agent/types';
-import type { EngineRuntime, EngineStatusSnapshot } from '../agent/runtime/types';
+import type {
+  EngineRuntime,
+  EngineRuntimeDescriptor,
+  EngineStatusSnapshot,
+} from '../agent/runtime/types';
 import type { ModelOption } from '../agent/models';
 
 /**
@@ -50,6 +54,10 @@ export class ProfileRuntimeSlot {
 
   currentGeneration(): number {
     return this.generation;
+  }
+
+  descriptor(): EngineRuntimeDescriptor {
+    return this.runtime.descriptor;
   }
 
   listModels(signal: AbortSignal): Promise<ModelOption[] | undefined> {

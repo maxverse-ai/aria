@@ -15,6 +15,7 @@ import {
   stageEngineBootstrap,
 } from '../../../src/runtime/engine-switch';
 import { FakeAgentAdapter } from '../../helpers/fake-agent';
+import { defineEngineRuntimeDescriptor } from '../../../src/agent/runtime/types';
 
 const roots: string[] = [];
 const app = { id: 'cli_test', secret: '${APP_SECRET}', tenant: 'feishu' as const };
@@ -42,6 +43,10 @@ const targetPlugin = {
   }),
   createRuntime: () => ({
     engineId: 'engine-switch-target',
+    descriptor: defineEngineRuntimeDescriptor({
+      engineId: 'engine-switch-target',
+      topology: 'one-shot',
+    }),
     execution: new FakeAgentAdapter({ id: 'engine-switch-target' }),
     dispose: async () => undefined,
   }),

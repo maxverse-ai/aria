@@ -46,6 +46,7 @@ describe('OpenCodeAdapter process contract', () => {
 
     const run = new OpenCodeAdapter({ binary, profileStateDir: dir }).run({
       runId: 'run-fresh',
+      scopeId: 'scope-opencode',
       prompt: 'hello from lark',
       cwd,
     });
@@ -80,6 +81,7 @@ describe('OpenCodeAdapter process contract', () => {
       xdg: { dataHome: '/tmp/oc-data', configHome: '/tmp/oc-config' },
     }).run({
       runId: 'run-resume',
+      scopeId: 'scope-opencode',
       prompt: 'continue',
       cwd,
       sessionId: 'ses_old',
@@ -109,6 +111,7 @@ describe('OpenCodeAdapter process contract', () => {
       effortFlag: (value) => ['--variant', value],
     }).run({
       runId: 'run-effort',
+      scopeId: 'scope-opencode',
       prompt: 'deep',
       cwd,
       reasoningEffort: 'high',
@@ -131,6 +134,7 @@ describe('OpenCodeAdapter process contract', () => {
 
     const run = new OpenCodeAdapter({ binary, profileStateDir: dir }).run({
       runId: 'run-fail',
+      scopeId: 'scope-opencode',
       prompt: 'boom',
       cwd,
     });

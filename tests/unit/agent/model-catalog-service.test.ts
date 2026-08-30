@@ -4,6 +4,7 @@ import { DEFAULT_MODEL } from '../../../src/agent/models.js';
 import type { EnginePlugin } from '../../../src/agent/plugin/types.js';
 import { registerEnginePlugin } from '../../../src/agent/plugin/registry.js';
 import type { AgentAdapter } from '../../../src/agent/types.js';
+import { defineEngineRuntimeDescriptor } from '../../../src/agent/runtime/types.js';
 import { createDefaultProfileConfig } from '../../../src/config/profile-schema.js';
 
 const app = { id: 'cli_catalog_test', secret: '${APP_SECRET}', tenant: 'feishu' as const };
@@ -99,6 +100,7 @@ function registerFakeEngine(): string {
     }),
     createRuntime: () => ({
       engineId: id,
+      descriptor: defineEngineRuntimeDescriptor({ engineId: id, topology: 'one-shot' }),
       execution: {
         id,
         displayName: id,
