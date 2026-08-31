@@ -42,6 +42,70 @@ describe('ChannelIdentityReadProjector', () => {
       sourceChatId: 'oc_chat', kind: 'group', resolutionStatus: 'resolved', observedAt: '2026-08-27T00:00:00.000Z',
     })).rejects.toThrow('requires an owner');
   });
+
+  it('lazily links an opaque actor to a chat and remains idempotent', async () => {
+    const { repository, projector } = await setup();
+    const observation = {
+      sourceChatId: 'oc_private_chat',
+      chatKind: 'group',
+      observedAt: '2026-08-27T00:00:00.000Z',
+      actor: { sourceIdentityId: 'ou_private_member', kind: 'user' },
+    } as const;
+
+    expect(await projector.observeMessage(observation)).toEqual({
+      identities: 1, chats: 1, memberships: 1,
+    });
+    const cursor = await repository.currentCursor();
+    expect(await projector.observeMessage({
+      ...observation,
+      observedAt: '2026-08-27T00:00:01.000Z',
+    })).toEqual({ identities: 0, chats: 0, memberships: 0 });
+    expect(await repository.currentCursor()).toBe(cursor);
+    expect(await repository.list('identity')).toEqual([
+      expect.objectContaining({ kind: 'user', resolutionStatus: 'resolved' }),
+    ]);
+    expect(await repository.list('chat')).toEqual([
+      expect.objectContaining({ kind: 'group', resolutionStatus: 'pending' }),
+    ]);
+    expect(await repository.list('chat-member')).toEqual([
+      expect.objectContaining({ role: 'unknown' }),
+    ]);
+    const journal = JSON.stringify((await repository.changes(null)).changes);
+    expect(journal).not.toContain('oc_private_chat');
+    expect(journal).not.toContain('ou_private_member');
+  });
+
+  it('upgrades lazy topology and never downgrades enriched resources', async () => {
+    const { repository, projector } = await setup();
+    await projector.observeMessage({
+      sourceChatId: 'oc_chat', chatKind: 'group', observedAt: '2026-08-27T00:00:00.000Z',
+      actor: { sourceIdentityId: 'ou_owner', kind: 'user' },
+    });
+    await projector.project({
+      sourceChatId: 'oc_chat', kind: 'group', name: 'Architecture',
+      resolutionStatus: 'resolved', observedAt: '2026-08-27T00:00:01.000Z',
+      owner: {
+        sourceIdentityId: 'ou_owner', kind: 'user', displayName: 'Ada',
+        resolutionStatus: 'resolved', observedAt: '2026-08-27T00:00:01.000Z',
+      },
+    });
+    const cursor = await repository.currentCursor();
+    await projector.observeMessage({
+      sourceChatId: 'oc_chat', chatKind: 'group', observedAt: '2026-08-27T00:00:02.000Z',
+      actor: { sourceIdentityId: 'ou_owner', kind: 'unknown' },
+    });
+
+    expect(await repository.currentCursor()).toBe(cursor);
+    expect(await repository.list('identity')).toEqual([
+      expect.objectContaining({ kind: 'user', displayName: 'Ada', resolutionStatus: 'resolved' }),
+    ]);
+    expect(await repository.list('chat')).toEqual([
+      expect.objectContaining({ name: 'Architecture', resolutionStatus: 'resolved' }),
+    ]);
+    expect(await repository.list('chat-member')).toEqual([
+      expect.objectContaining({ role: 'owner' }),
+    ]);
+  });
 });
 
 async function setup() {

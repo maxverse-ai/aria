@@ -134,6 +134,22 @@ only resolved records for that session. Message text is returned only with
 `read:message-content`; the profile-local journal and snapshot remain mode
 `0600` and never modify agent-native history files.
 
+Message observation also lazily materializes the minimum joinable topology:
+an opaque `identity` for a known sender, an opaque `chat` when the channel can
+classify the conversation, and an `unknown`-role `chat-member` edge between
+them. This is an identity index, not an authorization decision. It contains no
+source user/chat ID or fabricated display name, and later authoritative channel
+resolution can enrich it without a subsequent message downgrading that data.
+When a message is bound to a session, its actor identity is added to the
+session's deduplicated `participantIdentityIds`; catalog refreshes preserve
+those observed participants and do not move session activity timestamps
+backward.
+
+For Lark intake, chat mode and any recoverable topic `threadId` are resolved
+before audit, message projection, outbound policy, and session routing. Those
+consumers therefore share one canonical conversation key, including for the
+topic-opening events on which Lark omits `threadId` from the initial event.
+
 Run resources are projected from the same `RunExecutor` lifecycle events that
 produce run audit evidence. A run starts as `associationStatus: pending`; the
 message/session binding resolves its opaque `sessionId`, and later terminal

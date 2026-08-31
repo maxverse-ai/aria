@@ -47,7 +47,18 @@ export class SessionCatalogReadProjector {
       const history = input.historyBySessionKey?.get(engineHistorySessionKey(entry.agentId, nativeId));
       const draft = sessionResource(this.profileId, entry, nativeId, history);
       const existing = await this.repository.get<NativeSessionResource>('session', draft.id);
-      const resource = existing ? { ...draft, createdAt: existing.createdAt } : draft;
+      const resource = existing
+        ? {
+            ...draft,
+            createdAt: existing.createdAt,
+            updatedAt: latestTimestamp(existing.updatedAt, draft.updatedAt),
+            lastActivityAt: latestTimestamp(
+              existing.lastActivityAt,
+              draft.lastActivityAt,
+            ),
+            participantIdentityIds: existing.participantIdentityIds,
+          }
+        : draft;
       await this.repository.upsert<NativeSessionResource>({
         eventId: projectionEventId(this.profileId, nativeId, resource),
         changedAt: resource.updatedAt,
@@ -57,6 +68,10 @@ export class SessionCatalogReadProjector {
     }
     return { observed: input.entries.length, projected, skipped };
   }
+}
+
+function latestTimestamp(left: string, right: string): string {
+  return left > right ? left : right;
 }
 
 export function engineHistorySessionKey(agentKind: string, nativeId: string): string {

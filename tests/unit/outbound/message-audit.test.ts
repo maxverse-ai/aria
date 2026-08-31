@@ -23,7 +23,9 @@ describe('OutboundBroker message audit', () => {
     });
     await expect(broker.dispatch(envelope, async () => ({ messageId: 'om_reply' }))).resolves.toEqual({ messageId: 'om_reply' });
     expect(events).toEqual([expect.objectContaining({ direction: 'outbound', conversationKey: 'scope-secret' })]);
-    expect(messages).toEqual([expect.objectContaining({ sourceMessageId: 'om_reply', correlationId: 'op-secret' })]);
+    expect(messages).toEqual([expect.objectContaining({
+      sourceMessageId: 'om_reply', correlationId: 'op-secret', actorKind: 'bot',
+    })]);
     expect(JSON.stringify(events)).not.toContain('private response');
     expect(JSON.stringify(events)).not.toContain('chat-secret');
   });

@@ -89,6 +89,10 @@ import {
 } from './conversation-input';
 import { ChatModeCache, type ChatMode } from './chat-mode-cache';
 import { ChatTopologyResolver } from './chat-topology';
+import {
+  resolveMessageConversation,
+  type ResolvedMessageConversation,
+} from './scope';
 import { handleCommentMention } from './comments';
 import { ConversationRuntime } from '../conversation/runtime';
 import { decideLiveFollowup } from '../conversation/live-followup-policy';
@@ -102,7 +106,6 @@ import {
 } from './final-reply-freshness';
 import type { ProcessPool } from './process-pool';
 import { fetchQuotedContext, fetchTopicContext, type QuotedContext } from './quote';
-import { lookupMessageThreadId } from './thread-id';
 import { addWorkingReaction, removeReaction } from './reaction';
 import { fetchKnownChats } from './lark-info';
 import type { AppPaths } from '../config/app-paths';
@@ -503,13 +506,34 @@ export async function startChannel(deps: StartChannelDeps): Promise<BridgeChanne
   let consecutiveReconnects = 0;
 
   channel.on({
-    message: async (msg) => {
+    message: async (receivedMessage) => {
+      const conversation = await resolveMessageConversation(
+        channel,
+        receivedMessage,
+        chatModeCache,
+      );
+      const msg = conversation.message;
+      if (conversation.threadIdBackfilled && conversation.threadId) {
+        log.info('intake', 'thread-id-backfilled', {
+          chatId: msg.chatId,
+          msgId: msg.messageId,
+          threadId: conversation.threadId,
+        });
+      }
+      if (conversation.modeOverridden && conversation.threadId) {
+        logThreadModeOverride({
+          chatId: msg.chatId,
+          resolvedMode: conversation.resolvedMode,
+          threadId: conversation.threadId,
+        });
+      }
       outboundIdentity?.observeMessage(msg);
+      const occurredAt = new Date().toISOString();
       await deps.messageAudit?.record({
         eventId: `inbound:${msg.messageId}`,
         direction: 'inbound',
-        conversationKey: msg.threadId ? `${msg.chatId}:${msg.threadId}` : msg.chatId,
-        occurredAt: new Date().toISOString(),
+        conversationKey: conversation.key,
+        occurredAt,
         sourceMessageId: msg.messageId,
         actorSourceId: msg.senderId,
         actorKind: senderTypeOf(msg) ?? 'unknown',
@@ -518,9 +542,11 @@ export async function startChannel(deps: StartChannelDeps): Promise<BridgeChanne
         eventId: `inbound:${msg.messageId}`,
         sourceMessageId: msg.messageId,
         direction: 'inbound',
-        conversationKey: msg.threadId ? `${msg.chatId}:${msg.threadId}` : msg.chatId,
-        occurredAt: new Date().toISOString(),
+        conversationKey: conversation.key,
+        conversationKind: conversation.kind,
+        occurredAt,
         actorSourceId: msg.senderId,
+        actorKind: senderTypeOf(msg) ?? 'unknown',
         content: { format: 'plain-text', text: msg.content },
       }).catch((err) => log.warn('message', 'projection-failed', { err: String(err) }));
       await withOutboundPolicy(
@@ -528,7 +554,7 @@ export async function startChannel(deps: StartChannelDeps): Promise<BridgeChanne
         controls.profile,
         {
           source: 'im',
-          conversationId: msg.threadId ?? msg.chatId,
+          conversationId: conversation.key,
           sourceMessageId: msg.messageId,
           senderOpenId: msg.senderId,
           runId: `message:${msg.messageId}`,
@@ -548,11 +574,9 @@ export async function startChannel(deps: StartChannelDeps): Promise<BridgeChanne
               workspaces,
               activeRuns,
               pending,
-              msg,
+              conversation,
               controls,
-              chatModeCache,
               chatTopology,
-              logThreadModeOverride,
               executor,
               pool,
               governanceAudit: deps.governanceAudit,
@@ -896,11 +920,9 @@ interface IntakeDeps {
   workspaces: WorkspaceStore;
   activeRuns: ActiveRuns;
   pending: PendingQueue;
-  msg: NormalizedMessage;
+  conversation: ResolvedMessageConversation;
   controls: Controls;
-  chatModeCache: ChatModeCache;
   chatTopology: ChatTopologyResolver;
-  logThreadModeOverride: LogThreadModeOverride;
   executor: RunExecutor;
   pool: ProcessPool;
   governanceAudit?: GovernanceAuditSink;
@@ -925,58 +947,24 @@ async function intakeMessage(deps: IntakeDeps): Promise<void> {
     workspaces,
     activeRuns,
     pending,
-    msg,
+    conversation,
     controls,
-    chatModeCache,
     chatTopology,
-    logThreadModeOverride,
     executor,
     pool,
     deferOutbound,
     outboundFinalOnly,
     outboundControlChannel,
   } = deps;
+  const {
+    message: msg,
+    key: scope,
+    mode: chatMode,
+    resolvedMode,
+    threadId,
+  } = conversation;
+  const emsg = msg;
   const preview = msg.content.length > 80 ? `${msg.content.slice(0, 80)}…` : msg.content;
-  // Resolve scope (and underlying chat mode) once at intake — every
-  // downstream consumer keys off these.
-  const resolvedMode = await chatModeCache.resolve(channel, msg.chatId);
-  // Feishu delivers a sizable fraction of topic-group message events without a
-  // `thread_id` (notably the message that opens a new topic). We route topic
-  // replies (`replyInThread`) and isolate per-topic session scope off it, so a
-  // missing one makes the reply escape into a brand-new topic AND collapses the
-  // scope to the chat level. When getChatMode says this is a topic group but
-  // the event dropped `thread_id`, backfill it from the raw message — the same
-  // recovery the card-click path uses.
-  let threadId = msg.threadId;
-  if (!threadId && resolvedMode === 'topic') {
-    threadId = await lookupMessageThreadId(channel, msg.messageId);
-    if (threadId) {
-      log.info('intake', 'thread-id-backfilled', {
-        chatId: msg.chatId,
-        msgId: msg.messageId,
-        threadId,
-      });
-    }
-  }
-  // Carry the (possibly backfilled) threadId on the message so the batched
-  // flush — which reads `firstMsg.threadId` for reply routing and topic scope —
-  // sees it.
-  const emsg: NormalizedMessage = threadId === msg.threadId ? msg : { ...msg, threadId };
-  // Some groups are converted into topic groups after creation. In that state
-  // getChatMode can lag behind the message event shape, so threadId is the
-  // stronger signal for topic-scoped sessions and reply routing.
-  const chatMode = threadId ? 'topic' : resolvedMode;
-  if (threadId && resolvedMode !== 'topic') {
-    chatModeCache.invalidate(msg.chatId);
-    logThreadModeOverride({
-      chatId: msg.chatId,
-      resolvedMode,
-      threadId,
-    });
-  }
-  const scope = chatMode === 'topic' && threadId
-    ? `${msg.chatId}:${threadId}`
-    : msg.chatId;
   log.info('message', 'received', {
     ...observabilityFields(),
     profile: controls.profile,
@@ -1504,6 +1492,7 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
       bindingId: `${execution.runId}:session`,
       correlationId: `im:${firstMsg.messageId}`,
       conversationKey: scope,
+      conversationKind: mode,
       sourceRunId: execution.runId,
       agentKind: capability.agentId,
       sourceSessionId,
