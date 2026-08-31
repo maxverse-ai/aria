@@ -106,6 +106,7 @@ export type {
   CreateProfileConversationHostOptions,
   ProfileConversationHost,
   ProfileConversationNativeReadOptions,
+  ProfileConversationResetResult,
   ProfileTextConversationInput,
   ProfileTextConversationResult,
 } from './conversation/profile-host';
@@ -135,8 +136,24 @@ export type {
   WechatKfApiClientOptions,
   WechatKfFetch,
 } from './channel/wechat-kf/client';
+export {
+  parseWechatKfCommand,
+  renderWechatKfHelp,
+  WECHAT_KF_COMMANDS,
+  WECHAT_KF_WELCOME_TEXT,
+} from './channel/wechat-kf/commands';
+export type {
+  WechatKfCommandDefinition,
+  WechatKfCommandKind,
+  WechatKfCommandMatch,
+} from './channel/wechat-kf/commands';
 export { WechatKfCrypto } from './channel/wechat-kf/crypto';
 export type { WechatKfCryptoOptions } from './channel/wechat-kf/crypto';
+export { WechatKfDurableMessageSink } from './channel/wechat-kf/durable-sink';
+export type {
+  WechatKfDurableMessageSinkOptions,
+  WechatKfProcessingErrorContext,
+} from './channel/wechat-kf/durable-sink';
 export { FileWechatKfCursorStore } from './channel/wechat-kf/cursor-store';
 export type {
   FileWechatKfCursorStoreOptions,
@@ -149,12 +166,25 @@ export type {
 } from './channel/wechat-kf/http-server';
 export { FileWechatKfNotificationInbox } from './channel/wechat-kf/inbox';
 export type { FileWechatKfNotificationInboxOptions } from './channel/wechat-kf/inbox';
+export { FileWechatKfMessageInbox } from './channel/wechat-kf/message-inbox';
+export { FileWechatKfOnboardingStore } from './channel/wechat-kf/onboarding-store';
 export { WechatKfNotificationProcessor } from './channel/wechat-kf/processor';
 export type {
   WechatKfMessageSink,
   WechatKfNotificationProcessorOptions,
 } from './channel/wechat-kf/processor';
+export { FileWechatKfReceiptStore } from './channel/wechat-kf/receipt-store';
 export { wechatKfActorId, wechatKfScopeId } from './channel/wechat-kf/session';
+export {
+  messageReceiptKey,
+  splitWechatKfText,
+  stableOutboundMessageId,
+  WechatKfTextHandler,
+} from './channel/wechat-kf/text-handler';
+export type {
+  WechatKfCommandAuditEvent,
+  WechatKfTextHandlerOptions,
+} from './channel/wechat-kf/text-handler';
 export type {
   WechatKfMessage,
   WechatKfNotification,

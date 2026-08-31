@@ -137,6 +137,33 @@ describe('agent-aware session catalog', () => {
     await catalog.flush();
   });
 
+  it('archives every active entry for a scope without losing it to the next active session', async () => {
+    const catalog = new SessionCatalog(await path());
+    const base = { scopeId: 'wxkf-scope', cwdRealpath: '/repo', policyFingerprint: 'fp-1' };
+    catalog.upsertActive({ ...base, agentId: 'claude', sessionId: 'old-claude', now: 1000 });
+    catalog.upsertActive({ ...base, agentId: 'codex', threadId: 'old-codex', now: 1000 });
+    catalog.upsertActive({
+      ...base,
+      scopeId: 'other-scope',
+      agentId: 'codex',
+      threadId: 'other-codex',
+      now: 1000,
+    });
+
+    expect(catalog.archiveScope({ scopeId: 'wxkf-scope', now: 2000 })).toBe(2);
+    catalog.upsertActive({ ...base, agentId: 'codex', threadId: 'new-codex', now: 3000 });
+
+    expect(catalog.entries().filter((entry) => entry.scopeId === 'wxkf-scope'))
+      .toEqual(expect.arrayContaining([
+        expect.objectContaining({ status: 'archived', sessionId: 'old-claude' }),
+        expect.objectContaining({ status: 'archived', threadId: 'old-codex' }),
+        expect.objectContaining({ status: 'active', threadId: 'new-codex' }),
+      ]));
+    expect(catalog.entries().find((entry) => entry.scopeId === 'other-scope'))
+      .toMatchObject({ status: 'active', threadId: 'other-codex' });
+    await catalog.flush();
+  });
+
   it('garbage-collects old archived entries, per-scope overflow, and profile overflow', async () => {
     const catalog = new SessionCatalog(await path());
     await catalog.replaceForTest([

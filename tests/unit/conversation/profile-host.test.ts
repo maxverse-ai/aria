@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -234,5 +234,170 @@ describe('createProfileConversationHost', () => {
     }));
     await host.close();
     expect(runtime.stop).toHaveBeenCalledOnce();
+  });
+
+  it('archives the old thread and starts fresh after reset without deleting history', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'aria-profile-host-reset-'));
+    tempDirectories.push(root);
+    const profileConfig = createDefaultProfileConfig({
+      agentKind: 'codex',
+      mode: 'team',
+      accounts: { app: { id: 'app-id', secret: 'unused', tenant: 'feishu' } },
+      codex: { binaryPath: 'codex' },
+    });
+    profileConfig.workspaces.default = root;
+    const seen: AgentRunOptions[] = [];
+    const agent: AgentAdapter = {
+      id: 'codex',
+      displayName: 'Codex',
+      isAvailable: async () => true,
+      run: (options) => {
+        seen.push(options);
+        const threadId = `thread-${seen.length}`;
+        return {
+          runId: options.runId,
+          events: {
+            async *[Symbol.asyncIterator]() {
+              yield { type: 'system' as const, threadId };
+              yield { type: 'final_text' as const, content: threadId };
+              yield { type: 'done' as const, threadId, terminationReason: 'normal' as const };
+            },
+          },
+          stop: async () => undefined,
+          waitForExit: async () => true,
+        };
+      },
+    };
+    mocks.resolveProfileRuntime.mockResolvedValue({
+      cfg: profileConfig,
+      profileConfig,
+      configPath: join(root, 'config.json'),
+      appPaths: { profileDir: root, profile: 'wxkf', rootDir: root },
+    });
+    mocks.createProfileEngineRuntime.mockReturnValue({
+      engineId: 'codex',
+      execution: agent,
+      dispose: vi.fn(async () => undefined),
+    });
+    const stateDirectory = join(root, 'state');
+    const host = await createProfileConversationHost({
+      configPath: join(root, 'config.json'),
+      profile: 'wxkf',
+      stateDirectory,
+    });
+    const input = {
+      scopeId: 'wechat-kf:kf:user-hash',
+      actorId: 'wxkf_user-hash',
+      authorized: true,
+      source: 'channel:wechat-kf' as const,
+    };
+
+    await expect(host.runText({ ...input, prompt: 'first' })).resolves.toMatchObject({
+      ok: true,
+      content: 'thread-1',
+    });
+    await expect(host.reset(input.scopeId)).resolves.toEqual({
+      interrupted: false,
+      archivedSessionCount: 1,
+    });
+    await expect(host.runText({ ...input, prompt: 'second' })).resolves.toMatchObject({
+      ok: true,
+      content: 'thread-2',
+    });
+
+    expect(seen[0]?.threadId).toBeUndefined();
+    expect(seen[1]?.threadId).toBeUndefined();
+    const catalog = JSON.parse(
+      await readFile(join(stateDirectory, 'sessions.catalog.json'), 'utf8'),
+    ) as Array<{ status: string; threadId?: string }>;
+    expect(catalog).toEqual(expect.arrayContaining([
+      expect.objectContaining({ status: 'archived', threadId: 'thread-1' }),
+      expect.objectContaining({ status: 'active', threadId: 'thread-2' }),
+    ]));
+    await host.close();
+  });
+
+  it('prevents a run still preparing during reset from restoring the old generation', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'aria-profile-host-reset-race-'));
+    tempDirectories.push(root);
+    const profileConfig = createDefaultProfileConfig({
+      agentKind: 'codex',
+      mode: 'team',
+      accounts: { app: { id: 'app-id', secret: 'unused', tenant: 'feishu' } },
+      codex: { binaryPath: 'codex' },
+    });
+    profileConfig.workspaces.default = root;
+    let releasePrepare!: () => void;
+    let announcePrepare!: () => void;
+    const prepareGate = new Promise<void>((resolve) => { releasePrepare = resolve; });
+    const prepareStarted = new Promise<void>((resolve) => { announcePrepare = resolve; });
+    let prepareCount = 0;
+    const seen: AgentRunOptions[] = [];
+    const stop = vi.fn(async () => undefined);
+    const agent: AgentAdapter = {
+      id: 'codex',
+      displayName: 'Codex',
+      isAvailable: async () => true,
+      prepareRun: async () => {
+        prepareCount += 1;
+        if (prepareCount === 1) {
+          announcePrepare();
+          await prepareGate;
+        }
+      },
+      run: (options) => {
+        seen.push(options);
+        const threadId = `thread-${seen.length}`;
+        return {
+          runId: options.runId,
+          events: {
+            async *[Symbol.asyncIterator]() {
+              yield { type: 'system' as const, threadId };
+              yield { type: 'final_text' as const, content: threadId };
+              yield { type: 'done' as const, threadId, terminationReason: 'normal' as const };
+            },
+          },
+          stop,
+          waitForExit: async () => true,
+        };
+      },
+    };
+    mocks.resolveProfileRuntime.mockResolvedValue({
+      cfg: profileConfig,
+      profileConfig,
+      configPath: join(root, 'config.json'),
+      appPaths: { profileDir: root, profile: 'wxkf', rootDir: root },
+    });
+    mocks.createProfileEngineRuntime.mockReturnValue({
+      engineId: 'codex',
+      execution: agent,
+      dispose: vi.fn(async () => undefined),
+    });
+    const host = await createProfileConversationHost({
+      configPath: join(root, 'config.json'),
+      profile: 'wxkf',
+      stateDirectory: join(root, 'state'),
+    });
+    const input = {
+      scopeId: 'wechat-kf:kf:user-hash',
+      actorId: 'wxkf_user-hash',
+      authorized: true,
+      source: 'channel:wechat-kf' as const,
+    };
+
+    const oldRun = host.runText({ ...input, prompt: 'old generation' });
+    await prepareStarted;
+    const reset = host.reset(input.scopeId);
+    releasePrepare();
+
+    await expect(oldRun).resolves.toMatchObject({ ok: false, code: 'run-interrupted' });
+    await expect(reset).resolves.toMatchObject({ interrupted: true });
+    await expect(host.runText({ ...input, prompt: 'new generation' })).resolves.toMatchObject({
+      ok: true,
+      content: 'thread-2',
+    });
+    expect(stop).toHaveBeenCalled();
+    expect(seen[1]?.threadId).toBeUndefined();
+    await host.close();
   });
 });

@@ -35,6 +35,11 @@ export interface ArchiveSessionCatalogInput extends SessionCatalogIdentity {
   now?: number;
 }
 
+export interface ArchiveSessionCatalogScopeInput {
+  scopeId: string;
+  now?: number;
+}
+
 export interface SessionCatalogGcOptions {
   now?: number;
   maxArchivedAgeMs?: number;
@@ -132,6 +137,33 @@ export class SessionCatalog {
     return true;
   }
 
+  /**
+   * Archive every active session owned by one conversation scope.
+   *
+   * External channel hosts intentionally do not know the agent/cwd/policy
+   * identity that forms a catalog key. The catalog remains the sole owner of
+   * that lookup and preserves every prior entry as archived history.
+   */
+  archiveScope(input: ArchiveSessionCatalogScopeInput): number {
+    if (!input.scopeId) throw new Error('session catalog scopeId is required');
+    const now = input.now ?? Date.now();
+    let archived = 0;
+    for (const [key, entry] of this.data.entries()) {
+      if (entry.scopeId !== input.scopeId || entry.status !== 'active') continue;
+      const archivedEntry = {
+        ...entry,
+        key: archivedSessionCatalogKey(entry, now),
+        status: 'archived',
+        updatedAt: now,
+      } satisfies SessionCatalogEntry;
+      this.data.delete(key);
+      this.data.set(archivedEntry.key, archivedEntry);
+      archived += 1;
+    }
+    if (archived > 0) this.schedulePersist();
+    return archived;
+  }
+
   entries(): SessionCatalogEntry[] {
     return [...this.data.values()].map((entry) => ({ ...entry }));
   }
@@ -206,6 +238,15 @@ export class SessionCatalog {
       // Directory fsync is not available on every platform.
     }
   }
+}
+
+function archivedSessionCatalogKey(entry: SessionCatalogEntry, archivedAt: number): string {
+  return [
+    sessionCatalogKey(entry),
+    'archived',
+    String(archivedAt),
+    randomUUID(),
+  ].join(KEY_SEPARATOR);
 }
 
 function normalizeEntry(input: unknown): SessionCatalogEntry | undefined {

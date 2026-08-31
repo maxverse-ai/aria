@@ -7,6 +7,7 @@ import { getAgentStopGraceMs, getMaxConcurrentRuns } from '../config/schema';
 import { log } from '../core/logger';
 import type { AccessDecision } from '../policy/access';
 import { SessionCatalog } from '../session/catalog';
+import { SessionResetStore } from '../session/reset-store';
 import { SessionStore } from '../session/store';
 import { WorkspaceStore } from '../workspace/store';
 import {
@@ -19,6 +20,7 @@ import type {
   NativeReadRuntimeFactory,
 } from '../runtime/native-read-runtime';
 import type { MessageConversationKind } from '../runtime/message-resource';
+import type { RunExecution } from '../runtime/run-executor';
 import { ConversationRuntime } from './runtime';
 
 export interface ProfileConversationNativeReadOptions {
@@ -53,10 +55,33 @@ export type ProfileTextConversationResult =
   | { ok: true; runId: string; content: string }
   | { ok: false; code: string; userVisible: string };
 
+export interface ProfileConversationResetResult {
+  interrupted: boolean;
+  archivedSessionCount: number;
+}
+
 export interface ProfileConversationHost {
   runText(input: ProfileTextConversationInput): Promise<ProfileTextConversationResult>;
+  /** Stop the run currently owned by this scope, if one exists. */
+  interrupt(scopeId: string): Promise<boolean>;
+  /** Stop the current run and archive all resumable state for a fresh conversation. */
+  reset(scopeId: string): Promise<ProfileConversationResetResult>;
   close(): Promise<void>;
 }
+
+interface ActiveProfileConversation {
+  execution: RunExecution;
+  generation: number;
+  settled: Promise<void>;
+  settle(): void;
+}
+
+interface PreparingProfileConversation {
+  settled: Promise<void>;
+  settle(): void;
+}
+
+const PROFILE_CONVERSATION_SETTLE_TIMEOUT_MS = 10_000;
 
 /**
  * Deployment composition for a non-Lark channel that reuses one Aria profile's
@@ -85,8 +110,9 @@ export async function createProfileConversationHost(
 
   const sessions = new SessionStore(join(options.stateDirectory, 'sessions.json'));
   const sessionCatalog = new SessionCatalog(join(options.stateDirectory, 'sessions.catalog.json'));
+  const sessionResets = new SessionResetStore(join(options.stateDirectory, 'session-resets.json'));
   const workspaces = new WorkspaceStore(join(options.stateDirectory, 'workspaces.json'));
-  await Promise.all([sessions.load(), sessionCatalog.load(), workspaces.load()]);
+  await Promise.all([sessions.load(), sessionCatalog.load(), sessionResets.load(), workspaces.load()]);
 
   const engine = createProfileEngineRuntime(resolved.profileConfig, {
     ...resolved.appPaths,
@@ -128,6 +154,32 @@ export async function createProfileConversationHost(
     ...(nativeRead ? { governanceAudit: nativeRead.governanceAudit } : {}),
   });
   let closed = false;
+  const activeConversations = new Map<string, ActiveProfileConversation>();
+  const preparingConversations = new Map<string, PreparingProfileConversation>();
+  const resetOperations = new Map<string, Promise<ProfileConversationResetResult>>();
+
+  const interruptScope = async (scopeId: string): Promise<boolean> => {
+    assertScopeId(scopeId);
+    if (closed) throw new Error('profile conversation host is closed');
+    const active = activeConversations.get(scopeId);
+    if (!active) return conversations.interrupt(scopeId);
+    await active.execution.stop();
+    const settled = await waitForSettlement(
+      active.settled,
+      PROFILE_CONVERSATION_SETTLE_TIMEOUT_MS,
+    );
+    if (!settled) throw new Error('profile conversation did not settle after interruption');
+    return true;
+  };
+
+  const prepareFreshScope = async (scopeId: string): Promise<number> => {
+    const state = sessionResets.state(scopeId);
+    if (!state.forceFresh) return state.generation;
+    sessionCatalog.archiveScope({ scopeId, now: Date.now() });
+    sessions.clear(scopeId);
+    await Promise.all([sessions.flush(), sessionCatalog.flush()]);
+    return state.generation;
+  };
 
   return {
     async runText(input) {
@@ -138,29 +190,55 @@ export async function createProfileConversationHost(
       if (nativeRead && !input.sourceMessageId) {
         throw new Error('sourceMessageId is required when profile native read is enabled');
       }
+      const reset = resetOperations.get(input.scopeId);
+      if (reset) await reset;
+      if (closed) throw new Error('profile conversation host is closed');
+      const generation = await prepareFreshScope(input.scopeId);
       const access: AccessDecision = input.authorized
         ? { ok: true, reason: 'allowed-team' }
         : { ok: false, reason: 'denied-user' };
-      const flow = await conversations.start({
-        scopeId: input.scopeId,
-        scope: {
-          source: input.source ?? 'channel:external',
-          actorId: input.actorId,
-        },
-        prompt: input.prompt,
-        attachments: [],
-        access,
-        capability,
-        profileConfig: resolved.profileConfig,
-        now: Date.now(),
-        stopGraceMs: getAgentStopGraceMs(resolved.cfg),
-        observability: {
-          profile: options.profile,
-          agent: capability.agentId,
-          source: input.source ?? 'channel:external',
-          stage: 'submit',
-        },
-      });
+      let settlePreparation!: () => void;
+      const preparation: PreparingProfileConversation = {
+        settled: new Promise<void>((resolve) => { settlePreparation = resolve; }),
+        settle: () => settlePreparation(),
+      };
+      preparingConversations.set(input.scopeId, preparation);
+      let flow: Awaited<ReturnType<ConversationRuntime['start']>>;
+      try {
+        flow = await conversations.start({
+          scopeId: input.scopeId,
+          scope: {
+            source: input.source ?? 'channel:external',
+            actorId: input.actorId,
+          },
+          prompt: input.prompt,
+          attachments: [],
+          access,
+          capability,
+          profileConfig: resolved.profileConfig,
+          now: Date.now(),
+          stopGraceMs: getAgentStopGraceMs(resolved.cfg),
+          observability: {
+            profile: options.profile,
+            agent: capability.agentId,
+            source: input.source ?? 'channel:external',
+            stage: 'submit',
+          },
+        });
+        if (flow.ok && sessionResets.state(input.scopeId).generation !== generation) {
+          await flow.execution.stop();
+          return {
+            ok: false,
+            code: 'run-interrupted',
+            userVisible: '当前回答已停止。',
+          };
+        }
+      } finally {
+        preparation.settle();
+        if (preparingConversations.get(input.scopeId) === preparation) {
+          preparingConversations.delete(input.scopeId);
+        }
+      }
       if (!flow.ok) {
         return {
           ok: false,
@@ -169,82 +247,160 @@ export async function createProfileConversationHost(
         };
       }
 
-      const sourceMessageId = input.sourceMessageId;
-      const correlationId = sourceMessageId
-        ? `profile-conversation:${sourceMessageId}`
-        : undefined;
-      if (nativeRead && sourceMessageId && correlationId) {
-        await observeNativeMessage(nativeRead, {
-          eventId: `${sourceMessageId}:received`,
-          sourceMessageId,
-          direction: 'inbound',
-          conversationKey: input.scopeId,
-          conversationKind: input.conversationKind ?? 'p2p',
-          correlationId,
-          occurredAt: new Date().toISOString(),
-          actorSourceId: input.actorId,
-          actorKind: 'user',
-          content: { format: 'plain-text', text: input.prompt },
-        });
-      }
-
-      let sourceSessionId = flow.resumeFrom;
-      const projectedMessageIds = sourceMessageId ? [sourceMessageId] : [];
-      const bindMessages = async (): Promise<void> => {
-        if (!nativeRead || !correlationId || !sourceSessionId) return;
-        await nativeRead.messageRead.bind({
-          bindingId: `${flow.execution.runId}:session`,
-          correlationId,
-          conversationKey: input.scopeId,
-          conversationKind: input.conversationKind ?? 'p2p',
-          sourceRunId: flow.execution.runId,
-          agentKind: capability.agentId,
-          sourceSessionId,
-          sourceMessageIds: projectedMessageIds,
-          occurredAt: new Date().toISOString(),
-        }).catch((error) => logNativeReadFailure('message-bind-failed', error));
+      let settle!: () => void;
+      const settled = new Promise<void>((resolve) => { settle = resolve; });
+      const active: ActiveProfileConversation = {
+        execution: flow.execution,
+        generation,
+        settled,
+        settle,
       };
-      await bindMessages();
+      activeConversations.set(input.scopeId, active);
 
-      let final = '';
-      const progress: string[] = [];
-      for await (const event of flow.execution.subscribe()) {
-        recordConversationEvent(conversations, input.scopeId, capability, flow.policy, event);
-        const observedSessionId = agentSessionId(capability.sessionKind, event);
-        if (observedSessionId && observedSessionId !== sourceSessionId) {
-          sourceSessionId = observedSessionId;
-          await bindMessages();
+      try {
+        const sourceMessageId = input.sourceMessageId;
+        const correlationId = sourceMessageId
+          ? `profile-conversation:${sourceMessageId}`
+          : undefined;
+        if (nativeRead && sourceMessageId && correlationId) {
+          await observeNativeMessage(nativeRead, {
+            eventId: `${sourceMessageId}:received`,
+            sourceMessageId,
+            direction: 'inbound',
+            conversationKey: input.scopeId,
+            conversationKind: input.conversationKind ?? 'p2p',
+            correlationId,
+            occurredAt: new Date().toISOString(),
+            actorSourceId: input.actorId,
+            actorKind: 'user',
+            content: { format: 'plain-text', text: input.prompt },
+          });
         }
-        if (event.type === 'final_text') final = event.content;
-        else if (event.type === 'text') progress.push(event.delta);
-        else if (event.type === 'error') throw new Error(event.message);
-      }
-      const content = final || progress.join('\n').trim();
-      if (nativeRead && sourceMessageId && correlationId && content) {
-        const outboundMessageId = `${sourceMessageId}:assistant:${flow.execution.runId}`;
-        projectedMessageIds.push(outboundMessageId);
-        await observeNativeMessage(nativeRead, {
-          eventId: `${outboundMessageId}:sent`,
-          sourceMessageId: outboundMessageId,
-          direction: 'outbound',
-          conversationKey: input.scopeId,
-          conversationKind: input.conversationKind ?? 'p2p',
-          correlationId,
-          occurredAt: new Date().toISOString(),
-          actorSourceId: capability.agentId,
-          actorKind: 'bot',
-          content: { format: 'plain-text', text: content },
-        });
+
+        let sourceSessionId = flow.resumeFrom;
+        const projectedMessageIds = sourceMessageId ? [sourceMessageId] : [];
+        const bindMessages = async (): Promise<void> => {
+          if (!nativeRead || !correlationId || !sourceSessionId) return;
+          await nativeRead.messageRead.bind({
+            bindingId: `${flow.execution.runId}:session`,
+            correlationId,
+            conversationKey: input.scopeId,
+            conversationKind: input.conversationKind ?? 'p2p',
+            sourceRunId: flow.execution.runId,
+            agentKind: capability.agentId,
+            sourceSessionId,
+            sourceMessageIds: projectedMessageIds,
+            occurredAt: new Date().toISOString(),
+          }).catch((error) => logNativeReadFailure('message-bind-failed', error));
+        };
         await bindMessages();
-        await nativeRead.refreshSessions().catch((error) =>
+
+        let final = '';
+        const progress: string[] = [];
+        let interrupted = false;
+        for await (const event of flow.execution.subscribe()) {
+          await recordConversationEvent({
+            conversations,
+            sessions,
+            sessionCatalog,
+            sessionResets,
+            scopeId: input.scopeId,
+            generation,
+            capability,
+            policy: flow.policy,
+            event,
+          });
+          const observedSessionId = agentSessionId(capability.sessionKind, event);
+          if (observedSessionId && observedSessionId !== sourceSessionId) {
+            sourceSessionId = observedSessionId;
+            await bindMessages();
+          }
+          if (event.type === 'final_text') final = event.content;
+          else if (event.type === 'text') progress.push(event.delta);
+          else if (event.type === 'done' && event.terminationReason === 'interrupted') interrupted = true;
+          else if (event.type === 'error') throw new Error(event.message);
+        }
+        if (interrupted || flow.execution.handle.interrupted) {
+          return {
+            ok: false,
+            code: 'run-interrupted',
+            userVisible: '当前回答已停止。',
+          };
+        }
+        const content = final || progress.join('\n').trim();
+        if (nativeRead && sourceMessageId && correlationId && content) {
+          const outboundMessageId = `${sourceMessageId}:assistant:${flow.execution.runId}`;
+          projectedMessageIds.push(outboundMessageId);
+          await observeNativeMessage(nativeRead, {
+            eventId: `${outboundMessageId}:sent`,
+            sourceMessageId: outboundMessageId,
+            direction: 'outbound',
+            conversationKey: input.scopeId,
+            conversationKind: input.conversationKind ?? 'p2p',
+            correlationId,
+            occurredAt: new Date().toISOString(),
+            actorSourceId: capability.agentId,
+            actorKind: 'bot',
+            content: { format: 'plain-text', text: content },
+          });
+          await bindMessages();
+          await nativeRead.refreshSessions().catch((error) =>
+            logNativeReadFailure('session-refresh-failed', error),
+          );
+        }
+        return {
+          ok: true,
+          runId: flow.execution.runId,
+          content,
+        };
+      } finally {
+        active.settle();
+        if (activeConversations.get(input.scopeId) === active) {
+          activeConversations.delete(input.scopeId);
+        }
+      }
+    },
+    interrupt(scopeId) {
+      return interruptScope(scopeId);
+    },
+    reset(scopeId) {
+      assertScopeId(scopeId);
+      if (closed) throw new Error('profile conversation host is closed');
+      const current = resetOperations.get(scopeId);
+      if (current) return current;
+      const preparationAtReset = preparingConversations.get(scopeId);
+      const operation = (async (): Promise<ProfileConversationResetResult> => {
+        sessionResets.markFresh(scopeId, Date.now());
+        await sessionResets.flush();
+        let interrupted = await interruptScope(scopeId);
+        const preparation = preparationAtReset ?? preparingConversations.get(scopeId);
+        if (preparation) {
+          const settled = await waitForSettlement(
+            preparation.settled,
+            PROFILE_CONVERSATION_SETTLE_TIMEOUT_MS,
+          );
+          if (!settled) {
+            throw new Error('profile conversation did not finish preparing after reset');
+          }
+          interrupted = true;
+        }
+        interrupted = await interruptScope(scopeId) || interrupted;
+        const archivedSessionCount = sessionCatalog.archiveScope({
+          scopeId,
+          now: Date.now(),
+        });
+        sessions.clear(scopeId);
+        await Promise.all([sessions.flush(), sessionCatalog.flush(), sessionResets.flush()]);
+        await nativeRead?.refreshSessions().catch((error) =>
           logNativeReadFailure('session-refresh-failed', error),
         );
-      }
-      return {
-        ok: true,
-        runId: flow.execution.runId,
-        content,
-      };
+        return { interrupted, archivedSessionCount };
+      })();
+      resetOperations.set(scopeId, operation);
+      void operation.finally(() => {
+        if (resetOperations.get(scopeId) === operation) resetOperations.delete(scopeId);
+      }).catch(() => undefined);
+      return operation;
     },
     async close() {
       if (closed) return;
@@ -255,6 +411,7 @@ export async function createProfileConversationHost(
       await Promise.allSettled([
         sessions.flush(),
         sessionCatalog.flush(),
+        sessionResets.flush(),
         workspaces.flush(),
       ]);
       await nativeRead?.stop().catch((error) =>
@@ -263,6 +420,24 @@ export async function createProfileConversationHost(
       await engine.dispose();
     },
   };
+}
+
+function assertScopeId(scopeId: string): void {
+  if (!scopeId) throw new Error('profile conversation scopeId is required');
+}
+
+async function waitForSettlement(settled: Promise<void>, timeoutMs: number): Promise<boolean> {
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([
+      settled.then(() => true),
+      new Promise<boolean>((resolve) => {
+        timer = setTimeout(() => resolve(false), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 function agentSessionId(
@@ -300,13 +475,37 @@ function logNativeReadFailure(action: string, error: unknown): void {
   });
 }
 
-function recordConversationEvent(
-  conversations: ConversationRuntime,
-  scopeId: string,
-  capability: ReturnType<typeof capabilityFor>,
-  policy: Parameters<ConversationRuntime['recordEvent']>[0]['policy'],
-  event: AgentEvent,
-): void {
+async function recordConversationEvent(input: {
+  conversations: ConversationRuntime;
+  sessions: SessionStore;
+  sessionCatalog: SessionCatalog;
+  sessionResets: SessionResetStore;
+  scopeId: string;
+  generation: number;
+  capability: ReturnType<typeof capabilityFor>;
+  policy: Parameters<ConversationRuntime['recordEvent']>[0]['policy'];
+  event: AgentEvent;
+}): Promise<void> {
+  const {
+    conversations,
+    sessions,
+    sessionCatalog,
+    sessionResets,
+    scopeId,
+    generation,
+    capability,
+    policy,
+    event,
+  } = input;
   if (event.type !== 'system' && event.type !== 'done') return;
+  const resetState = sessionResets.state(scopeId);
+  if (resetState.generation !== generation) return;
   conversations.recordEvent({ scopeId, capability, policy, event });
+  if (!agentSessionId(capability.sessionKind, event)) return;
+  if (!resetState.forceFresh) return;
+  await Promise.all([sessions.flush(), sessionCatalog.flush()]);
+  if (sessionResets.state(scopeId).generation !== generation) return;
+  if (sessionResets.clearFresh(scopeId, generation, Date.now())) {
+    await sessionResets.flush();
+  }
 }

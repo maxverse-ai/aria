@@ -16,7 +16,9 @@ WeChat user
   -> signature + AES adapter
   -> durable notification inbox
   -> sync_msg processor + durable cursor
-  -> channel message sink
+  -> durable customer-message inbox
+  -> control lane or per-user normal lane
+  -> wxkf text handler
   -> ConversationRuntime
   -> agent execution
   -> channel outbound renderer
@@ -35,6 +37,13 @@ on the page have been accepted downstream.
   response is sent only after its atomic file is fsynced.
 - `WechatKfNotificationProcessor` owns serial pulling and cursor advancement.
 - The channel message sink owns `msgid` idempotency and normalization into Aria.
+- `WechatKfDurableMessageSink` durably accepts pulled messages before the sync
+  cursor advances. Deployments must call `recover()` during startup. Normal
+  questions remain serial per customer; exact commands use a separate control
+  lane so `/stop` and `/new` are not trapped behind a long agent run.
+- `WechatKfTextHandler` owns the wxkf-only command table and onboarding text.
+  Commands are intercepted before `ProfileConversationHost.runText()` and do
+  not enter agent context. This does not register commands on the Lark channel.
 - `ConversationRuntime` owns agent concurrency, policy, sessions, and shutdown.
 - The outbound renderer owns final-answer collection, 2048-byte splitting, and
   delivery status. WeChat Customer Service does not support token streaming.
@@ -72,3 +81,23 @@ The profile composition layer must provide:
 
 This keeps WeChat Customer Service removable and permits future channel packages
 to reuse the same conversation runtime without importing WeCom code.
+
+## Customer commands and onboarding
+
+The public wxkf command set is intentionally small:
+
+- `/help` (`help`, `帮助`) renders the wxkf help text locally;
+- `/new` (`/reset`) archives resumable state and forces the next turn to start a
+  new engine session without deleting native history;
+- `/stop` (`/cancel`) interrupts the active run for the same anonymized scope;
+- any other slash-prefixed input is rejected locally with a `/help` hint.
+
+Only a whole-message, case-insensitive match is a command. Command definitions,
+aliases, help text, and tests come from `src/channel/wechat-kf/commands.ts`; they
+must not be copied into an agent prompt or `AGENTS.md`.
+
+The first ordinary customer question receives one short welcome before the
+question continues normally. A successful first `/help` substitutes for that
+welcome. Onboarding state is independent from session reset state and stores
+only the HMAC-derived actor ID. A failed welcome never blocks the question and
+is retried on a later ordinary message.
