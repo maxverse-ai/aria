@@ -183,6 +183,9 @@ export {
 } from './channel/wechat-kf/text-handler';
 export type {
   WechatKfCommandAuditEvent,
+  WechatKfProcessingFeedback,
+  WechatKfProcessingFeedbackContext,
+  WechatKfProcessingFeedbackHandle,
   WechatKfTextHandlerOptions,
 } from './channel/wechat-kf/text-handler';
 export type {

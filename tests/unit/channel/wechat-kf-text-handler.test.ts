@@ -83,7 +83,13 @@ describe('WechatKfTextHandler', () => {
   });
 
   it('routes new, stop, and unknown commands deterministically', async () => {
-    const harness = await createHarness();
+    const processingFeedback = {
+      begin: vi.fn(() => ({
+        beforeFinal: vi.fn().mockResolvedValue(undefined),
+        finish: vi.fn().mockResolvedValue(undefined),
+      })),
+    };
+    const harness = await createHarness({ processingFeedback });
     harness.host.interrupt.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
 
     await harness.handler.accept(message('m-new', '/reset'));
@@ -94,6 +100,7 @@ describe('WechatKfTextHandler', () => {
     expect(harness.host.reset).toHaveBeenCalledOnce();
     expect(harness.host.interrupt).toHaveBeenCalledTimes(2);
     expect(harness.host.runText).not.toHaveBeenCalled();
+    expect(processingFeedback.begin).not.toHaveBeenCalled();
     expect(harness.api.sendText.mock.calls.map((call) => call[0].content)).toEqual([
       '已开启新会话，你可以开始提问。',
       '已停止当前查询。',
@@ -101,9 +108,75 @@ describe('WechatKfTextHandler', () => {
       '不支持该命令，请发送 /help。',
     ]);
   });
+
+  it('settles ordinary-message feedback before sending the final answer', async () => {
+    const events: string[] = [];
+    const processingFeedback = {
+      begin: vi.fn(() => ({
+        async beforeFinal() { events.push('before-final'); },
+        async finish() { events.push('finish'); },
+      })),
+    };
+    const harness = await createHarness({ processingFeedback });
+    harness.host.runText.mockImplementationOnce(async () => {
+      events.push('run');
+      return { ok: true, runId: 'run-feedback', content: '查询结果' };
+    });
+    harness.api.sendText.mockImplementation(async (input: { content: string }) => {
+      if (input.content === '查询结果') events.push('answer');
+      return { messageId: 'sent' };
+    });
+
+    await harness.handler.accept(message('m-feedback', '普通问题'));
+
+    expect(processingFeedback.begin).toHaveBeenCalledWith({
+      externalUserId: 'wm_user',
+      openKfid: 'wk123',
+      inboundMessageId: 'm-feedback',
+    });
+    expect(events).toEqual(['run', 'before-final', 'answer', 'finish']);
+  });
+
+  it('settles feedback when an ordinary run is interrupted without sending an answer', async () => {
+    const beforeFinal = vi.fn().mockResolvedValue(undefined);
+    const finish = vi.fn().mockResolvedValue(undefined);
+    const harness = await createHarness({
+      processingFeedback: { begin: vi.fn(() => ({ beforeFinal, finish })) },
+    });
+    harness.host.runText.mockResolvedValueOnce({
+      ok: false,
+      runId: 'run-interrupted',
+      code: 'run-interrupted',
+      userVisible: 'interrupted',
+    });
+
+    await harness.handler.accept(message('m-interrupted', '普通问题'));
+
+    expect(beforeFinal).toHaveBeenCalledOnce();
+    expect(finish).toHaveBeenCalledOnce();
+    expect(harness.api.sendText.mock.calls.map((call) => call[0].content)).not.toContain('interrupted');
+  });
+
+  it('finishes ordinary-message feedback when the run fails', async () => {
+    const beforeFinal = vi.fn().mockResolvedValue(undefined);
+    const finish = vi.fn().mockResolvedValue(undefined);
+    const harness = await createHarness({
+      processingFeedback: { begin: vi.fn(() => ({ beforeFinal, finish })) },
+    });
+    harness.host.runText.mockRejectedValueOnce(new Error('agent failed'));
+
+    await expect(harness.handler.accept(message('m-failed', '普通问题')))
+      .rejects.toThrow('agent failed');
+
+    expect(beforeFinal).not.toHaveBeenCalled();
+    expect(finish).toHaveBeenCalledOnce();
+  });
 });
 
-async function createHarness(options: { onWelcomeError?: (error: unknown) => void } = {}) {
+async function createHarness(options: {
+  onWelcomeError?: (error: unknown) => void;
+  processingFeedback?: import('../../../src/channel/wechat-kf/text-handler').WechatKfProcessingFeedback;
+} = {}) {
   const root = await mkdtemp(join(tmpdir(), 'aria-wxkf-handler-'));
   roots.push(root);
   const onboarding = new FileWechatKfOnboardingStore(join(root, 'onboarding.json'));

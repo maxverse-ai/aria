@@ -22,6 +22,21 @@ export interface WechatKfCommandAuditEvent {
   interrupted?: boolean;
 }
 
+export interface WechatKfProcessingFeedbackContext {
+  externalUserId: string;
+  openKfid: string;
+  inboundMessageId: string;
+}
+
+export interface WechatKfProcessingFeedbackHandle {
+  beforeFinal(): Promise<void>;
+  finish(): Promise<void>;
+}
+
+export interface WechatKfProcessingFeedback {
+  begin(context: WechatKfProcessingFeedbackContext): WechatKfProcessingFeedbackHandle;
+}
+
 export interface WechatKfTextHandlerOptions {
   host: Pick<ProfileConversationHost, 'runText' | 'reset' | 'interrupt'>;
   api: Pick<WechatKfApiClient, 'sendText'>;
@@ -29,6 +44,7 @@ export interface WechatKfTextHandlerOptions {
   onboarding: FileWechatKfOnboardingStore;
   receipts: FileWechatKfReceiptStore;
   authorized: boolean | ((message: WechatKfMessage) => boolean);
+  processingFeedback?: WechatKfProcessingFeedback;
   audit?: { record(event: WechatKfCommandAuditEvent): Promise<void> };
   onWelcomeError?: (error: unknown) => void;
 }
@@ -107,22 +123,32 @@ export class WechatKfTextHandler implements WechatKfMessageSink {
     const authorized = typeof this.options.authorized === 'function'
       ? this.options.authorized(message)
       : this.options.authorized;
-    const result = await this.options.host.runText({
-      scopeId,
-      actorId,
-      prompt: message.text.content,
-      authorized,
-      source: 'channel:wechat-kf',
-      conversationKind: 'p2p',
-      sourceMessageId: message.msgid,
+    const feedback = this.options.processingFeedback?.begin({
+      externalUserId,
+      openKfid,
+      inboundMessageId: message.msgid,
     });
-    if (!result.ok && result.code === 'run-interrupted') return;
-    await this.sendContent(
-      message,
-      result.ok ? result.content : result.userVisible,
-      'answer',
-      message.msgid,
-    );
+    try {
+      const result = await this.options.host.runText({
+        scopeId,
+        actorId,
+        prompt: message.text.content,
+        authorized,
+        source: 'channel:wechat-kf',
+        conversationKind: 'p2p',
+        sourceMessageId: message.msgid,
+      });
+      await feedback?.beforeFinal();
+      if (!result.ok && result.code === 'run-interrupted') return;
+      await this.sendContent(
+        message,
+        result.ok ? result.content : result.userVisible,
+        'answer',
+        message.msgid,
+      );
+    } finally {
+      await feedback?.finish();
+    }
   }
 
   private async ensureOnboarding(message: WechatKfMessage, actorId: string): Promise<void> {
