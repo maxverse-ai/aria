@@ -41,12 +41,76 @@ export interface ChannelIdentityProjectionResult {
   memberships: number;
 }
 
+export interface ChannelMessageIdentityObservation {
+  sourceChatId: string;
+  chatKind?: NativeChatResource['kind'];
+  observedAt: string;
+  actor?: Pick<ChannelIdentityObservation, 'sourceIdentityId' | 'kind'>;
+}
+
 /** Converts channel-owned identifiers and names into opaque native-read resources. */
 export class ChannelIdentityReadProjector {
   constructor(
     private readonly profileId: string,
     private readonly repository: NativeReadRepository,
   ) {}
+
+  /**
+   * Lazily creates the opaque topology needed to join messages, sessions,
+   * identities, and chats. Existing enriched resources are never downgraded.
+   */
+  async observeMessage(
+    observation: ChannelMessageIdentityObservation,
+  ): Promise<ChannelIdentityProjectionResult> {
+    if (!observation.sourceChatId || !observation.observedAt) {
+      throw new Error('message identity observation requires sourceChatId and observedAt');
+    }
+
+    let identities = 0;
+    let chats = 0;
+    let memberships = 0;
+    const actor = observation.actor;
+    if (actor) {
+      identities += Number(await this.ensure(identityResource(this.profileId, {
+        ...actor,
+        resolutionStatus: actor.kind === 'unknown' ? 'pending' : 'resolved',
+        observedAt: observation.observedAt,
+      })));
+    }
+
+    if (!observation.chatKind) return { identities, chats, memberships };
+
+    const chatId = nativeReadOpaqueId('chat', this.profileId, observation.sourceChatId);
+    const chatResolved = observation.chatKind === 'p2p';
+    chats += Number(await this.ensure({
+      resourceType: 'chat',
+      id: chatId,
+      profileId: this.profileId,
+      createdAt: observation.observedAt,
+      updatedAt: observation.observedAt,
+      kind: observation.chatKind,
+      resolutionStatus: chatResolved ? 'resolved' : 'pending',
+      ...(chatResolved ? { lastResolvedAt: observation.observedAt } : {}),
+    }));
+
+    if (actor) {
+      const identityId = nativeReadOpaqueId('identity', this.profileId, actor.sourceIdentityId);
+      memberships += Number(await this.ensure({
+        resourceType: 'chat-member',
+        id: nativeReadOpaqueId(
+          'chat-member', this.profileId, observation.sourceChatId, actor.sourceIdentityId,
+        ),
+        profileId: this.profileId,
+        createdAt: observation.observedAt,
+        updatedAt: observation.observedAt,
+        chatId,
+        identityId,
+        role: 'unknown',
+      }));
+    }
+
+    return { identities, chats, memberships };
+  }
 
   async project(observation: ChannelChatObservation): Promise<ChannelIdentityProjectionResult> {
     validateObservation(observation);
@@ -102,6 +166,13 @@ export class ChannelIdentityReadProjector {
       changedAt: stable.updatedAt,
       resource: stable,
     });
+  }
+
+  private async ensure(resource: NativeReadResourceDraft): Promise<boolean> {
+    const existing = await this.repository.get(resource.resourceType, resource.id);
+    if (existing) return false;
+    await this.upsert(resource);
+    return true;
   }
 }
 

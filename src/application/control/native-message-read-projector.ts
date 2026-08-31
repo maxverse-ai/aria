@@ -7,6 +7,7 @@ import type {
 import type { NativeReadRepository } from './native-read-repository';
 import type { NativeMessageResource, NativeRunResource, NativeSessionResource } from './native-read-types';
 import { nativeReadOpaqueId } from './native-read-identifiers';
+import { ChannelIdentityReadProjector } from './channel-identity-read-projector';
 
 interface NativeMessageReadProjectorOptions {
   profileId: string;
@@ -21,12 +22,24 @@ interface ResolvedBinding {
 /** Durable message projection with an explicit pending-to-resolved association transition. */
 export class NativeMessageReadProjector implements MessageResourceSink {
   private readonly bindings = new Map<string, ResolvedBinding>();
+  private readonly identities: ChannelIdentityReadProjector;
   private queue: Promise<void> = Promise.resolve();
 
-  constructor(private readonly options: NativeMessageReadProjectorOptions) {}
+  constructor(private readonly options: NativeMessageReadProjectorOptions) {
+    this.identities = new ChannelIdentityReadProjector(options.profileId, options.repository);
+  }
 
   observe(event: MessageResourceEvent): Promise<void> {
     return this.serialize(async () => {
+      const actorKind = event.actorKind ?? (event.direction === 'inbound' ? 'user' : 'bot');
+      await this.identities.observeMessage({
+        sourceChatId: event.conversationKey,
+        ...(event.conversationKind ? { chatKind: event.conversationKind } : {}),
+        observedAt: event.occurredAt,
+        ...(event.actorSourceId ? {
+          actor: { sourceIdentityId: event.actorSourceId, kind: actorKind },
+        } : {}),
+      });
       const id = messageId(this.options.profileId, event.sourceMessageId);
       const existing = await this.options.repository.get<NativeMessageResource>('message', id);
       const binding = event.correlationId ? this.bindings.get(event.correlationId) : undefined;
@@ -70,13 +83,29 @@ export class NativeMessageReadProjector implements MessageResourceSink {
       );
       const runId = nativeReadOpaqueId('run', this.options.profileId, binding.sourceRunId);
       this.bindings.set(binding.correlationId, { sessionId, runId });
-      await this.ensureSession(binding, sessionId);
-      await this.bindRun(binding, runId, sessionId);
       const conversationId = nativeReadOpaqueId('conversation', this.options.profileId, binding.conversationKey);
+      const sourceMessages: Array<{
+        sourceMessageId: string;
+        resource: NativeMessageResource;
+      }> = [];
       for (const sourceMessageId of binding.sourceMessageIds) {
         const id = messageId(this.options.profileId, sourceMessageId);
         const existing = await this.options.repository.get<NativeMessageResource>('message', id);
-        if (!existing) continue;
+        if (existing) sourceMessages.push({ sourceMessageId, resource: existing });
+      }
+      const participantIdentityIds = [...new Set(sourceMessages.flatMap(({ resource }) =>
+        resource.actorIdentityId ? [resource.actorIdentityId] : [],
+      ))].sort();
+      if (binding.conversationKind) {
+        await this.identities.observeMessage({
+          sourceChatId: binding.conversationKey,
+          chatKind: binding.conversationKind,
+          observedAt: binding.occurredAt,
+        });
+      }
+      await this.ensureSession(binding, sessionId, participantIdentityIds);
+      await this.bindRun(binding, runId, sessionId);
+      for (const { sourceMessageId, resource: existing } of sourceMessages) {
         const resource = {
           ...existing,
           updatedAt: binding.occurredAt,
@@ -108,11 +137,24 @@ export class NativeMessageReadProjector implements MessageResourceSink {
     });
   }
 
-  private async ensureSession(binding: MessageSessionBinding, id: string): Promise<void> {
+  private async ensureSession(
+    binding: MessageSessionBinding,
+    id: string,
+    participantIdentityIds: readonly string[],
+  ): Promise<void> {
     const existing = await this.options.repository.get<NativeSessionResource>('session', id);
     const conversationId = nativeReadOpaqueId('conversation', this.options.profileId, binding.conversationKey);
+    const mergedParticipantIdentityIds = [...new Set([
+      ...(existing?.participantIdentityIds ?? []),
+      ...participantIdentityIds,
+    ])].sort();
+    const bindingShape = JSON.stringify([
+      binding.bindingId,
+      [...binding.sourceMessageIds].sort(),
+      mergedParticipantIdentityIds,
+    ]);
     await this.options.repository.upsert({
-      eventId: sourceEventId(this.options.profileId, `${binding.bindingId}:session`),
+      eventId: sourceEventId(this.options.profileId, `${bindingShape}:session`),
       changedAt: binding.occurredAt,
       resource: {
         resourceType: 'session', id, profileId: this.options.profileId,
@@ -123,7 +165,7 @@ export class NativeMessageReadProjector implements MessageResourceSink {
         status: 'active',
         lastActivityAt: binding.occurredAt,
         chatId: nativeReadOpaqueId('chat', this.options.profileId, binding.conversationKey),
-        participantIdentityIds: existing?.participantIdentityIds ?? [],
+        participantIdentityIds: mergedParticipantIdentityIds,
       },
     });
   }

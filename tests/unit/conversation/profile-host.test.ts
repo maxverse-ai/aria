@@ -218,13 +218,15 @@ describe('createProfileConversationHost', () => {
     expect(observe).toHaveBeenCalledTimes(2);
     expect(observe).toHaveBeenNthCalledWith(1, expect.objectContaining({
       sourceMessageId: 'wechat-message-1', direction: 'inbound',
+      conversationKind: 'p2p', actorKind: 'user',
     }));
     expect(observe).toHaveBeenNthCalledWith(2, expect.objectContaining({
       sourceMessageId: expect.stringContaining('wechat-message-1:assistant:'),
-      direction: 'outbound',
+      direction: 'outbound', conversationKind: 'p2p', actorKind: 'bot',
     }));
     expect(bind).toHaveBeenLastCalledWith(expect.objectContaining({
       sourceSessionId: 'wechat-thread-1',
+      conversationKind: 'p2p',
       sourceMessageIds: expect.arrayContaining([
         'wechat-message-1',
         expect.stringContaining('wechat-message-1:assistant:'),

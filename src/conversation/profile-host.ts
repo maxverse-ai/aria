@@ -18,6 +18,7 @@ import type {
   NativeReadProfileRuntime,
   NativeReadRuntimeFactory,
 } from '../runtime/native-read-runtime';
+import type { MessageConversationKind } from '../runtime/message-resource';
 import { ConversationRuntime } from './runtime';
 
 export interface ProfileConversationNativeReadOptions {
@@ -42,6 +43,8 @@ export interface ProfileTextConversationInput {
   /** Deployment-owned authorization decision made before the agent is started. */
   authorized: boolean;
   source?: `channel:${string}`;
+  /** Shape of the external conversation. Defaults to a private conversation. */
+  conversationKind?: MessageConversationKind;
   /** Transport-native stable ID used to deduplicate and associate read resources. */
   sourceMessageId?: string;
 }
@@ -176,9 +179,11 @@ export async function createProfileConversationHost(
           sourceMessageId,
           direction: 'inbound',
           conversationKey: input.scopeId,
+          conversationKind: input.conversationKind ?? 'p2p',
           correlationId,
           occurredAt: new Date().toISOString(),
           actorSourceId: input.actorId,
+          actorKind: 'user',
           content: { format: 'plain-text', text: input.prompt },
         });
       }
@@ -191,6 +196,7 @@ export async function createProfileConversationHost(
           bindingId: `${flow.execution.runId}:session`,
           correlationId,
           conversationKey: input.scopeId,
+          conversationKind: input.conversationKind ?? 'p2p',
           sourceRunId: flow.execution.runId,
           agentKind: capability.agentId,
           sourceSessionId,
@@ -222,9 +228,11 @@ export async function createProfileConversationHost(
           sourceMessageId: outboundMessageId,
           direction: 'outbound',
           conversationKey: input.scopeId,
+          conversationKind: input.conversationKind ?? 'p2p',
           correlationId,
           occurredAt: new Date().toISOString(),
           actorSourceId: capability.agentId,
+          actorKind: 'bot',
           content: { format: 'plain-text', text: content },
         });
         await bindMessages();
@@ -278,7 +286,9 @@ async function observeNativeMessage(
       occurredAt: event.occurredAt,
       sourceMessageId: event.sourceMessageId,
       ...(event.actorSourceId ? { actorSourceId: event.actorSourceId } : {}),
-      actorKind: event.direction === 'inbound' ? 'user' : 'bot',
+      actorKind: event.actorKind === 'user' || event.actorKind === 'bot'
+        ? event.actorKind
+        : event.direction === 'inbound' ? 'user' : 'bot',
     }),
   ]).catch((error) => logNativeReadFailure('message-observe-failed', error));
 }

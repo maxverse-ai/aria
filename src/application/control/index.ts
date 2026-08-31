@@ -97,6 +97,7 @@ export type {
   ChannelChatObservation,
   ChannelIdentityObservation,
   ChannelIdentityProjectionResult,
+  ChannelMessageIdentityObservation,
   ChannelMemberObservation,
 } from './channel-identity-read-projector';
 export type {

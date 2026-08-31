@@ -13,6 +13,7 @@ import type {
   NativeReadChange,
   NativeReadCursor,
   NativeReadResource,
+  NativeSessionResource,
 } from '../../../src/application/control/native-read-types';
 import type { SessionCatalogEntry } from '../../../src/session/catalog';
 
@@ -79,6 +80,34 @@ describe('SessionCatalogReadProjector', () => {
       updatedAt: '1970-01-01T00:00:02.000Z',
       summary: 'new summary',
     });
+  });
+
+  it('preserves participants learned from message bindings across catalog refreshes', async () => {
+    const repository = new MemoryRepository('***REMOVED***');
+    const projector = new SessionCatalogReadProjector({ profileId: '***REMOVED***', repository });
+    const entry = catalogEntry({ agentId: 'codex', threadId: 'thread-1' });
+    await projector.project({ entries: [entry] });
+    const projected = repository.resources[0] as NativeSessionResource;
+    const { revision: _revision, ...draft } = projected;
+    await repository.upsert<NativeSessionResource>({
+      eventId: 'message-binding',
+      resource: {
+        ...draft,
+        updatedAt: '1970-01-01T00:00:03.000Z',
+        lastActivityAt: '1970-01-01T00:00:03.000Z',
+        participantIdentityIds: ['idn_actor'],
+      },
+    });
+
+    await projector.project({ entries: [{ ...entry, updatedAt: 2_000 }] });
+
+    expect(repository.resources).toEqual([
+      expect.objectContaining({
+        updatedAt: '1970-01-01T00:00:03.000Z',
+        lastActivityAt: '1970-01-01T00:00:03.000Z',
+        participantIdentityIds: ['idn_actor'],
+      }),
+    ]);
   });
 });
 

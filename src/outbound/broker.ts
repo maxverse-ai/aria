@@ -55,6 +55,7 @@ export class OutboundBroker {
             conversationKey: envelope.context.conversationId,
             correlationId: envelope.context.operationId,
             occurredAt,
+            actorKind: 'bot',
             content: envelope.sink === 'message.send'
               ? outboundContent(envelope.payload)
               : { format: 'unavailable' },

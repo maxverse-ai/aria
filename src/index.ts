@@ -217,4 +217,10 @@ export type { NativeReadScope } from './platform/native-read-http-server';
 export type { RunAuditEvent, RunAuditSink } from './runtime/run-executor';
 export type { GovernanceAuditAction, GovernanceAuditEvent, GovernanceAuditSink } from './runtime/governance-audit';
 export type { MessageAuditEvent, MessageAuditSink } from './runtime/message-audit';
-export type { MessageResourceEvent, MessageResourceSink, MessageSessionBinding } from './runtime/message-resource';
+export type {
+  MessageActorKind,
+  MessageConversationKind,
+  MessageResourceEvent,
+  MessageResourceSink,
+  MessageSessionBinding,
+} from './runtime/message-resource';
