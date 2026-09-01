@@ -1,9 +1,13 @@
 import type {
   WechatKfMessage,
+  WechatKfSendImageInput,
+  WechatKfSendImageResult,
   WechatKfSendTextInput,
   WechatKfSendTextResult,
   WechatKfSyncMessagesInput,
   WechatKfSyncMessagesResult,
+  WechatKfUploadImageInput,
+  WechatKfUploadImageResult,
 } from './types';
 
 export type WechatKfAccessTokenProvider = () => Promise<string>;
@@ -32,6 +36,15 @@ interface SyncResult extends ApiResult {
 interface SendResult extends ApiResult {
   msgid?: string;
 }
+
+interface UploadMediaResult extends ApiResult {
+  media_id?: string;
+  created_at?: number | string;
+}
+
+const WECHAT_KF_MIN_MEDIA_BYTES = 6;
+const WECHAT_KF_MAX_IMAGE_BYTES = 2 * 1024 * 1024;
+const WECHAT_KF_TEMPORARY_MEDIA_TTL_MS = 3 * 24 * 60 * 60 * 1000;
 
 export class WechatKfApiClient {
   private readonly accessToken: WechatKfAccessTokenProvider;
@@ -64,15 +77,11 @@ export class WechatKfApiClient {
   }
 
   async sendText(input: WechatKfSendTextInput): Promise<WechatKfSendTextResult> {
-    if (!input.externalUserId || !input.openKfid) {
-      throw new Error('wechat-kf recipient and openKfid are required');
-    }
+    assertRecipient(input.externalUserId, input.openKfid);
     if (Buffer.byteLength(input.content, 'utf8') > 2048) {
       throw new Error('wechat-kf text content exceeds 2048 bytes');
     }
-    if (input.messageId && !/^[0-9A-Za-z_-]{1,32}$/.test(input.messageId)) {
-      throw new Error('invalid wechat-kf messageId');
-    }
+    assertMessageId(input.messageId);
     const result = await this.post<SendResult>('/cgi-bin/kf/send_msg', {
       touser: input.externalUserId,
       open_kfid: input.openKfid,
@@ -84,16 +93,87 @@ export class WechatKfApiClient {
     return { messageId: result.msgid };
   }
 
+  async uploadImage(input: WechatKfUploadImageInput): Promise<WechatKfUploadImageResult> {
+    if (!(input.content instanceof Uint8Array)) {
+      throw new Error('wechat-kf image content must be bytes');
+    }
+    if (input.content.byteLength < WECHAT_KF_MIN_MEDIA_BYTES
+      || input.content.byteLength > WECHAT_KF_MAX_IMAGE_BYTES) {
+      throw new Error('wechat-kf image content must be between 6 bytes and 2 MiB');
+    }
+    if (input.contentType !== 'image/jpeg' && input.contentType !== 'image/png') {
+      throw new Error('wechat-kf image contentType must be image/jpeg or image/png');
+    }
+    if (!/^[^/\\\0\r\n]{1,128}\.(?:jpe?g|png)$/i.test(input.filename)) {
+      throw new Error('invalid wechat-kf image filename');
+    }
+    const form = new FormData();
+    form.append(
+      'media',
+      new Blob([Uint8Array.from(input.content)], { type: input.contentType }),
+      input.filename,
+    );
+    const result = await this.postForm<UploadMediaResult>(
+      '/cgi-bin/media/upload',
+      { type: 'image' },
+      form,
+    );
+    if (!result.media_id) throw new Error('wechat-kf media upload response is missing media_id');
+    const createdAt = Number(result.created_at);
+    if (!Number.isFinite(createdAt) || createdAt < 0) {
+      throw new Error('wechat-kf media upload response has invalid created_at');
+    }
+    return {
+      mediaId: result.media_id,
+      createdAt,
+      expiresAt: createdAt * 1000 + WECHAT_KF_TEMPORARY_MEDIA_TTL_MS,
+    };
+  }
+
+  async sendImage(input: WechatKfSendImageInput): Promise<WechatKfSendImageResult> {
+    assertRecipient(input.externalUserId, input.openKfid);
+    if (!input.mediaId || /[\0\r\n]/.test(input.mediaId)) {
+      throw new Error('invalid wechat-kf image mediaId');
+    }
+    assertMessageId(input.messageId);
+    const result = await this.post<SendResult>('/cgi-bin/kf/send_msg', {
+      touser: input.externalUserId,
+      open_kfid: input.openKfid,
+      ...(input.messageId ? { msgid: input.messageId } : {}),
+      msgtype: 'image',
+      image: { media_id: input.mediaId },
+    });
+    if (!result.msgid) throw new Error('wechat-kf send_msg response is missing msgid');
+    return { messageId: result.msgid };
+  }
+
   private async post<T extends ApiResult>(path: string, body: unknown): Promise<T> {
-    const accessToken = await this.accessToken();
-    if (!accessToken) throw new Error('wechat-kf access token provider returned an empty token');
-    const url = new URL(path, this.baseUrl);
-    url.searchParams.set('access_token', accessToken);
-    const response = await this.fetch(url, {
+    return this.request<T>(path, {}, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(body),
     });
+  }
+
+  private async postForm<T extends ApiResult>(
+    path: string,
+    query: Readonly<Record<string, string>>,
+    body: FormData,
+  ): Promise<T> {
+    return this.request<T>(path, query, { method: 'POST', body });
+  }
+
+  private async request<T extends ApiResult>(
+    path: string,
+    query: Readonly<Record<string, string>>,
+    init: RequestInit,
+  ): Promise<T> {
+    const accessToken = await this.accessToken();
+    if (!accessToken) throw new Error('wechat-kf access token provider returned an empty token');
+    const url = new URL(path, this.baseUrl);
+    url.searchParams.set('access_token', accessToken);
+    for (const [name, value] of Object.entries(query)) url.searchParams.set(name, value);
+    const response = await this.fetch(url, init);
     if (!response.ok) {
       throw new Error(`wechat-kf API HTTP ${response.status}`);
     }
@@ -102,6 +182,18 @@ export class WechatKfApiClient {
       throw new WechatKfApiError(result?.errcode, result?.errmsg);
     }
     return result;
+  }
+}
+
+function assertRecipient(externalUserId: string, openKfid: string): void {
+  if (!externalUserId || !openKfid) {
+    throw new Error('wechat-kf recipient and openKfid are required');
+  }
+}
+
+function assertMessageId(messageId: string | undefined): void {
+  if (messageId && !/^[0-9A-Za-z_-]{1,32}$/.test(messageId)) {
+    throw new Error('invalid wechat-kf messageId');
   }
 }
 

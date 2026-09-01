@@ -13,6 +13,12 @@ import {
   type WechatKfPreparedDelivery,
 } from './delivery-store';
 import { FileWechatKfOnboardingStore } from './onboarding-store';
+import {
+  textOnlyWechatKfAnswer,
+  type WechatKfAnswerComposer,
+  type WechatKfAnswerPart,
+  type WechatKfImageMaterializer,
+} from './outbound';
 import { renderWechatKfPlainText } from './plain-text-renderer';
 import type { WechatKfMessageSink } from './processor';
 import { FileWechatKfReceiptStore } from './receipt-store';
@@ -45,17 +51,21 @@ export interface WechatKfProcessingFeedback {
 
 export interface WechatKfTextHandlerOptions {
   host: Pick<ProfileConversationHost, 'runText' | 'reset' | 'interrupt'>;
-  api: Pick<WechatKfApiClient, 'sendText'>;
+  api: Pick<WechatKfApiClient, 'sendText' | 'sendImage'>;
   sessionHmacSecret: string;
   onboarding: FileWechatKfOnboardingStore;
   receipts: FileWechatKfReceiptStore;
   deliveries: FileWechatKfDeliveryStore;
   authorized: boolean | ((message: WechatKfMessage) => boolean);
   userCopy?: Readonly<WechatKfUserCopy>;
+  answerComposer?: WechatKfAnswerComposer;
+  imageMaterializer?: WechatKfImageMaterializer;
   processingFeedback?: WechatKfProcessingFeedback;
   audit?: { record(event: WechatKfCommandAuditEvent): Promise<void> };
   onWelcomeError?: (error: unknown) => void;
+  onAnswerComposeError?: (error: unknown) => void;
   onRenderError?: (error: unknown) => void;
+  now?: () => number;
 }
 
 /** Deterministic wxkf text/command adapter. No command reaches the agent. */
@@ -162,11 +172,8 @@ export class WechatKfTextHandler implements WechatKfMessageSink {
         await feedback?.beforeFinal();
         return;
       }
-      const prepared = await this.prepareDurableContent(
-        message,
-        result.ok ? result.content : result.userVisible,
-        'answer',
-      );
+      const answer = result.ok ? result.content : result.userVisible;
+      const prepared = await this.prepareDurableAnswer(message, answer);
       await feedback?.beforeFinal();
       await this.deliverPrepared(message, prepared);
     } finally {
@@ -219,8 +226,54 @@ export class WechatKfTextHandler implements WechatKfMessageSink {
     return this.options.deliveries.create(
       message.msgid,
       splitWechatKfText(rendered).map((chunk, index) => ({
+        kind: 'text' as const,
         content: chunk,
         messageId: stableOutboundMessageId(kind, message.msgid, index),
+      })),
+    );
+  }
+
+  private async prepareDurableAnswer(
+    message: WechatKfMessage,
+    content: string,
+  ): Promise<WechatKfPreparedDelivery> {
+    const chunks: Array<
+      | { kind: 'text'; content: string }
+      | { kind: 'image'; assetRef: string }
+    > = [];
+    try {
+      const answer: ReadonlyArray<WechatKfAnswerPart> = this.options.answerComposer
+        ? await this.options.answerComposer({ content })
+        : textOnlyWechatKfAnswer(content);
+      if (answer.length === 0) throw new Error('wxkf answer composer returned no parts');
+      for (const part of answer) {
+        if (part.kind === 'image') {
+          if (!this.options.imageMaterializer) {
+            throw new Error('wxkf answer image materializer is unavailable');
+          }
+          if (!/^[^\0\r\n]{1,1024}$/.test(part.assetRef)) {
+            throw new Error('invalid wxkf answer image assetRef');
+          }
+          chunks.push({ kind: 'image', assetRef: part.assetRef });
+          continue;
+        }
+        for (const text of splitWechatKfText(this.renderContent(part.content))) {
+          chunks.push({ kind: 'text', content: text });
+        }
+      }
+    } catch (error) {
+      if (!this.options.answerComposer) throw error;
+      this.options.onAnswerComposeError?.(error);
+      chunks.length = 0;
+      for (const text of splitWechatKfText(this.renderContent(content))) {
+        chunks.push({ kind: 'text', content: text });
+      }
+    }
+    return this.options.deliveries.create(
+      message.msgid,
+      chunks.map((chunk, index) => ({
+        ...chunk,
+        messageId: stableOutboundMessageId('answer', message.msgid, index),
       })),
     );
   }
@@ -260,12 +313,40 @@ export class WechatKfTextHandler implements WechatKfMessageSink {
   ): Promise<void> {
     for (const [index, chunk] of prepared.chunks.entries()) {
       if (chunk.deliveredAt !== undefined) continue;
-      await this.options.api.sendText({
-        externalUserId: message.external_userid!,
-        openKfid: message.open_kfid!,
-        content: chunk.content,
-        messageId: chunk.messageId,
-      });
+      if (chunk.kind === 'image') {
+        let mediaId = chunk.mediaId;
+        const now = (this.options.now ?? Date.now)();
+        if (!mediaId || (chunk.mediaExpiresAt !== undefined && chunk.mediaExpiresAt <= now)) {
+          if (!this.options.imageMaterializer) {
+            throw new Error('wxkf answer image materializer is unavailable');
+          }
+          const materialized = await this.options.imageMaterializer({ assetRef: chunk.assetRef });
+          if (!/^[^\0\r\n]{1,512}$/.test(materialized.mediaId)
+            || (materialized.expiresAt !== undefined
+              && (!Number.isFinite(materialized.expiresAt) || materialized.expiresAt <= now))) {
+            throw new Error('invalid wxkf image materialization');
+          }
+          await this.options.deliveries.markImageMaterialized(
+            message.msgid,
+            index,
+            materialized,
+          );
+          mediaId = materialized.mediaId;
+        }
+        await this.options.api.sendImage({
+          externalUserId: message.external_userid!,
+          openKfid: message.open_kfid!,
+          mediaId,
+          messageId: chunk.messageId,
+        });
+      } else {
+        await this.options.api.sendText({
+          externalUserId: message.external_userid!,
+          openKfid: message.open_kfid!,
+          content: chunk.content,
+          messageId: chunk.messageId,
+        });
+      }
       await this.options.deliveries.markDelivered(message.msgid, index);
     }
   }

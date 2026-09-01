@@ -160,7 +160,10 @@ export type {
 export { FileWechatKfDeliveryStore } from './channel/wechat-kf/delivery-store';
 export type {
   WechatKfDeliveryChunk,
+  WechatKfDeliveryChunkInput,
+  WechatKfImageDeliveryChunk,
   WechatKfPreparedDelivery,
+  WechatKfTextDeliveryChunk,
 } from './channel/wechat-kf/delivery-store';
 export { FileWechatKfCursorStore } from './channel/wechat-kf/cursor-store';
 export type {
@@ -176,6 +179,20 @@ export { FileWechatKfNotificationInbox } from './channel/wechat-kf/inbox';
 export type { FileWechatKfNotificationInboxOptions } from './channel/wechat-kf/inbox';
 export { FileWechatKfMessageInbox } from './channel/wechat-kf/message-inbox';
 export { FileWechatKfOnboardingStore } from './channel/wechat-kf/onboarding-store';
+export {
+  extractWechatKfMarkdownImages,
+  renderWechatKfPlainText,
+} from './channel/wechat-kf/plain-text-renderer';
+export type { WechatKfMarkdownImage } from './channel/wechat-kf/plain-text-renderer';
+export { textOnlyWechatKfAnswer } from './channel/wechat-kf/outbound';
+export type {
+  WechatKfAnswerComposer,
+  WechatKfAnswerComposerInput,
+  WechatKfAnswerPart,
+  WechatKfImageMaterialization,
+  WechatKfImageMaterializer,
+  WechatKfImageMaterializerInput,
+} from './channel/wechat-kf/outbound';
 export { WechatKfNotificationProcessor } from './channel/wechat-kf/processor';
 export type {
   WechatKfMessageSink,
@@ -200,10 +217,15 @@ export type {
   WechatKfMessage,
   WechatKfNotification,
   WechatKfNotificationSink,
+  WechatKfImageContentType,
+  WechatKfSendImageInput,
+  WechatKfSendImageResult,
   WechatKfSendTextInput,
   WechatKfSendTextResult,
   WechatKfSyncMessagesInput,
   WechatKfSyncMessagesResult,
+  WechatKfUploadImageInput,
+  WechatKfUploadImageResult,
 } from './channel/wechat-kf/types';
 
 // Stable outbound contracts. Aria itself is pass-through; deployments may

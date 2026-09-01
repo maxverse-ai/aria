@@ -51,3 +51,28 @@ export interface WechatKfSendTextInput {
 export interface WechatKfSendTextResult {
   messageId: string;
 }
+
+export type WechatKfImageContentType = 'image/jpeg' | 'image/png';
+
+export interface WechatKfUploadImageInput {
+  content: Uint8Array;
+  filename: string;
+  contentType: WechatKfImageContentType;
+}
+
+export interface WechatKfUploadImageResult {
+  mediaId: string;
+  createdAt: number;
+  expiresAt: number;
+}
+
+export interface WechatKfSendImageInput {
+  externalUserId: string;
+  openKfid: string;
+  mediaId: string;
+  messageId?: string;
+}
+
+export interface WechatKfSendImageResult {
+  messageId: string;
+}
