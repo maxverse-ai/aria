@@ -8,6 +8,10 @@ import {
   type WechatKfUserCopy,
 } from './commands';
 import type { WechatKfApiClient } from './client';
+import {
+  FileWechatKfDeliveryStore,
+  type WechatKfPreparedDelivery,
+} from './delivery-store';
 import { FileWechatKfOnboardingStore } from './onboarding-store';
 import { renderWechatKfPlainText } from './plain-text-renderer';
 import type { WechatKfMessageSink } from './processor';
@@ -45,6 +49,7 @@ export interface WechatKfTextHandlerOptions {
   sessionHmacSecret: string;
   onboarding: FileWechatKfOnboardingStore;
   receipts: FileWechatKfReceiptStore;
+  deliveries: FileWechatKfDeliveryStore;
   authorized: boolean | ((message: WechatKfMessage) => boolean);
   userCopy?: Readonly<WechatKfUserCopy>;
   processingFeedback?: WechatKfProcessingFeedback;
@@ -68,13 +73,16 @@ export class WechatKfTextHandler implements WechatKfMessageSink {
 
   accept(message: WechatKfMessage): Promise<void> {
     const receiptKey = messageReceiptKey(message.msgid);
-    if (this.options.receipts.hasCompleted(receiptKey)) return Promise.resolve();
+    if (this.options.receipts.hasCompleted(receiptKey)) {
+      return this.options.deliveries.remove(message.msgid);
+    }
     const existing = this.inFlight.get(receiptKey);
     if (existing) return existing;
     const operation = this.process(message, receiptKey)
       .then(async () => {
         this.options.receipts.markCompleted(receiptKey);
         await this.options.receipts.flush();
+        await this.options.deliveries.remove(message.msgid);
       })
       .finally(() => {
         if (this.inFlight.get(receiptKey) === operation) this.inFlight.delete(receiptKey);
@@ -93,31 +101,35 @@ export class WechatKfTextHandler implements WechatKfMessageSink {
     }
     const actorId = wechatKfActorId(this.options.sessionHmacSecret, externalUserId);
     const scopeId = wechatKfScopeId(this.options.sessionHmacSecret, openKfid, externalUserId);
+    const prepared = await this.options.deliveries.get(message.msgid);
+    if (prepared) {
+      await this.deliverPrepared(message, prepared);
+      return;
+    }
     const command = parseWechatKfCommand(message.text.content);
 
     if (command) {
       try {
         if (command.kind === 'help') {
           await this.runOnboardingOperation(actorId, async () => {
-            await this.sendContent(message, this.helpText, 'help', message.msgid);
+            await this.sendDurableContent(message, this.helpText, 'help');
             this.options.onboarding.markIntroduced(actorId);
             await this.options.onboarding.flush();
           });
         } else if (command.kind === 'new') {
           await this.options.host.reset(scopeId);
-          await this.sendContent(message, '已开启新会话，你可以开始提问。', 'new', message.msgid);
+          await this.sendDurableContent(message, '已开启新会话，你可以开始提问。', 'new');
         } else if (command.kind === 'stop') {
           const interrupted = await this.options.host.interrupt(scopeId);
-          await this.sendContent(
+          await this.sendDurableContent(
             message,
             interrupted ? '已停止当前查询。' : '当前没有正在查询的内容。',
             'stop',
-            message.msgid,
           );
           await this.audit(command.kind, scopeId, sourceMessageKey, 'success', interrupted);
           return;
         } else {
-          await this.sendContent(message, '不支持该命令，请发送 /help。', 'unknown', message.msgid);
+          await this.sendDurableContent(message, '不支持该命令，请发送 /help。', 'unknown');
         }
         await this.audit(command.kind, scopeId, sourceMessageKey, 'success');
       } catch (error) {
@@ -146,14 +158,17 @@ export class WechatKfTextHandler implements WechatKfMessageSink {
         conversationKind: 'p2p',
         sourceMessageId: message.msgid,
       });
-      await feedback?.beforeFinal();
-      if (!result.ok && result.code === 'run-interrupted') return;
-      await this.sendContent(
+      if (!result.ok && result.code === 'run-interrupted') {
+        await feedback?.beforeFinal();
+        return;
+      }
+      const prepared = await this.prepareDurableContent(
         message,
         result.ok ? result.content : result.userVisible,
         'answer',
-        message.msgid,
       );
+      await feedback?.beforeFinal();
+      await this.deliverPrepared(message, prepared);
     } finally {
       await feedback?.finish();
     }
@@ -163,7 +178,7 @@ export class WechatKfTextHandler implements WechatKfMessageSink {
     await this.runOnboardingOperation(actorId, async () => {
       if (this.options.onboarding.hasIntroduced(actorId)) return;
       try {
-        await this.sendContent(message, this.welcomeText, 'welcome', actorId);
+        await this.sendBestEffortContent(message, this.welcomeText, 'welcome', actorId);
         this.options.onboarding.markIntroduced(actorId);
         await this.options.onboarding.flush();
       } catch (error) {
@@ -186,14 +201,48 @@ export class WechatKfTextHandler implements WechatKfMessageSink {
     return operation;
   }
 
-  private async sendContent(
+  private async sendDurableContent(
+    message: WechatKfMessage,
+    content: string,
+    kind: string,
+  ): Promise<void> {
+    const prepared = await this.prepareDurableContent(message, content, kind);
+    await this.deliverPrepared(message, prepared);
+  }
+
+  private async prepareDurableContent(
+    message: WechatKfMessage,
+    content: string,
+    kind: string,
+  ): Promise<WechatKfPreparedDelivery> {
+    const rendered = this.renderContent(content);
+    return this.options.deliveries.create(
+      message.msgid,
+      splitWechatKfText(rendered).map((chunk, index) => ({
+        content: chunk,
+        messageId: stableOutboundMessageId(kind, message.msgid, index),
+      })),
+    );
+  }
+
+  private async sendBestEffortContent(
     message: WechatKfMessage,
     content: string,
     kind: string,
     stableSource: string,
   ): Promise<void> {
-    const externalUserId = message.external_userid!;
-    const openKfid = message.open_kfid!;
+    const rendered = this.renderContent(content);
+    for (const [index, chunk] of splitWechatKfText(rendered).entries()) {
+      await this.options.api.sendText({
+        externalUserId: message.external_userid!,
+        openKfid: message.open_kfid!,
+        content: chunk,
+        messageId: stableOutboundMessageId(kind, stableSource, index),
+      });
+    }
+  }
+
+  private renderContent(content: string): string {
     const source = content || '暂时没有生成可发送的回答，请稍后重试。';
     let rendered: string;
     try {
@@ -202,16 +251,22 @@ export class WechatKfTextHandler implements WechatKfMessageSink {
       this.options.onRenderError?.(error);
       rendered = '回答已生成，但暂时无法整理为可发送格式，请稍后重试。';
     }
-    const chunks = splitWechatKfText(
-      rendered || '暂时没有生成可发送的回答，请稍后重试。',
-    );
-    for (const [index, chunk] of chunks.entries()) {
+    return rendered || '暂时没有生成可发送的回答，请稍后重试。';
+  }
+
+  private async deliverPrepared(
+    message: WechatKfMessage,
+    prepared: WechatKfPreparedDelivery,
+  ): Promise<void> {
+    for (const [index, chunk] of prepared.chunks.entries()) {
+      if (chunk.deliveredAt !== undefined) continue;
       await this.options.api.sendText({
-        externalUserId,
-        openKfid,
-        content: chunk,
-        messageId: stableOutboundMessageId(kind, stableSource, index),
+        externalUserId: message.external_userid!,
+        openKfid: message.open_kfid!,
+        content: chunk.content,
+        messageId: chunk.messageId,
       });
+      await this.options.deliveries.markDelivered(message.msgid, index);
     }
   }
 

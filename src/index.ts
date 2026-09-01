@@ -157,6 +157,11 @@ export type {
   WechatKfDurableMessageSinkOptions,
   WechatKfProcessingErrorContext,
 } from './channel/wechat-kf/durable-sink';
+export { FileWechatKfDeliveryStore } from './channel/wechat-kf/delivery-store';
+export type {
+  WechatKfDeliveryChunk,
+  WechatKfPreparedDelivery,
+} from './channel/wechat-kf/delivery-store';
 export { FileWechatKfCursorStore } from './channel/wechat-kf/cursor-store';
 export type {
   FileWechatKfCursorStoreOptions,
