@@ -1,0 +1,100 @@
+import { describe, expect, it } from 'vitest';
+import { renderWechatKfPlainText } from '../../../src/channel/wechat-kf/plain-text-renderer';
+
+describe('renderWechatKfPlainText', () => {
+  it('keeps ordinary text readable and normalizes outer whitespace', () => {
+    expect(renderWechatKfPlainText('  ***REMOVED*** S3 支持 HDR。\n')).toBe('***REMOVED*** S3 支持 HDR。');
+    expect(renderWechatKfPlainText('')).toBe('');
+  });
+
+  it('renders headings, emphasis, quotes, and rules without markdown markers', () => {
+    expect(renderWechatKfPlainText([
+      '## HDR 支持情况',
+      '',
+      '> **S3 5.2** 支持 *HDR*。',
+      '',
+      '---',
+      '',
+      '~~旧说明~~',
+    ].join('\n'))).toBe([
+      'HDR 支持情况',
+      '',
+      'S3 5.2 支持 HDR。',
+      '',
+      '旧说明',
+    ].join('\n'));
+  });
+
+  it('renders ordered, unordered, nested, and task lists', () => {
+    expect(renderWechatKfPlainText([
+      '- S3',
+      '  - **5.2**',
+      '  - [x] HDR',
+      '1. 准备设备',
+      '2. 开启输出',
+    ].join('\n'))).toBe([
+      '• S3',
+      '  • 5.2',
+      '  • ☑ HDR',
+      '',
+      '1. 准备设备',
+      '2. 开启输出',
+    ].join('\n'));
+  });
+
+  it('preserves code content while removing code markup and language labels', () => {
+    expect(renderWechatKfPlainText([
+      '运行 `status --format=json`。',
+      '',
+      '```bash',
+      '# literal comment',
+      'value="**literal**"',
+      '```',
+    ].join('\n'))).toBe([
+      '运行 status --format=json。',
+      '',
+      '# literal comment',
+      'value="**literal**"',
+    ].join('\n'));
+  });
+
+  it('renders links, autolinks, and images as plain text', () => {
+    expect(renderWechatKfPlainText([
+      '[查看说明](https://example.com/docs)',
+      '<https://example.com/status>',
+      '![接口图](https://example.com/image.png)',
+    ].join('\n'))).toBe([
+      '查看说明：https://example.com/docs',
+      'https://example.com/status',
+      '图片：接口图（https://example.com/image.png）',
+    ].join('\n'));
+  });
+
+  it('renders tables without markdown separators', () => {
+    expect(renderWechatKfPlainText([
+      '| 型号 | HDR |',
+      '| --- | --- |',
+      '| **S3** | 支持 |',
+    ].join('\n'))).toBe([
+      '型号 ｜ HDR',
+      'S3 ｜ 支持',
+    ].join('\n'));
+  });
+
+  it('keeps visible HTML text without executing or exposing tags', () => {
+    expect(renderWechatKfPlainText([
+      '<div>***REMOVED*** <b>S3</b></div>',
+      '<script>alert("secret")</script>',
+      'Tom &amp; Jerry &#x1F642;',
+    ].join('\n'))).toBe([
+      '***REMOVED*** S3',
+      '',
+      'Tom & Jerry 🙂',
+    ].join('\n'));
+  });
+
+  it('is idempotent for its own rendered output', () => {
+    const once = renderWechatKfPlainText('## 标题\n\n- **结论**：支持');
+    expect(renderWechatKfPlainText(once)).toBe(once);
+  });
+});
