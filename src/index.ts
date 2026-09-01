@@ -137,8 +137,10 @@ export type {
   WechatKfFetch,
 } from './channel/wechat-kf/client';
 export {
+  DEFAULT_WECHAT_KF_USER_COPY,
   parseWechatKfCommand,
   renderWechatKfHelp,
+  renderWechatKfWelcome,
   WECHAT_KF_COMMANDS,
   WECHAT_KF_WELCOME_TEXT,
 } from './channel/wechat-kf/commands';
@@ -146,6 +148,7 @@ export type {
   WechatKfCommandDefinition,
   WechatKfCommandKind,
   WechatKfCommandMatch,
+  WechatKfUserCopy,
 } from './channel/wechat-kf/commands';
 export { WechatKfCrypto } from './channel/wechat-kf/crypto';
 export type { WechatKfCryptoOptions } from './channel/wechat-kf/crypto';

@@ -3,8 +3,9 @@ import type { ProfileConversationHost } from '../../conversation/profile-host';
 import {
   parseWechatKfCommand,
   renderWechatKfHelp,
-  WECHAT_KF_WELCOME_TEXT,
+  renderWechatKfWelcome,
   type WechatKfCommandKind,
+  type WechatKfUserCopy,
 } from './commands';
 import type { WechatKfApiClient } from './client';
 import { FileWechatKfOnboardingStore } from './onboarding-store';
@@ -45,6 +46,7 @@ export interface WechatKfTextHandlerOptions {
   onboarding: FileWechatKfOnboardingStore;
   receipts: FileWechatKfReceiptStore;
   authorized: boolean | ((message: WechatKfMessage) => boolean);
+  userCopy?: Readonly<WechatKfUserCopy>;
   processingFeedback?: WechatKfProcessingFeedback;
   audit?: { record(event: WechatKfCommandAuditEvent): Promise<void> };
   onWelcomeError?: (error: unknown) => void;
@@ -55,9 +57,13 @@ export interface WechatKfTextHandlerOptions {
 export class WechatKfTextHandler implements WechatKfMessageSink {
   private readonly inFlight = new Map<string, Promise<void>>();
   private readonly onboardingInFlight = new Map<string, Promise<void>>();
+  private readonly welcomeText: string;
+  private readonly helpText: string;
 
   constructor(private readonly options: WechatKfTextHandlerOptions) {
     if (!options.sessionHmacSecret) throw new Error('wxkf session HMAC secret is required');
+    this.welcomeText = renderWechatKfWelcome(options.userCopy);
+    this.helpText = renderWechatKfHelp(options.userCopy);
   }
 
   accept(message: WechatKfMessage): Promise<void> {
@@ -93,7 +99,7 @@ export class WechatKfTextHandler implements WechatKfMessageSink {
       try {
         if (command.kind === 'help') {
           await this.runOnboardingOperation(actorId, async () => {
-            await this.sendContent(message, renderWechatKfHelp(), 'help', message.msgid);
+            await this.sendContent(message, this.helpText, 'help', message.msgid);
             this.options.onboarding.markIntroduced(actorId);
             await this.options.onboarding.flush();
           });
@@ -157,7 +163,7 @@ export class WechatKfTextHandler implements WechatKfMessageSink {
     await this.runOnboardingOperation(actorId, async () => {
       if (this.options.onboarding.hasIntroduced(actorId)) return;
       try {
-        await this.sendContent(message, WECHAT_KF_WELCOME_TEXT, 'welcome', actorId);
+        await this.sendContent(message, this.welcomeText, 'welcome', actorId);
         this.options.onboarding.markIntroduced(actorId);
         await this.options.onboarding.flush();
       } catch (error) {
