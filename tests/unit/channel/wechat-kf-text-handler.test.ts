@@ -41,7 +41,7 @@ describe('WechatKfTextHandler', () => {
       source: 'channel:wechat-kf',
     }));
     expect(harness.api.sendText).toHaveBeenCalledTimes(3);
-    expect(harness.api.sendText.mock.calls[0]?.[0].content).toContain('***REMOVED*** 产品助手');
+    expect(harness.api.sendText.mock.calls[0]?.[0].content).toContain('产品助手');
   });
 
   it('serializes first help against a concurrent ordinary message without duplicate welcome', async () => {
@@ -79,7 +79,27 @@ describe('WechatKfTextHandler', () => {
     expect(warning).toHaveBeenCalledOnce();
     expect(harness.host.runText).toHaveBeenCalledTimes(2);
     expect(harness.api.sendText).toHaveBeenCalledTimes(4);
-    expect(harness.api.sendText.mock.calls[2]?.[0].content).toContain('***REMOVED*** 产品助手');
+    expect(harness.api.sendText.mock.calls[2]?.[0].content).toContain('产品助手');
+  });
+
+  it('uses injected product copy for onboarding and help without changing commands', async () => {
+    const userCopy = {
+      welcomeIntroduction: '你好，我是 Example 产品助手。',
+      helpTitle: 'Example 产品助手',
+      helpPrompt: '直接发送 Example 产品问题即可。',
+    };
+    const onboardingHarness = await createHarness({ userCopy });
+    await onboardingHarness.handler.accept(message('m-branded-question', '普通问题'));
+    expect(onboardingHarness.api.sendText.mock.calls[0]?.[0].content).toContain(
+      userCopy.welcomeIntroduction,
+    );
+
+    const helpHarness = await createHarness({ userCopy });
+    await helpHarness.handler.accept(message('m-branded-help', '/help'));
+    const help = helpHarness.api.sendText.mock.calls[0]?.[0].content;
+    expect(help).toContain(userCopy.helpTitle);
+    expect(help).toContain(userCopy.helpPrompt);
+    expect(help).toContain('/new：归档当前上下文并开启新会话');
   });
 
   it('routes new, stop, and unknown commands deterministically', async () => {
@@ -207,6 +227,7 @@ describe('WechatKfTextHandler', () => {
 async function createHarness(options: {
   onWelcomeError?: (error: unknown) => void;
   processingFeedback?: import('../../../src/channel/wechat-kf/text-handler').WechatKfProcessingFeedback;
+  userCopy?: import('../../../src/channel/wechat-kf/commands').WechatKfUserCopy;
 } = {}) {
   const root = await mkdtemp(join(tmpdir(), 'aria-wxkf-handler-'));
   roots.push(root);

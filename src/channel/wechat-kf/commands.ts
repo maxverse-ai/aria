@@ -11,6 +11,12 @@ export type WechatKfCommandMatch =
   | { kind: WechatKfCommandKind; definition: WechatKfCommandDefinition }
   | { kind: 'unknown'; input: string };
 
+export interface WechatKfUserCopy {
+  welcomeIntroduction: string;
+  helpTitle: string;
+  helpPrompt: string;
+}
+
 export const WECHAT_KF_COMMANDS: readonly WechatKfCommandDefinition[] = Object.freeze([
   Object.freeze({
     kind: 'help',
@@ -38,13 +44,26 @@ for (const command of WECHAT_KF_COMMANDS) {
   for (const alias of command.aliases) COMMAND_LOOKUP.set(normalize(alias), command);
 }
 
-export const WECHAT_KF_WELCOME_TEXT = [
-  '你好，我是 ***REMOVED*** 产品助手，可以查询产品功能、规格、型号和版本差异。',
-  '直接发送问题即可。',
-  '/help 查看帮助',
-  '/new 开启新会话',
-  '/stop 停止当前查询',
-].join('\n');
+export const DEFAULT_WECHAT_KF_USER_COPY: Readonly<WechatKfUserCopy> = Object.freeze({
+  welcomeIntroduction: '你好，我是产品助手，可以查询产品功能、规格、型号和版本差异。',
+  helpTitle: '产品助手',
+  helpPrompt: '直接发送产品功能、规格、型号或版本问题即可。',
+});
+
+export const WECHAT_KF_WELCOME_TEXT = renderWechatKfWelcome();
+
+export function renderWechatKfWelcome(
+  userCopy: Readonly<WechatKfUserCopy> = DEFAULT_WECHAT_KF_USER_COPY,
+): string {
+  assertWechatKfUserCopy(userCopy);
+  return [
+    userCopy.welcomeIntroduction,
+    '直接发送问题即可。',
+    '/help 查看帮助',
+    '/new 开启新会话',
+    '/stop 停止当前查询',
+  ].join('\n');
+}
 
 export function parseWechatKfCommand(text: string): WechatKfCommandMatch | undefined {
   const input = text.trim();
@@ -55,13 +74,25 @@ export function parseWechatKfCommand(text: string): WechatKfCommandMatch | undef
   return undefined;
 }
 
-export function renderWechatKfHelp(): string {
+export function renderWechatKfHelp(
+  userCopy: Readonly<WechatKfUserCopy> = DEFAULT_WECHAT_KF_USER_COPY,
+): string {
+  assertWechatKfUserCopy(userCopy);
   return [
-    '***REMOVED*** 产品助手',
-    '直接发送产品功能、规格、型号或版本问题即可。',
+    userCopy.helpTitle,
+    userCopy.helpPrompt,
     '',
     ...WECHAT_KF_COMMANDS.map((command) => `${command.canonical}：${command.description}`),
   ].join('\n');
+}
+
+function assertWechatKfUserCopy(userCopy: Readonly<WechatKfUserCopy>): void {
+  for (const field of ['welcomeIntroduction', 'helpTitle', 'helpPrompt'] as const) {
+    const value = userCopy?.[field];
+    if (typeof value !== 'string' || !value || value.trim() !== value || /[\0\r\n]/.test(value)) {
+      throw new Error(`wxkf user copy ${field} is missing or invalid`);
+    }
+  }
 }
 
 function normalize(value: string): string {
