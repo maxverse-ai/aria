@@ -11,8 +11,8 @@ export interface WechatKfAnswerComposerInput {
  * Deployment-owned answer composition seam.
  *
  * Aria owns wxkf transport and durable delivery. Deployments may resolve
- * product-specific, pre-authorized assets and return already-uploaded media
- * IDs without exposing those policies to the reusable channel adapter.
+ * product-specific, pre-authorized assets and return opaque references without
+ * exposing filesystem or authorization policies to the reusable adapter.
  */
 export type WechatKfAnswerComposer = (
   input: Readonly<WechatKfAnswerComposerInput>,
