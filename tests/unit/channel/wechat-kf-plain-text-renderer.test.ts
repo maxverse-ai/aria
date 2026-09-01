@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { renderWechatKfPlainText } from '../../../src/channel/wechat-kf/plain-text-renderer';
+import {
+  extractWechatKfMarkdownImages,
+  renderWechatKfPlainText,
+} from '../../../src/channel/wechat-kf/plain-text-renderer';
 
 describe('renderWechatKfPlainText', () => {
   it('keeps ordinary text readable and normalizes outer whitespace', () => {
@@ -68,6 +71,37 @@ describe('renderWechatKfPlainText', () => {
       'https://example.com/status',
       '图片：接口图（https://example.com/image.png）',
     ].join('\n'));
+  });
+
+  it('does not expose local image paths in plain-text fallbacks', () => {
+    expect(renderWechatKfPlainText([
+      '![产品图](/data/external-product/workspace/kb/assets/product.png)',
+      '![受控图](kb-asset://external/product.png)',
+    ].join('\n'))).toBe([
+      '图片：产品图',
+      '图片：受控图',
+    ].join('\n'));
+  });
+
+  it('extracts nested markdown image syntax without authorizing its href', () => {
+    expect(extractWechatKfMarkdownImages([
+      '- ![产品图](/data/external-product/workspace/kb/assets/product.png)',
+      '',
+      '| 预览 |',
+      '| --- |',
+      '| ![表格图](https://example.com/table.png) |',
+    ].join('\n'))).toEqual([
+      {
+        raw: '![产品图](/data/external-product/workspace/kb/assets/product.png)',
+        text: '产品图',
+        href: '/data/external-product/workspace/kb/assets/product.png',
+      },
+      {
+        raw: '![表格图](https://example.com/table.png)',
+        text: '表格图',
+        href: 'https://example.com/table.png',
+      },
+    ]);
   });
 
   it('renders tables without markdown separators', () => {

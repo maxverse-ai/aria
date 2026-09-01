@@ -257,6 +257,117 @@ describe('WechatKfTextHandler', () => {
     expect(await harness.deliveries.get(input.msgid)).toBeUndefined();
   });
 
+  it('delivers a deployment-composed text and image answer in order', async () => {
+    const answerComposer = vi.fn().mockResolvedValue([
+      { kind: 'text', content: '**产品示意图**' },
+      { kind: 'image', assetRef: 'kb-asset://approved/product-image' },
+    ]);
+    const imageMaterializer = vi.fn().mockResolvedValue({
+      mediaId: 'approved-media-id',
+      expiresAt: 10_000,
+    });
+    const harness = await createHarness({ answerComposer, imageMaterializer, now: () => 1_000 });
+
+    await harness.handler.accept(message('m-image-answer', '请发产品示意图'));
+
+    expect(answerComposer).toHaveBeenCalledWith({ content: '查询结果' });
+    expect(imageMaterializer).toHaveBeenCalledWith({
+      assetRef: 'kb-asset://approved/product-image',
+    });
+    expect(harness.api.sendText.mock.calls.at(-1)?.[0].content).toBe('产品示意图');
+    expect(harness.api.sendImage).toHaveBeenCalledWith({
+      externalUserId: 'wm_user',
+      openKfid: 'wk123',
+      mediaId: 'approved-media-id',
+      messageId: expect.stringMatching(/^[0-9A-Za-z_-]{32}$/),
+    });
+  });
+
+  it('resumes an undelivered image without rerunning or recomposing the answer', async () => {
+    const answerComposer = vi.fn().mockResolvedValue([
+      { kind: 'text', content: '说明' },
+      { kind: 'image', assetRef: 'kb-asset://approved/product-image' },
+    ]);
+    const imageMaterializer = vi.fn().mockResolvedValue({
+      mediaId: 'approved-media-id',
+      expiresAt: 10_000,
+    });
+    const harness = await createHarness({
+      answerComposer,
+      imageMaterializer,
+      now: () => 1_000,
+    });
+    harness.api.sendImage
+      .mockRejectedValueOnce(new Error('image unavailable'))
+      .mockResolvedValueOnce({ messageId: 'image-sent' });
+    const input = message('m-image-retry', '请发产品示意图');
+
+    await expect(harness.handler.accept(input)).rejects.toThrow('image unavailable');
+    expect(await harness.deliveries.get(input.msgid)).toMatchObject({
+      schemaVersion: 2,
+      chunks: [
+        { kind: 'text', content: '说明', deliveredAt: expect.any(Number) },
+        {
+          kind: 'image',
+          assetRef: 'kb-asset://approved/product-image',
+          mediaId: 'approved-media-id',
+          mediaExpiresAt: 10_000,
+        },
+      ],
+    });
+
+    await harness.handler.accept(input);
+    expect(harness.host.runText).toHaveBeenCalledOnce();
+    expect(answerComposer).toHaveBeenCalledOnce();
+    expect(imageMaterializer).toHaveBeenCalledOnce();
+    expect(harness.api.sendImage).toHaveBeenCalledTimes(2);
+  });
+
+  it('rematerializes an expired image checkpoint before retrying delivery', async () => {
+    let now = 1_000;
+    const answerComposer = vi.fn().mockResolvedValue([
+      { kind: 'image', assetRef: 'kb-asset://approved/product-image' },
+    ]);
+    const imageMaterializer = vi.fn()
+      .mockResolvedValueOnce({ mediaId: 'media-old', expiresAt: 2_000 })
+      .mockResolvedValueOnce({ mediaId: 'media-new', expiresAt: 5_000 });
+    const harness = await createHarness({
+      answerComposer,
+      imageMaterializer,
+      now: () => now,
+    });
+    harness.api.sendImage
+      .mockRejectedValueOnce(new Error('image unavailable'))
+      .mockResolvedValueOnce({ messageId: 'image-sent' });
+    const input = message('m-image-expired', '请发产品示意图');
+
+    await expect(harness.handler.accept(input)).rejects.toThrow('image unavailable');
+    now = 3_000;
+    await harness.handler.accept(input);
+
+    expect(harness.host.runText).toHaveBeenCalledOnce();
+    expect(answerComposer).toHaveBeenCalledOnce();
+    expect(imageMaterializer).toHaveBeenCalledTimes(2);
+    expect(harness.api.sendImage.mock.calls.map((call) => call[0].mediaId)).toEqual([
+      'media-old',
+      'media-new',
+    ]);
+  });
+
+  it('falls back to the text answer when deployment composition fails', async () => {
+    const onAnswerComposeError = vi.fn();
+    const harness = await createHarness({
+      answerComposer: vi.fn().mockRejectedValue(new Error('asset policy unavailable')),
+      onAnswerComposeError,
+    });
+
+    await harness.handler.accept(message('m-image-fallback', '普通问题'));
+
+    expect(onAnswerComposeError).toHaveBeenCalledOnce();
+    expect(harness.api.sendText.mock.calls.at(-1)?.[0].content).toBe('查询结果');
+    expect(harness.api.sendImage).not.toHaveBeenCalled();
+  });
+
   it('resumes only undelivered answer chunks after a partial send failure', async () => {
     const harness = await createHarness();
     await harness.handler.accept(message('m-onboarding', '准备'));
@@ -287,8 +398,12 @@ describe('WechatKfTextHandler', () => {
 
 async function createHarness(options: {
   onWelcomeError?: (error: unknown) => void;
+  onAnswerComposeError?: (error: unknown) => void;
+  answerComposer?: import('../../../src/channel/wechat-kf/outbound').WechatKfAnswerComposer;
+  imageMaterializer?: import('../../../src/channel/wechat-kf/outbound').WechatKfImageMaterializer;
   processingFeedback?: import('../../../src/channel/wechat-kf/text-handler').WechatKfProcessingFeedback;
   userCopy?: import('../../../src/channel/wechat-kf/commands').WechatKfUserCopy;
+  now?: () => number;
 } = {}) {
   const root = await mkdtemp(join(tmpdir(), 'aria-wxkf-handler-'));
   roots.push(root);
@@ -305,7 +420,10 @@ async function createHarness(options: {
     reset: ReturnType<typeof vi.fn>;
     interrupt: ReturnType<typeof vi.fn>;
   };
-  const api = { sendText: vi.fn().mockResolvedValue({ messageId: 'sent' }) };
+  const api = {
+    sendText: vi.fn().mockResolvedValue({ messageId: 'sent' }),
+    sendImage: vi.fn().mockResolvedValue({ messageId: 'sent-image' }),
+  };
   const handler = new WechatKfTextHandler({
     host,
     api,

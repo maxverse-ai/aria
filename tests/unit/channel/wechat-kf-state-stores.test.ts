@@ -1,4 +1,5 @@
-import { readFile, mkdtemp, readdir, rm } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { readFile, mkdtemp, mkdir, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -54,16 +55,73 @@ describe('wxkf durable state stores', () => {
 
     const reloaded = new FileWechatKfDeliveryStore(directory);
     expect(await reloaded.get('raw-transport-message-id')).toEqual({
-      schemaVersion: 1,
+      schemaVersion: 2,
       createdAt: 1000,
       chunks: [
-        { content: 'first', messageId: 'stable-part-0', deliveredAt: 1100 },
-        { content: 'second', messageId: 'stable-part-1' },
+        { kind: 'text', content: 'first', messageId: 'stable-part-0', deliveredAt: 1100 },
+        { kind: 'text', content: 'second', messageId: 'stable-part-1' },
       ],
     });
     const names = await readdir(directory);
     expect(names).toHaveLength(1);
     expect(names[0]).not.toContain('raw-transport-message-id');
+  });
+
+  it('persists mixed text and image delivery progress', async () => {
+    const root = await temporaryRoot();
+    const directory = join(root, 'deliveries');
+    const store = new FileWechatKfDeliveryStore(directory);
+    await store.create('mixed-delivery', [
+      { kind: 'text', content: '说明', messageId: 'stable-text' },
+      {
+        kind: 'image',
+        assetRef: 'kb-asset://approved/product-image',
+        messageId: 'stable-image',
+      },
+    ], 2000);
+    await store.markImageMaterialized('mixed-delivery', 1, {
+      mediaId: 'approved-media',
+      expiresAt: 3000,
+    });
+    await store.markDelivered('mixed-delivery', 1, 2100);
+
+    expect(await store.get('mixed-delivery')).toEqual({
+      schemaVersion: 2,
+      createdAt: 2000,
+      chunks: [
+        { kind: 'text', content: '说明', messageId: 'stable-text' },
+        {
+          kind: 'image',
+          assetRef: 'kb-asset://approved/product-image',
+          mediaId: 'approved-media',
+          mediaExpiresAt: 3000,
+          messageId: 'stable-image',
+          deliveredAt: 2100,
+        },
+      ],
+    });
+  });
+
+  it('reads an existing schema-v1 text checkpoint as a schema-v2 delivery', async () => {
+    const root = await temporaryRoot();
+    const directory = join(root, 'deliveries');
+    const sourceMessageId = 'legacy-delivery';
+    const digest = createHash('sha256')
+      .update(`wxkf-delivery:v1:${sourceMessageId}`)
+      .digest('base64url');
+    await mkdir(directory, { recursive: true });
+    await writeFile(join(directory, `${digest}.json`), JSON.stringify({
+      schemaVersion: 1,
+      createdAt: 3000,
+      chunks: [{ content: '旧回答', messageId: 'legacy-part' }],
+    }));
+
+    const store = new FileWechatKfDeliveryStore(directory);
+    expect(await store.get(sourceMessageId)).toEqual({
+      schemaVersion: 2,
+      createdAt: 3000,
+      chunks: [{ kind: 'text', content: '旧回答', messageId: 'legacy-part' }],
+    });
   });
 
   it('keeps a force-fresh generation until the matching new session clears it', async () => {

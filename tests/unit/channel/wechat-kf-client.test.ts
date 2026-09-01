@@ -54,6 +54,84 @@ describe('WechatKfApiClient', () => {
     expect(fetch).toHaveBeenCalledTimes(1);
   });
 
+  it('uploads a validated image as multipart media', async () => {
+    const fetch = vi.fn<WechatKfFetch>().mockResolvedValue(jsonResponse({
+      errcode: 0,
+      errmsg: 'ok',
+      media_id: 'media_1',
+      created_at: '1234',
+    }));
+    const client = new WechatKfApiClient({ accessToken: async () => 'access', fetch });
+
+    await expect(client.uploadImage({
+      content: Uint8Array.from([137, 80, 78, 71, 13, 10]),
+      filename: 'product.png',
+      contentType: 'image/png',
+    })).resolves.toEqual({
+      mediaId: 'media_1',
+      createdAt: 1234,
+      expiresAt: 1234 * 1000 + 3 * 24 * 60 * 60 * 1000,
+    });
+
+    const [url, init] = fetch.mock.calls[0]!;
+    expect(url).toEqual(new URL(
+      'https://qyapi.weixin.qq.com/cgi-bin/media/upload?access_token=access&type=image',
+    ));
+    expect(init).toMatchObject({ method: 'POST' });
+    expect(init?.headers).toBeUndefined();
+    expect(init?.body).toBeInstanceOf(FormData);
+    const media = (init?.body as FormData).get('media');
+    expect(media).toBeInstanceOf(Blob);
+    expect((media as File).name).toBe('product.png');
+    expect((media as Blob).type).toBe('image/png');
+  });
+
+  it('sends an image media id with a stable outbound message id', async () => {
+    const fetch = vi.fn<WechatKfFetch>().mockResolvedValue(jsonResponse({
+      errcode: 0,
+      errmsg: 'ok',
+      msgid: 'reply_image_1',
+    }));
+    const client = new WechatKfApiClient({ accessToken: async () => 'access', fetch });
+
+    await expect(client.sendImage({
+      externalUserId: 'wm_user',
+      openKfid: 'wk123',
+      mediaId: 'media_1',
+      messageId: 'image_part_1',
+    })).resolves.toEqual({ messageId: 'reply_image_1' });
+    expect(fetch).toHaveBeenCalledWith(
+      new URL('https://qyapi.weixin.qq.com/cgi-bin/kf/send_msg?access_token=access'),
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({
+          touser: 'wm_user',
+          open_kfid: 'wk123',
+          msgid: 'image_part_1',
+          msgtype: 'image',
+          image: { media_id: 'media_1' },
+        }),
+      }),
+    );
+  });
+
+  it('rejects unsafe image inputs before network I/O', async () => {
+    const fetch = vi.fn<WechatKfFetch>();
+    const client = new WechatKfApiClient({ accessToken: async () => 'access', fetch });
+
+    await expect(client.uploadImage({
+      content: Uint8Array.from([1, 2, 3, 4, 5]),
+      filename: '../product.png',
+      contentType: 'image/png',
+    })).rejects.toThrow('between 6 bytes and 2 MiB');
+    await expect(client.uploadImage({
+      content: Uint8Array.from([1, 2, 3, 4, 5, 6]),
+      filename: '../product.png',
+      contentType: 'image/png',
+    })).rejects.toThrow('filename');
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
   it('exposes WeCom API errors with their numeric code', async () => {
     const client = new WechatKfApiClient({
       accessToken: async () => 'access',

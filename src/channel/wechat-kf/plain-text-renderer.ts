@@ -1,5 +1,11 @@
 import { Lexer, type Token, type Tokens } from 'marked';
 
+export interface WechatKfMarkdownImage {
+  raw: string;
+  text: string;
+  href: string;
+}
+
 /**
  * Render Markdown-shaped agent output for WeChat KF's text-only send_msg API.
  *
@@ -14,6 +20,19 @@ export function renderWechatKfPlainText(input: string): string {
     gfm: true,
   });
   return normalizeOutput(renderBlocks(tokens));
+}
+
+/** Extract syntax only. Callers remain responsible for authorizing every href. */
+export function extractWechatKfMarkdownImages(input: string): WechatKfMarkdownImage[] {
+  if (!input) return [];
+  const tokens = Lexer.lex(input.replace(/\r\n?/g, '\n'), {
+    async: false,
+    breaks: false,
+    gfm: true,
+  });
+  const images: WechatKfMarkdownImage[] = [];
+  collectImages(tokens, images);
+  return images;
 }
 
 function renderBlocks(tokens: readonly Token[], depth = 0): string {
@@ -134,9 +153,42 @@ function renderLink(link: Tokens.Link): string {
 function renderImage(image: Tokens.Image): string {
   const label = normalizeInline(renderInline(image.tokens) || image.text);
   const href = decodeHtmlEntities(image.href).trim();
+  if (isLocalResourceReference(href)) return label ? `图片：${label}` : '图片';
   if (label && href) return `图片：${label}（${href}）`;
   if (label) return `图片：${label}`;
   return href ? `图片：${href}` : '图片';
+}
+
+function collectImages(tokens: readonly Token[], output: WechatKfMarkdownImage[]): void {
+  for (const token of tokens) {
+    if (token.type === 'image') {
+      const image = token as Tokens.Image;
+      output.push({
+        raw: image.raw,
+        text: normalizeInline(renderInline(image.tokens) || image.text),
+        href: decodeHtmlEntities(image.href).trim(),
+      });
+      continue;
+    }
+    if (token.type === 'list') {
+      for (const item of (token as Tokens.List).items) collectImages(item.tokens, output);
+      continue;
+    }
+    if (token.type === 'table') {
+      const table = token as Tokens.Table;
+      for (const cell of [...table.header, ...table.rows.flat()]) collectImages(cell.tokens, output);
+      continue;
+    }
+    const nested = (token as Tokens.Generic).tokens;
+    if (nested) collectImages(nested, output);
+  }
+}
+
+function isLocalResourceReference(href: string): boolean {
+  return href.startsWith('/')
+    || href.startsWith('file:')
+    || href.startsWith('kb-asset:')
+    || /^[A-Za-z]:[\\/]/.test(href);
 }
 
 function renderUnknownToken(token: Token): string {
