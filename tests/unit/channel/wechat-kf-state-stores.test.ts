@@ -1,9 +1,10 @@
-import { readFile, mkdtemp, rm } from 'node:fs/promises';
+import { readFile, mkdtemp, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { FileWechatKfOnboardingStore } from '../../../src/channel/wechat-kf/onboarding-store';
 import { FileWechatKfReceiptStore } from '../../../src/channel/wechat-kf/receipt-store';
+import { FileWechatKfDeliveryStore } from '../../../src/channel/wechat-kf/delivery-store';
 import { SessionResetStore } from '../../../src/session/reset-store';
 
 const roots: string[] = [];
@@ -39,6 +40,30 @@ describe('wxkf durable state stores', () => {
     const reloaded = new FileWechatKfReceiptStore(path);
     await reloaded.load();
     expect(reloaded.hasCompleted(key)).toBe(true);
+  });
+
+  it('persists delivery progress without exposing the transport message id in its filename', async () => {
+    const root = await temporaryRoot();
+    const directory = join(root, 'deliveries');
+    const store = new FileWechatKfDeliveryStore(directory);
+    await store.create('raw-transport-message-id', [
+      { content: 'first', messageId: 'stable-part-0' },
+      { content: 'second', messageId: 'stable-part-1' },
+    ], 1000);
+    await store.markDelivered('raw-transport-message-id', 0, 1100);
+
+    const reloaded = new FileWechatKfDeliveryStore(directory);
+    expect(await reloaded.get('raw-transport-message-id')).toEqual({
+      schemaVersion: 1,
+      createdAt: 1000,
+      chunks: [
+        { content: 'first', messageId: 'stable-part-0', deliveredAt: 1100 },
+        { content: 'second', messageId: 'stable-part-1' },
+      ],
+    });
+    const names = await readdir(directory);
+    expect(names).toHaveLength(1);
+    expect(names[0]).not.toContain('raw-transport-message-id');
   });
 
   it('keeps a force-fresh generation until the matching new session clears it', async () => {

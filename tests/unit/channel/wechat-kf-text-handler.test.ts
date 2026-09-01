@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ProfileConversationHost } from '../../../src/conversation/profile-host';
 import { FileWechatKfOnboardingStore } from '../../../src/channel/wechat-kf/onboarding-store';
 import { FileWechatKfReceiptStore } from '../../../src/channel/wechat-kf/receipt-store';
+import { FileWechatKfDeliveryStore } from '../../../src/channel/wechat-kf/delivery-store';
 import { WechatKfTextHandler } from '../../../src/channel/wechat-kf/text-handler';
 import type { WechatKfMessage } from '../../../src/channel/wechat-kf/types';
 
@@ -131,13 +132,22 @@ describe('WechatKfTextHandler', () => {
 
   it('settles ordinary-message feedback before sending the final answer', async () => {
     const events: string[] = [];
+    let inspectCheckpoint = async () => {};
     const processingFeedback = {
       begin: vi.fn(() => ({
-        async beforeFinal() { events.push('before-final'); },
+        async beforeFinal() {
+          events.push('before-final');
+          await inspectCheckpoint();
+        },
         async finish() { events.push('finish'); },
       })),
     };
     const harness = await createHarness({ processingFeedback });
+    inspectCheckpoint = async () => {
+      expect(await harness.deliveries.get('m-feedback')).toMatchObject({
+        chunks: [{ content: '查询结果' }],
+      });
+    };
     harness.host.runText.mockImplementationOnce(async () => {
       events.push('run');
       return { ok: true, runId: 'run-feedback', content: '查询结果' };
@@ -222,6 +232,57 @@ describe('WechatKfTextHandler', () => {
     expect(beforeFinal).not.toHaveBeenCalled();
     expect(finish).toHaveBeenCalledOnce();
   });
+
+  it('retries a failed final delivery without rerunning the agent', async () => {
+    const harness = await createHarness();
+    const input = message('m-delivery-retry', '普通问题');
+    harness.api.sendText
+      .mockResolvedValueOnce({ messageId: 'welcome' })
+      .mockRejectedValueOnce(new Error('send unavailable'))
+      .mockResolvedValueOnce({ messageId: 'answer' });
+
+    await expect(harness.handler.accept(input)).rejects.toThrow('send unavailable');
+    expect(harness.host.runText).toHaveBeenCalledOnce();
+    expect(await harness.deliveries.get(input.msgid)).toMatchObject({
+      chunks: [{ content: '查询结果' }],
+    });
+
+    await harness.handler.accept(input);
+    expect(harness.host.runText).toHaveBeenCalledOnce();
+    expect(harness.api.sendText.mock.calls.map((call) => call[0].content)).toEqual([
+      expect.stringContaining('产品助手'),
+      '查询结果',
+      '查询结果',
+    ]);
+    expect(await harness.deliveries.get(input.msgid)).toBeUndefined();
+  });
+
+  it('resumes only undelivered answer chunks after a partial send failure', async () => {
+    const harness = await createHarness();
+    await harness.handler.accept(message('m-onboarding', '准备'));
+    harness.host.runText.mockResolvedValueOnce({
+      ok: true,
+      runId: 'run-long-retry',
+      content: '中'.repeat(900),
+    });
+    harness.api.sendText.mockClear();
+    harness.api.sendText
+      .mockResolvedValueOnce({ messageId: 'part-0' })
+      .mockRejectedValueOnce(new Error('part unavailable'))
+      .mockResolvedValueOnce({ messageId: 'part-1' });
+    const input = message('m-partial-delivery', '详细回答');
+
+    await expect(harness.handler.accept(input)).rejects.toThrow('part unavailable');
+    expect(harness.host.runText).toHaveBeenCalledTimes(2);
+    await harness.handler.accept(input);
+
+    expect(harness.host.runText).toHaveBeenCalledTimes(2);
+    expect(harness.api.sendText).toHaveBeenCalledTimes(3);
+    expect(harness.api.sendText.mock.calls[0]?.[0].content).not.toBe(
+      harness.api.sendText.mock.calls[1]?.[0].content,
+    );
+    expect(harness.api.sendText.mock.calls[2]?.[0]).toEqual(harness.api.sendText.mock.calls[1]?.[0]);
+  });
 });
 
 async function createHarness(options: {
@@ -233,6 +294,7 @@ async function createHarness(options: {
   roots.push(root);
   const onboarding = new FileWechatKfOnboardingStore(join(root, 'onboarding.json'));
   const receipts = new FileWechatKfReceiptStore(join(root, 'receipts.json'));
+  const deliveries = new FileWechatKfDeliveryStore(join(root, 'deliveries'));
   await Promise.all([onboarding.load(), receipts.load()]);
   const host = {
     runText: vi.fn().mockResolvedValue({ ok: true, runId: 'run-1', content: '查询结果' }),
@@ -250,10 +312,11 @@ async function createHarness(options: {
     sessionHmacSecret: 'test-secret',
     onboarding,
     receipts,
+    deliveries,
     authorized: true,
     ...options,
   });
-  return { handler, host, api };
+  return { handler, host, api, deliveries };
 }
 
 function message(msgid: string, content: string): WechatKfMessage {
