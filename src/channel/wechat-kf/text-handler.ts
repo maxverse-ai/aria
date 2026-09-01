@@ -8,6 +8,7 @@ import {
 } from './commands';
 import type { WechatKfApiClient } from './client';
 import { FileWechatKfOnboardingStore } from './onboarding-store';
+import { renderWechatKfPlainText } from './plain-text-renderer';
 import type { WechatKfMessageSink } from './processor';
 import { FileWechatKfReceiptStore } from './receipt-store';
 import { wechatKfActorId, wechatKfScopeId } from './session';
@@ -47,6 +48,7 @@ export interface WechatKfTextHandlerOptions {
   processingFeedback?: WechatKfProcessingFeedback;
   audit?: { record(event: WechatKfCommandAuditEvent): Promise<void> };
   onWelcomeError?: (error: unknown) => void;
+  onRenderError?: (error: unknown) => void;
 }
 
 /** Deterministic wxkf text/command adapter. No command reaches the agent. */
@@ -186,7 +188,17 @@ export class WechatKfTextHandler implements WechatKfMessageSink {
   ): Promise<void> {
     const externalUserId = message.external_userid!;
     const openKfid = message.open_kfid!;
-    const chunks = splitWechatKfText(content || '暂时没有生成可发送的回答，请稍后重试。');
+    const source = content || '暂时没有生成可发送的回答，请稍后重试。';
+    let rendered: string;
+    try {
+      rendered = renderWechatKfPlainText(source);
+    } catch (error) {
+      this.options.onRenderError?.(error);
+      rendered = '回答已生成，但暂时无法整理为可发送格式，请稍后重试。';
+    }
+    const chunks = splitWechatKfText(
+      rendered || '暂时没有生成可发送的回答，请稍后重试。',
+    );
     for (const [index, chunk] of chunks.entries()) {
       await this.options.api.sendText({
         externalUserId,

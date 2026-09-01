@@ -137,6 +137,37 @@ describe('WechatKfTextHandler', () => {
     expect(events).toEqual(['run', 'before-final', 'answer', 'finish']);
   });
 
+  it('renders markdown to plain text before splitting and sending an answer', async () => {
+    const harness = await createHarness();
+    harness.host.runText.mockResolvedValueOnce({
+      ok: true,
+      runId: 'run-markdown',
+      content: '## HDR 支持情况\n\n- **S3 5.2**：支持 HDR',
+    });
+
+    await harness.handler.accept(message('m-markdown', 'S3 支持 HDR 吗？'));
+
+    expect(harness.api.sendText.mock.calls.at(-1)?.[0].content).toBe(
+      'HDR 支持情况\n\n• S3 5.2：支持 HDR',
+    );
+  });
+
+  it('renders the complete answer before applying the byte limit', async () => {
+    const harness = await createHarness();
+    harness.host.runText.mockResolvedValueOnce({
+      ok: true,
+      runId: 'run-long-markdown',
+      content: `**${'中'.repeat(900)}**`,
+    });
+
+    await harness.handler.accept(message('m-long-markdown', '请详细说明'));
+
+    const answerChunks = harness.api.sendText.mock.calls.slice(1).map((call) => call[0].content);
+    expect(answerChunks).toHaveLength(2);
+    expect(answerChunks.join('')).toBe('中'.repeat(900));
+    expect(answerChunks.every((chunk) => Buffer.byteLength(chunk, 'utf8') <= 2048)).toBe(true);
+  });
+
   it('settles feedback when an ordinary run is interrupted without sending an answer', async () => {
     const beforeFinal = vi.fn().mockResolvedValue(undefined);
     const finish = vi.fn().mockResolvedValue(undefined);
