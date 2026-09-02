@@ -93,8 +93,24 @@ describe('createProfileConversationHost', () => {
       authorized: true,
       source: 'channel:wechat-kf',
     })).resolves.toEqual({ ok: true, runId: expect.any(String), content: '微信最终回复' });
-    expect(seen).toHaveLength(1);
+    await expect(host.run({
+      scopeId: 'wechat-kf:kf:user-hash',
+      actorId: 'user-hash',
+      prompt: '分析图片',
+      authorized: true,
+      source: 'channel:wechat-kf',
+      attachments: [{
+        kind: 'image',
+        path: join(root, 'image.png'),
+        hash: 'image-hash',
+        size: 8,
+        requiredness: 'required',
+        decision: 'accepted',
+      }],
+    })).resolves.toMatchObject({ ok: true, content: '微信最终回复' });
+    expect(seen).toHaveLength(2);
     expect(seen[0]?.prompt).toBe('你好');
+    expect(seen[1]?.images).toEqual([join(root, 'image.png')]);
     await host.close();
   });
 
@@ -204,13 +220,17 @@ describe('createProfileConversationHost', () => {
       },
     });
 
-    await expect(host.runText({
+    await expect(host.run({
       scopeId: 'wechat-kf:kf:user-hash',
       actorId: 'user-hash',
       prompt: '查询设备信息',
       authorized: true,
       source: 'channel:wechat-kf',
       sourceMessageId: 'wechat-message-1',
+      attachments: [{
+        kind: 'image', path: join(root, 'image.png'), hash: 'image-hash', size: 8,
+        requiredness: 'required', decision: 'accepted',
+      }],
     })).resolves.toMatchObject({ ok: true, content: '已找到答案' });
 
     expect(createRuntime).toHaveBeenCalledWith(expect.objectContaining({ profile: 'wechat-kf' }));
@@ -219,6 +239,7 @@ describe('createProfileConversationHost', () => {
     expect(observe).toHaveBeenNthCalledWith(1, expect.objectContaining({
       sourceMessageId: 'wechat-message-1', direction: 'inbound',
       conversationKind: 'p2p', actorKind: 'user',
+      attachmentSourceIds: ['image-hash'],
     }));
     expect(observe).toHaveBeenNthCalledWith(2, expect.objectContaining({
       sourceMessageId: expect.stringContaining('wechat-message-1:assistant:'),

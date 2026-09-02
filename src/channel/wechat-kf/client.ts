@@ -1,4 +1,6 @@
 import type {
+  WechatKfDownloadImageInput,
+  WechatKfDownloadImageResult,
   WechatKfMessage,
   WechatKfSendImageInput,
   WechatKfSendImageResult,
@@ -14,7 +16,8 @@ export type WechatKfAccessTokenProvider = () => Promise<string>;
 export type WechatKfFetch = (
   input: string | URL,
   init?: RequestInit,
-) => Promise<Pick<Response, 'ok' | 'status' | 'json'>>;
+) => Promise<Pick<Response, 'ok' | 'status' | 'json'> &
+  Partial<Pick<Response, 'arrayBuffer' | 'headers'>>>;
 
 export interface WechatKfApiClientOptions {
   accessToken: WechatKfAccessTokenProvider;
@@ -44,6 +47,7 @@ interface UploadMediaResult extends ApiResult {
 
 const WECHAT_KF_MIN_MEDIA_BYTES = 6;
 const WECHAT_KF_MAX_IMAGE_BYTES = 2 * 1024 * 1024;
+const WECHAT_KF_MAX_DOWNLOAD_BYTES = 20 * 1024 * 1024;
 const WECHAT_KF_TEMPORARY_MEDIA_TTL_MS = 3 * 24 * 60 * 60 * 1000;
 
 export class WechatKfApiClient {
@@ -130,6 +134,56 @@ export class WechatKfApiClient {
     };
   }
 
+  async downloadImage(input: WechatKfDownloadImageInput): Promise<WechatKfDownloadImageResult> {
+    if (!input.mediaId || /[\0\r\n]/.test(input.mediaId)) {
+      throw new Error('invalid wechat-kf image mediaId');
+    }
+    const maxBytes = input.maxBytes ?? WECHAT_KF_MAX_DOWNLOAD_BYTES;
+    if (!Number.isSafeInteger(maxBytes) || maxBytes < WECHAT_KF_MIN_MEDIA_BYTES
+      || maxBytes > WECHAT_KF_MAX_DOWNLOAD_BYTES) {
+      throw new Error('wechat-kf image maxBytes must be between 6 bytes and 20 MiB');
+    }
+    const accessToken = await this.accessToken();
+    if (!accessToken) throw new Error('wechat-kf access token provider returned an empty token');
+    const url = new URL('/cgi-bin/media/get', this.baseUrl);
+    url.searchParams.set('access_token', accessToken);
+    url.searchParams.set('media_id', input.mediaId);
+    const response = await this.fetch(url, {
+      method: 'GET',
+      headers: { range: `bytes=0-${maxBytes}` },
+    });
+    if (!response.ok) throw new Error(`wechat-kf API HTTP ${response.status}`);
+    const responseType = response.headers?.get('content-type')?.split(';', 1)[0]?.trim().toLowerCase();
+    if (responseType === 'application/json' || responseType === 'text/json') {
+      const result = await response.json() as Partial<ApiResult>;
+      throw new WechatKfApiError(result.errcode, result.errmsg);
+    }
+    const contentRange = response.headers?.get('content-range');
+    const totalBytes = contentRange?.match(/\/(\d+)$/)?.[1];
+    const declaredBytes = response.headers?.get('content-length');
+    if ((totalBytes && Number(totalBytes) > maxBytes)
+      || (declaredBytes && Number(declaredBytes) > maxBytes)) {
+      throw new WechatKfMediaError(
+        'image-too-large',
+        `wechat-kf downloaded image exceeds ${maxBytes} bytes`,
+      );
+    }
+    if (!response.arrayBuffer) throw new Error('wechat-kf media response body is unavailable');
+    const content = new Uint8Array(await response.arrayBuffer());
+    if (content.byteLength < WECHAT_KF_MIN_MEDIA_BYTES || content.byteLength > maxBytes) {
+      throw new WechatKfMediaError(
+        content.byteLength > maxBytes ? 'image-too-large' : 'invalid-image',
+        `wechat-kf downloaded image must be between 6 bytes and ${maxBytes} bytes`,
+      );
+    }
+    const contentType = detectWechatKfImageType(content, responseType);
+    return {
+      content,
+      contentType,
+      filename: `wechat-kf-image.${contentType === 'image/png' ? 'png' : 'jpg'}`,
+    };
+  }
+
   async sendImage(input: WechatKfSendImageInput): Promise<WechatKfSendImageResult> {
     assertRecipient(input.externalUserId, input.openKfid);
     if (!input.mediaId || /[\0\r\n]/.test(input.mediaId)) {
@@ -205,4 +259,32 @@ export class WechatKfApiError extends Error {
     this.name = 'WechatKfApiError';
     this.code = code;
   }
+}
+
+export class WechatKfMediaError extends Error {
+  constructor(
+    readonly code: 'image-too-large' | 'invalid-image',
+    message: string,
+  ) {
+    super(message);
+    this.name = 'WechatKfMediaError';
+  }
+}
+
+function detectWechatKfImageType(
+  content: Uint8Array,
+  responseType: string | undefined,
+): WechatKfDownloadImageResult['contentType'] {
+  const isPng = content.length >= 8
+    && [137, 80, 78, 71, 13, 10, 26, 10].every((byte, index) => content[index] === byte);
+  const isJpeg = content.length >= 3
+    && content[0] === 0xff && content[1] === 0xd8 && content[2] === 0xff;
+  if (responseType === 'image/png' && isPng) return 'image/png';
+  if ((responseType === 'image/jpeg' || responseType === 'image/jpg') && isJpeg) return 'image/jpeg';
+  if (isPng) return 'image/png';
+  if (isJpeg) return 'image/jpeg';
+  throw new WechatKfMediaError(
+    'invalid-image',
+    'wechat-kf media response is not a supported image',
+  );
 }

@@ -23,6 +23,9 @@ export interface WechatKfMessage {
     content: string;
     menu_id?: string;
   };
+  image?: {
+    media_id: string;
+  };
   event?: Record<string, unknown>;
   [key: string]: unknown;
 }
@@ -53,6 +56,17 @@ export interface WechatKfSendTextResult {
 }
 
 export type WechatKfImageContentType = 'image/jpeg' | 'image/png';
+
+export interface WechatKfDownloadImageInput {
+  mediaId: string;
+  maxBytes?: number;
+}
+
+export interface WechatKfDownloadImageResult {
+  content: Uint8Array;
+  contentType: WechatKfImageContentType;
+  filename: string;
+}
 
 export interface WechatKfUploadImageInput {
   content: Uint8Array;

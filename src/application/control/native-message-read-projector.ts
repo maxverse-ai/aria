@@ -66,7 +66,11 @@ export class NativeMessageReadProjector implements MessageResourceSink {
           format: hasText ? event.content.format : 'unavailable',
           ...(hasText ? { text: event.content.text } : {}),
         },
-        attachmentIds: [],
+        attachmentIds: [...new Set(event.attachmentSourceIds ?? [])]
+          .map((sourceId) => nativeReadOpaqueId(
+            'attachment', this.options.profileId, sourceId,
+          ))
+          .sort(),
       };
       await this.options.repository.upsert({
         eventId: sourceEventId(this.options.profileId, event.eventId),

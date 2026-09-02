@@ -15,6 +15,8 @@ export interface MessageResourceEvent {
     format: 'plain-text' | 'markdown' | 'structured' | 'unavailable';
     text?: string;
   };
+  /** Stable source identifiers; projectors convert them to provider-opaque IDs. */
+  attachmentSourceIds?: readonly string[];
 }
 
 export interface MessageSessionBinding {

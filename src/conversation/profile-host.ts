@@ -6,6 +6,7 @@ import { resolveAppPaths } from '../config/app-paths';
 import { getAgentStopGraceMs, getMaxConcurrentRuns } from '../config/schema';
 import { log } from '../core/logger';
 import type { AccessDecision } from '../policy/access';
+import type { AgentAttachment } from '../policy/run-policy';
 import { SessionCatalog } from '../session/catalog';
 import { SessionResetStore } from '../session/reset-store';
 import { SessionStore } from '../session/store';
@@ -51,6 +52,10 @@ export interface ProfileTextConversationInput {
   sourceMessageId?: string;
 }
 
+export interface ProfileConversationInput extends ProfileTextConversationInput {
+  attachments: AgentAttachment[];
+}
+
 export type ProfileTextConversationResult =
   | { ok: true; runId: string; content: string }
   | { ok: false; code: string; userVisible: string };
@@ -61,6 +66,7 @@ export interface ProfileConversationResetResult {
 }
 
 export interface ProfileConversationHost {
+  run(input: ProfileConversationInput): Promise<ProfileTextConversationResult>;
   runText(input: ProfileTextConversationInput): Promise<ProfileTextConversationResult>;
   /** Stop the run currently owned by this scope, if one exists. */
   interrupt(scopeId: string): Promise<boolean>;
@@ -181,11 +187,14 @@ export async function createProfileConversationHost(
     return state.generation;
   };
 
-  return {
-    async runText(input) {
+  const host: ProfileConversationHost = {
+    async run(input) {
       if (closed) throw new Error('profile conversation host is closed');
-      if (!input.scopeId || !input.actorId || !input.prompt.trim()) {
-        throw new Error('scopeId, actorId, and prompt are required');
+      const hasAcceptedAttachment = input.attachments.some(
+        (attachment) => attachment.decision === 'accepted',
+      );
+      if (!input.scopeId || !input.actorId || (!input.prompt.trim() && !hasAcceptedAttachment)) {
+        throw new Error('scopeId, actorId, and prompt or accepted attachment are required');
       }
       if (nativeRead && !input.sourceMessageId) {
         throw new Error('sourceMessageId is required when profile native read is enabled');
@@ -212,7 +221,7 @@ export async function createProfileConversationHost(
             actorId: input.actorId,
           },
           prompt: input.prompt,
-          attachments: [],
+          attachments: input.attachments,
           access,
           capability,
           profileConfig: resolved.profileConfig,
@@ -273,7 +282,14 @@ export async function createProfileConversationHost(
             occurredAt: new Date().toISOString(),
             actorSourceId: input.actorId,
             actorKind: 'user',
-            content: { format: 'plain-text', text: input.prompt },
+            content: {
+              format: input.prompt.trim() ? 'plain-text' : 'unavailable',
+              ...(input.prompt.trim() ? { text: input.prompt } : {}),
+            },
+            attachmentSourceIds: input.attachments
+              .filter((attachment) => attachment.decision === 'accepted')
+              .map((attachment) => attachment.hash)
+              .filter((hash): hash is string => Boolean(hash)),
           });
         }
 
@@ -360,6 +376,9 @@ export async function createProfileConversationHost(
         }
       }
     },
+    runText(input) {
+      return host.run({ ...input, attachments: [] });
+    },
     interrupt(scopeId) {
       return interruptScope(scopeId);
     },
@@ -420,6 +439,7 @@ export async function createProfileConversationHost(
       await engine.dispose();
     },
   };
+  return host;
 }
 
 function assertScopeId(scopeId: string): void {

@@ -40,9 +40,13 @@ describe('NativeMessageReadProjector', () => {
       conversationKey: 'oc_secret', occurredAt: '2026-08-27T00:00:00.000Z',
       conversationKind: 'group', actorSourceId: 'ou_secret', actorKind: 'user',
       content: { format: 'plain-text', text: 'real prompt' },
+      attachmentSourceIds: ['image-secret'],
     });
     const [pending] = await repository.list<NativeMessageResource>('message');
-    expect(pending).toMatchObject({ associationStatus: 'pending', sequence: 1 });
+    expect(pending).toMatchObject({
+      associationStatus: 'pending', sequence: 1,
+      attachmentIds: [expect.stringMatching(/^att_/)],
+    });
     expect(pending).not.toHaveProperty('sessionId');
 
     const binding = {
@@ -77,7 +81,9 @@ describe('NativeMessageReadProjector', () => {
     await projector.bind(binding);
     expect(await repository.currentCursor()).toBe(cursor);
     const journal = await readFile(journalFile, 'utf8');
-    for (const raw of ['om_secret', 'oc_secret', 'ou_secret', 'thread-secret', 'run-secret']) {
+    for (const raw of [
+      'om_secret', 'oc_secret', 'ou_secret', 'thread-secret', 'run-secret', 'image-secret',
+    ]) {
       expect(journal).not.toContain(raw);
     }
     expect(journal).toContain('real prompt');

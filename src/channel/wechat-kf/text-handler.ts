@@ -1,5 +1,14 @@
 import { createHash } from 'node:crypto';
-import type { ProfileConversationHost } from '../../conversation/profile-host';
+import type {
+  ProfileConversationHost,
+  ProfileTextConversationResult,
+} from '../../conversation/profile-host';
+import {
+  toPolicyAttachment,
+  type NormalizedAttachment,
+} from '../../media/attachment';
+import type { FileAttachmentStore } from '../../media/file-store';
+import type { AgentAttachment } from '../../policy/run-policy';
 import {
   parseWechatKfCommand,
   renderWechatKfHelp,
@@ -7,7 +16,7 @@ import {
   type WechatKfCommandKind,
   type WechatKfUserCopy,
 } from './commands';
-import type { WechatKfApiClient } from './client';
+import { WechatKfMediaError, type WechatKfApiClient } from './client';
 import {
   FileWechatKfDeliveryStore,
   type WechatKfPreparedDelivery,
@@ -50,8 +59,12 @@ export interface WechatKfProcessingFeedback {
 }
 
 export interface WechatKfTextHandlerOptions {
-  host: Pick<ProfileConversationHost, 'runText' | 'reset' | 'interrupt'>;
-  api: Pick<WechatKfApiClient, 'sendText' | 'sendImage'>;
+  host: Pick<ProfileConversationHost, 'runText' | 'reset' | 'interrupt'> &
+    Partial<Pick<ProfileConversationHost, 'run'>>;
+  api: Pick<WechatKfApiClient, 'sendText' | 'sendImage'> &
+    Partial<Pick<WechatKfApiClient, 'downloadImage'>>;
+  attachmentStore?: Pick<FileAttachmentStore, 'persist' | 'remove'>;
+  inboundImageMaxBytes?: number;
   sessionHmacSecret: string;
   onboarding: FileWechatKfOnboardingStore;
   receipts: FileWechatKfReceiptStore;
@@ -68,7 +81,7 @@ export interface WechatKfTextHandlerOptions {
   now?: () => number;
 }
 
-/** Deterministic wxkf text/command adapter. No command reaches the agent. */
+/** Deterministic wxkf text/image/command adapter. No command reaches the agent. */
 export class WechatKfTextHandler implements WechatKfMessageSink {
   private readonly inFlight = new Map<string, Promise<void>>();
   private readonly onboardingInFlight = new Map<string, Promise<void>>();
@@ -103,11 +116,17 @@ export class WechatKfTextHandler implements WechatKfMessageSink {
 
   private async process(message: WechatKfMessage, sourceMessageKey: string): Promise<void> {
     if (message.origin !== 3) return;
-    if (message.msgtype !== 'text') return;
+    if (message.msgtype !== 'text' && message.msgtype !== 'image') return;
     const externalUserId = message.external_userid;
     const openKfid = message.open_kfid;
-    if (!externalUserId || !openKfid || !message.text?.content) {
-      throw new Error('wxkf customer text message is missing identity or content');
+    if (!externalUserId || !openKfid) {
+      throw new Error('wxkf customer message is missing identity');
+    }
+    if (message.msgtype === 'text' && !message.text?.content) {
+      throw new Error('wxkf customer text message is missing content');
+    }
+    if (message.msgtype === 'image' && !message.image?.media_id) {
+      throw new Error('wxkf customer image message is missing media_id');
     }
     const actorId = wechatKfActorId(this.options.sessionHmacSecret, externalUserId);
     const scopeId = wechatKfScopeId(this.options.sessionHmacSecret, openKfid, externalUserId);
@@ -116,7 +135,9 @@ export class WechatKfTextHandler implements WechatKfMessageSink {
       await this.deliverPrepared(message, prepared);
       return;
     }
-    const command = parseWechatKfCommand(message.text.content);
+    const command = message.msgtype === 'text'
+      ? parseWechatKfCommand(message.text!.content)
+      : undefined;
 
     if (command) {
       try {
@@ -158,16 +179,71 @@ export class WechatKfTextHandler implements WechatKfMessageSink {
       openKfid,
       inboundMessageId: message.msgid,
     });
+    const persistedAttachments: NormalizedAttachment[] = [];
     try {
-      const result = await this.options.host.runText({
+      const attachments: AgentAttachment[] = [];
+      const prompt = message.msgtype === 'text'
+        ? message.text!.content
+        : '请分析用户发送的图片，并直接回答与图片有关的问题。';
+      if (message.msgtype === 'image') {
+        if (!this.options.api.downloadImage || !this.options.attachmentStore) {
+          throw new Error('wxkf inbound image capability is unavailable');
+        }
+        try {
+          const image = await this.options.api.downloadImage({
+            mediaId: message.image!.media_id,
+            ...(this.options.inboundImageMaxBytes !== undefined
+              ? { maxBytes: this.options.inboundImageMaxBytes }
+              : {}),
+          });
+          const attachment = await this.options.attachmentStore.persist({
+            content: image.content,
+            kind: 'image',
+            mime: image.contentType,
+            source: 'wechat-kf',
+            sourceMessageId: message.msgid,
+            sourceFileKey: message.image!.media_id,
+            originalName: image.filename,
+          }, this.options.inboundImageMaxBytes === undefined ? {} : {
+            imageMaxBytes: this.options.inboundImageMaxBytes,
+            maxFileBytes: this.options.inboundImageMaxBytes,
+            maxBytes: this.options.inboundImageMaxBytes,
+          });
+          if (attachment.decision === 'accepted') persistedAttachments.push(attachment);
+          attachments.push({
+            ...toPolicyAttachment(attachment),
+            requiredness: 'required' as const,
+          });
+        } catch (error) {
+          if (!(error instanceof WechatKfMediaError)) throw error;
+          await this.sendDurableContent(
+            message,
+            error.code === 'image-too-large'
+              ? '图片过大，暂时无法处理。请压缩后重新发送。'
+              : '这张图片暂时无法识别，请重新发送 JPG 或 PNG 图片。',
+            'image-rejected',
+          );
+          return;
+        }
+      }
+      const conversationInput = {
         scopeId,
         actorId,
-        prompt: message.text.content,
+        prompt,
         authorized,
-        source: 'channel:wechat-kf',
-        conversationKind: 'p2p',
+        source: 'channel:wechat-kf' as const,
+        conversationKind: 'p2p' as const,
         sourceMessageId: message.msgid,
-      });
+      };
+      let result: ProfileTextConversationResult;
+      if (this.options.host.run) {
+        result = await this.options.host.run({ ...conversationInput, attachments });
+      } else {
+        if (attachments.length > 0) {
+          throw new Error('wxkf conversation host image input is unavailable');
+        }
+        result = await this.options.host.runText(conversationInput);
+      }
       if (!result.ok && result.code === 'run-interrupted') {
         await feedback?.beforeFinal();
         return;
@@ -177,7 +253,13 @@ export class WechatKfTextHandler implements WechatKfMessageSink {
       await feedback?.beforeFinal();
       await this.deliverPrepared(message, prepared);
     } finally {
-      await feedback?.finish();
+      try {
+        await feedback?.finish();
+      } finally {
+        await Promise.all(
+          persistedAttachments.map((attachment) => this.options.attachmentStore!.remove(attachment)),
+        );
+      }
     }
   }
 

@@ -104,12 +104,15 @@ export type {
 export { createProfileConversationHost } from './conversation/profile-host';
 export type {
   CreateProfileConversationHostOptions,
+  ProfileConversationInput,
   ProfileConversationHost,
   ProfileConversationNativeReadOptions,
   ProfileConversationResetResult,
   ProfileTextConversationInput,
   ProfileTextConversationResult,
 } from './conversation/profile-host';
+export { FileAttachmentStore } from './media/file-store';
+export type { FileAttachmentInput } from './media/file-store';
 export type { ConversationSource } from './conversation/types';
 export { ChannelPluginRegistry } from './channel/plugin/registry';
 export type {
@@ -130,7 +133,11 @@ export type {
   WechatKfCallbackRequest,
   WechatKfCallbackResponse,
 } from './channel/wechat-kf/callback';
-export { WechatKfApiClient, WechatKfApiError } from './channel/wechat-kf/client';
+export {
+  WechatKfApiClient,
+  WechatKfApiError,
+  WechatKfMediaError,
+} from './channel/wechat-kf/client';
 export type {
   WechatKfAccessTokenProvider,
   WechatKfApiClientOptions,
@@ -218,6 +225,8 @@ export type {
   WechatKfNotification,
   WechatKfNotificationSink,
   WechatKfImageContentType,
+  WechatKfDownloadImageInput,
+  WechatKfDownloadImageResult,
   WechatKfSendImageInput,
   WechatKfSendImageResult,
   WechatKfSendTextInput,

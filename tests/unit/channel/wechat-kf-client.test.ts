@@ -9,6 +9,19 @@ function jsonResponse(value: unknown, ok = true, status = 200) {
   return { ok, status, json: async () => value };
 }
 
+function binaryResponse(content: Uint8Array, contentType: string) {
+  return {
+    ok: true,
+    status: 200,
+    headers: new Headers({ 'content-type': contentType }),
+    json: async () => ({}),
+    arrayBuffer: async () => content.buffer.slice(
+      content.byteOffset,
+      content.byteOffset + content.byteLength,
+    ) as ArrayBuffer,
+  };
+}
+
 describe('WechatKfApiClient', () => {
   it('maps sync_msg and preserves has_more independently of the message list', async () => {
     const fetch = vi.fn<WechatKfFetch>().mockResolvedValue(jsonResponse({
@@ -84,6 +97,38 @@ describe('WechatKfApiClient', () => {
     expect(media).toBeInstanceOf(Blob);
     expect((media as File).name).toBe('product.png');
     expect((media as Blob).type).toBe('image/png');
+  });
+
+  it('downloads and validates an inbound image media id', async () => {
+    const bytes = Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10]);
+    const fetch = vi.fn<WechatKfFetch>().mockResolvedValue(binaryResponse(bytes, 'image/png'));
+    const client = new WechatKfApiClient({ accessToken: async () => 'access', fetch });
+
+    await expect(client.downloadImage({ mediaId: 'media-inbound-1' })).resolves.toEqual({
+      content: bytes,
+      contentType: 'image/png',
+      filename: 'wechat-kf-image.png',
+    });
+    expect(fetch).toHaveBeenCalledWith(
+      new URL(
+        'https://qyapi.weixin.qq.com/cgi-bin/media/get?access_token=access&media_id=media-inbound-1',
+      ),
+      {
+        method: 'GET',
+        headers: { range: `bytes=0-${20 * 1024 * 1024}` },
+      },
+    );
+  });
+
+  it('rejects an invalid inbound media body instead of forwarding it as an image', async () => {
+    const fetch = vi.fn<WechatKfFetch>().mockResolvedValue(binaryResponse(
+      Uint8Array.from([1, 2, 3, 4, 5, 6]),
+      'application/octet-stream',
+    ));
+    const client = new WechatKfApiClient({ accessToken: async () => 'access', fetch });
+
+    await expect(client.downloadImage({ mediaId: 'media-invalid' }))
+      .rejects.toMatchObject({ code: 'invalid-image' });
   });
 
   it('sends an image media id with a stable outbound message id', async () => {

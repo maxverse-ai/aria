@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -7,7 +7,9 @@ import { FileWechatKfOnboardingStore } from '../../../src/channel/wechat-kf/onbo
 import { FileWechatKfReceiptStore } from '../../../src/channel/wechat-kf/receipt-store';
 import { FileWechatKfDeliveryStore } from '../../../src/channel/wechat-kf/delivery-store';
 import { WechatKfTextHandler } from '../../../src/channel/wechat-kf/text-handler';
+import { WechatKfMediaError } from '../../../src/channel/wechat-kf/client';
 import type { WechatKfMessage } from '../../../src/channel/wechat-kf/types';
+import { FileAttachmentStore } from '../../../src/media/file-store';
 
 const roots: string[] = [];
 
@@ -16,6 +18,49 @@ afterEach(async () => {
 });
 
 describe('WechatKfTextHandler', () => {
+  it('preserves the legacy text-only host contract when run is unavailable', async () => {
+    const harness = await createHarness();
+    delete (harness.host as Partial<typeof harness.host>).run;
+
+    await harness.handler.accept(message('m-legacy-text', '你好'));
+
+    expect(harness.host.runText).toHaveBeenCalledWith(expect.objectContaining({
+      prompt: '你好',
+    }));
+  });
+
+  it('downloads and persists an inbound image before passing it to the agent', async () => {
+    const harness = await createHarness();
+
+    await harness.handler.accept(imageMessage('m-inbound-image', 'media-inbound-1'));
+
+    expect(harness.api.downloadImage).toHaveBeenCalledWith({ mediaId: 'media-inbound-1' });
+    expect(harness.host.runText).toHaveBeenCalledWith(expect.objectContaining({
+      prompt: expect.stringContaining('图片'),
+      attachments: [expect.objectContaining({
+        kind: 'image',
+        decision: 'accepted',
+        requiredness: 'required',
+        path: expect.stringMatching(/\.png$/),
+        hash: expect.stringMatching(/^[a-f0-9]{64}$/),
+      })],
+    }));
+    const attachmentPath = harness.host.runText.mock.calls[0]?.[0].attachments[0].path;
+    await expect(readFile(attachmentPath)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('finishes an invalid inbound image with a user-visible answer without starting the agent', async () => {
+    const harness = await createHarness();
+    harness.api.downloadImage.mockRejectedValueOnce(
+      new WechatKfMediaError('invalid-image', 'not an image'),
+    );
+
+    await harness.handler.accept(imageMessage('m-invalid-image', 'media-invalid'));
+
+    expect(harness.host.runText).not.toHaveBeenCalled();
+    expect(harness.api.sendText.mock.calls.at(-1)?.[0].content).toContain('JPG 或 PNG');
+  });
+
   it('handles help without entering the agent and deduplicates webhook replay', async () => {
     const harness = await createHarness();
     const input = message('m-help', '/help');
@@ -411,16 +456,24 @@ async function createHarness(options: {
   const receipts = new FileWechatKfReceiptStore(join(root, 'receipts.json'));
   const deliveries = new FileWechatKfDeliveryStore(join(root, 'deliveries'));
   await Promise.all([onboarding.load(), receipts.load()]);
+  const run = vi.fn().mockResolvedValue({ ok: true, runId: 'run-1', content: '查询结果' });
   const host = {
-    runText: vi.fn().mockResolvedValue({ ok: true, runId: 'run-1', content: '查询结果' }),
+    run,
+    runText: run,
     reset: vi.fn().mockResolvedValue({ interrupted: false, archivedSessionCount: 1 }),
     interrupt: vi.fn().mockResolvedValue(false),
-  } as unknown as Pick<ProfileConversationHost, 'runText' | 'reset' | 'interrupt'> & {
+  } as unknown as Pick<ProfileConversationHost, 'run' | 'runText' | 'reset' | 'interrupt'> & {
+    run: ReturnType<typeof vi.fn>;
     runText: ReturnType<typeof vi.fn>;
     reset: ReturnType<typeof vi.fn>;
     interrupt: ReturnType<typeof vi.fn>;
   };
   const api = {
+    downloadImage: vi.fn().mockResolvedValue({
+      content: Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10]),
+      contentType: 'image/png' as const,
+      filename: 'wechat-image.png',
+    }),
     sendText: vi.fn().mockResolvedValue({ messageId: 'sent' }),
     sendImage: vi.fn().mockResolvedValue({ messageId: 'sent-image' }),
   };
@@ -431,10 +484,23 @@ async function createHarness(options: {
     onboarding,
     receipts,
     deliveries,
+    attachmentStore: new FileAttachmentStore(join(root, 'attachments')),
     authorized: true,
     ...options,
   });
   return { handler, host, api, deliveries };
+}
+
+function imageMessage(msgid: string, mediaId: string): WechatKfMessage {
+  return {
+    msgid,
+    open_kfid: 'wk123',
+    external_userid: 'wm_user',
+    send_time: 1,
+    origin: 3,
+    msgtype: 'image',
+    image: { media_id: mediaId },
+  };
 }
 
 function message(msgid: string, content: string): WechatKfMessage {
