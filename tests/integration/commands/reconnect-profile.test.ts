@@ -55,19 +55,24 @@ describe('/reconnect profile lifecycle', () => {
 
   it('guards direct bridge disconnects and IM commands with the current profile runtime context', async () => {
     const source = await readFile(new URL('../../../src/bot/channel.ts', import.meta.url), 'utf8');
+    const ownerSource = await readFile(
+      new URL('../../../src/conversation/profile-runtime-owner.ts', import.meta.url),
+      'utf8',
+    );
     const disconnectBlock = source.slice(
       source.indexOf('disconnect: async () => {'),
       source.indexOf('async function commandSessionCatalogIdentity'),
     );
 
-    expect(source).toContain("activeRuns.pauseNewRuns('bridge-disconnect')");
-    expect(disconnectBlock).not.toContain('resumeNewRuns');
+    expect(source).toContain('const ownsConversationRuntime = !deps.conversationRuntime;');
+    expect(disconnectBlock).toContain("conversationRuntime.close('bridge-disconnect')");
     expect(disconnectBlock).toContain('await Promise.allSettled([');
     expect(disconnectBlock).toContain('channel.disconnect()');
-    expect(disconnectBlock).toContain('activeRuns.stopAll()');
+    expect(ownerSource).toContain('this.runtime.pauseNewRuns(reason)');
+    expect(ownerSource).toContain('this.runtime.stopAll()');
     // Graceful drain: interrupted runs get a bounded grace period so their
     // cards reach a terminal frame before the process exits.
-    expect(disconnectBlock).toContain('waitForExit(SHUTDOWN_DRAIN_MS)');
+    expect(ownerSource).toContain('handle.run.waitForExit(timeoutMs)');
     expect(disconnectBlock).toContain('STREAM_TERMINAL_GRACE_MS');
     expect(source).toContain('sessionCatalogIdentity: await commandSessionCatalogIdentity({');
   });

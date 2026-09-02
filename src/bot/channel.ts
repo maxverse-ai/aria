@@ -94,7 +94,8 @@ import {
   type ResolvedMessageConversation,
 } from './scope';
 import { handleCommentMention } from './comments';
-import { ConversationRuntime } from '../conversation/runtime';
+import type { ConversationRuntime } from '../conversation/runtime';
+import { ProfileConversationRuntimeOwner } from '../conversation/profile-runtime-owner';
 import { decideLiveFollowup } from '../conversation/live-followup-policy';
 import { commandSessionCatalogIdentity } from './session-catalog-identity';
 import { startKeepalive } from './keepalive';
@@ -266,19 +267,27 @@ export interface StartChannelDeps {
   messageAudit?: MessageAuditSink;
   messageRead?: MessageResourceSink;
   governanceAudit?: GovernanceAuditSink;
+  /** Profile-owned runtime. Omit only for legacy standalone composition. */
+  conversationRuntime?: ProfileConversationRuntimeOwner;
 }
 
 export async function startChannel(deps: StartChannelDeps): Promise<BridgeChannel> {
   const { cfg, agent, sessions, sessionCatalog, workspaces, controls } = deps;
-  const conversations = new ConversationRuntime({
-    agent,
-    sessions,
-    ...(sessionCatalog ? { sessionCatalog } : {}),
-    workspaces,
-    maxConcurrentRuns: () => getMaxConcurrentRuns(controls.cfg),
-    ...(deps.runAudit ? { runAudit: deps.runAudit } : {}),
-    ...(deps.governanceAudit ? { governanceAudit: deps.governanceAudit } : {}),
-  });
+  const ownsConversationRuntime = !deps.conversationRuntime;
+  const conversationRuntime =
+    deps.conversationRuntime ??
+    new ProfileConversationRuntimeOwner({
+      profileId: controls.profile,
+      agent,
+      sessions,
+      ...(sessionCatalog ? { sessionCatalog } : {}),
+      workspaces,
+      maxConcurrentRuns: () => getMaxConcurrentRuns(controls.cfg),
+      ...(deps.runAudit ? { runAudit: deps.runAudit } : {}),
+      ...(deps.governanceAudit ? { governanceAudit: deps.governanceAudit } : {}),
+      drainTimeoutMs: SHUTDOWN_DRAIN_MS,
+    });
+  const conversations = conversationRuntime.runtime;
   const { activeRuns, executor, processPool: pool } = conversations;
   // ChatModeCache stays per-bridge-instance — invalidated on restart along
   // with everything else. Topic-mode chats only need one chat.get() call ever.
@@ -773,23 +782,8 @@ export async function startChannel(deps: StartChannelDeps): Promise<BridgeChanne
   return {
     channel,
     activitySnapshot: () => activityTracker.snapshot(),
-    quiesceAgentRuns: async (reason: string) => {
-      const resume = activeRuns.pauseNewRuns(reason);
-      try {
-        const stopped = await activeRuns.stopAll();
-        const reservationsSettled = await activeRuns.waitForReservations(SHUTDOWN_DRAIN_MS);
-        await Promise.allSettled(stopped.map((h) => h.run.waitForExit(SHUTDOWN_DRAIN_MS)));
-        if (!reservationsSettled) {
-          throw new Error('timed out waiting for agent run preparation to stop');
-        }
-        return resume;
-      } catch (err) {
-        resume();
-        throw err;
-      }
-    },
+    quiesceAgentRuns: (reason: string) => conversationRuntime.quiesce(reason),
     disconnect: async () => {
-      activeRuns.pauseNewRuns('bridge-disconnect');
       ownerRefresh.stop();
       knownChatsRefresh.stop();
       keepalive.stop();
@@ -802,12 +796,14 @@ export async function startChannel(deps: StartChannelDeps): Promise<BridgeChanne
       // Graceful drain: interrupt in-flight runs, then stay alive until their
       // streams wind down so every streaming card gets a terminal frame
       // before process exit — otherwise a restart orphans them mid-spin.
-      const stopped = await activeRuns.stopAll();
-      if (stopped.length > 0) {
-        log.info('shutdown', 'drain-start', { runs: stopped.length });
-        await Promise.allSettled(
-          stopped.map((h) => h.run.waitForExit(SHUTDOWN_DRAIN_MS)),
-        );
+      const activeRunCount = activeRuns.snapshot().length;
+      if (ownsConversationRuntime) {
+        if (activeRunCount > 0) {
+          log.info('shutdown', 'drain-start', { runs: activeRunCount });
+        }
+        await conversationRuntime.close('bridge-disconnect');
+      }
+      if (ownsConversationRuntime && activeRunCount > 0) {
         // Terminal card/COT updates trail the child's exit event; give them
         // the same settle window the stream path uses.
         await new Promise((resolve) => setTimeout(resolve, STREAM_TERMINAL_GRACE_MS));

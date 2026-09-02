@@ -16,6 +16,7 @@ import { resolveAppPaths } from '../../../src/config/app-paths';
 import { readRuntimeLockMeta } from '../../../src/runtime/locks';
 import { readAndPrune } from '../../../src/runtime/registry';
 import type { ControlActorContext } from '../../../src/application/control';
+import type { ProfileConversationRuntimeOwner } from '../../../src/conversation/profile-runtime-owner';
 
 const roots: string[] = [];
 const started: string[] = [];
@@ -23,6 +24,7 @@ const disconnected: string[] = [];
 const startedAgents: string[] = [];
 const createdAgents: string[] = [];
 const disposedAgents: string[] = [];
+const startedConversationRuntimes: ProfileConversationRuntimeOwner[] = [];
 let quiesceCount = 0;
 let root: string;
 let sup: Supervisor;
@@ -79,6 +81,7 @@ function registerFakeEngine(id: string): void {
 const stubStartChannel: any = async (deps: any) => {
   started.push(deps.appPaths.profile);
   startedAgents.push(deps.agent.id);
+  startedConversationRuntimes.push(deps.conversationRuntime);
   return {
     channel: { botIdentity: { name: `bot-${deps.appPaths.profile}` } },
     quiesceAgentRuns: async () => {
@@ -97,6 +100,7 @@ beforeEach(async () => {
   startedAgents.length = 0;
   createdAgents.length = 0;
   disposedAgents.length = 0;
+  startedConversationRuntimes.length = 0;
   quiesceCount = 0;
   failedAgent = undefined;
   blockedAgent = undefined;
@@ -156,12 +160,30 @@ describe('Supervisor', () => {
     const list = sup.list();
     expect(list).toHaveLength(1);
     expect(list[0]).toMatchObject({ profile: 'claude', online: true, pid: process.pid, botName: 'bot-claude' });
+    expect(startedConversationRuntimes[0]?.profileId).toBe('claude');
   });
 
   it('hosts multiple profiles at once', async () => {
     await sup.startProfile('claude');
     await sup.startProfile('work');
     expect(sup.list().map((s) => s.profile).sort()).toEqual(['claude', 'work']);
+    expect(startedConversationRuntimes[0]).not.toBe(startedConversationRuntimes[1]);
+  });
+
+  it('reuses one profile conversation runtime across reconnect', async () => {
+    await sup.startProfile('claude');
+    const owner = startedConversationRuntimes[0];
+
+    await sup.restartProfile('claude');
+
+    expect(startedConversationRuntimes).toEqual([owner, owner]);
+    expect(startedAgents).toEqual(['claude', 'claude']);
+    expect(quiesceCount).toBe(1);
+    expect(disconnected).toEqual(['claude']);
+    expect(owner?.isClosed()).toBe(false);
+
+    await sup.stopProfile('claude');
+    expect(owner?.isClosed()).toBe(true);
   });
 
   it('stops one profile without affecting others or the process', async () => {
