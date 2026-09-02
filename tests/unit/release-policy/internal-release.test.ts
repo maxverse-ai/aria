@@ -137,7 +137,7 @@ describe("internal release workflow boundary", () => {
     expect(workflow).not.toContain("npm publish");
     expect(workflow).not.toContain("id-token: write");
     expect(workflow).not.toContain("NODE_AUTH_TOKEN");
-    expect(notes).toContain("not\npublished to npm");
+    expect(notes).toMatch(/not\r?\npublished to npm/);
     expect(notes).toContain("Physical state migration");
   });
 });

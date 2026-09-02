@@ -33,10 +33,12 @@ describe('initializeManagedWorkspace', () => {
     expect(await readdir(workspace)).toEqual(['AGENTS.md', 'README.md', 'scratch']);
     expect(await readFile(join(workspace, 'AGENTS.md'), 'utf8')).toBe(MANAGED_WORKSPACE_AGENTS);
     expect(await readFile(join(workspace, 'README.md'), 'utf8')).toBe(MANAGED_WORKSPACE_README);
-    expect((await lstat(workspace)).mode & 0o777).toBe(0o700);
-    expect((await lstat(join(workspace, 'AGENTS.md'))).mode & 0o777).toBe(0o600);
-    expect((await lstat(join(workspace, 'README.md'))).mode & 0o777).toBe(0o600);
-    expect((await lstat(join(workspace, 'scratch'))).mode & 0o777).toBe(0o700);
+    if (process.platform !== 'win32') {
+      expect((await lstat(workspace)).mode & 0o777).toBe(0o700);
+      expect((await lstat(join(workspace, 'AGENTS.md'))).mode & 0o777).toBe(0o600);
+      expect((await lstat(join(workspace, 'README.md'))).mode & 0o777).toBe(0o600);
+      expect((await lstat(join(workspace, 'scratch'))).mode & 0o777).toBe(0o700);
+    }
     const templates = `${MANAGED_WORKSPACE_AGENTS}\n${MANAGED_WORKSPACE_README}`;
     expect(templates).not.toMatch(/\/home\/|\\Users\\|app[_ -]?id|tenant[_ -]?id|@users\.noreply/iu);
   });

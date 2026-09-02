@@ -397,6 +397,8 @@ describe('profile-aware account and config commands', () => {
     await expect(
       listSecretIds(codexPaths),
     ).resolves.not.toContain(secretKeyForApp('cli_new'));
+    await vi.runAllTimersAsync();
+    await waitForCardActions();
   });
 });
 
