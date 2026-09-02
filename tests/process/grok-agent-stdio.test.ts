@@ -92,7 +92,7 @@ describe('Grok agent stdio runtime', () => {
     });
 
     const log = await readFile(join(root, 'grok.log'), 'utf8');
-    expect(log).toContain('args agent --no-leader --sandbox off --always-approve stdio');
+    expect(log).toContain('args --sandbox off --always-approve agent --no-leader stdio');
     expect(log).toContain('authenticate cached_token');
     expect(log).toContain('session/set_model grok-test high');
     expect(log).toContain('x.ai/interject also check tests');
@@ -151,7 +151,7 @@ describe('Grok agent stdio runtime', () => {
       // Drain the turn.
     }
     const log = await readFile(join(root, 'grok.log'), 'utf8');
-    expect(log).toContain('args agent --no-leader --sandbox workspace stdio');
+    expect(log).toContain('args --sandbox workspace agent --no-leader stdio');
     expect(log).toContain('permission reject');
     await runtime.dispose();
   });
