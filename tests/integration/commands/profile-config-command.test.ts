@@ -538,12 +538,10 @@ async function waitForRoot(
   rootDir: string,
   predicate: (root: RootConfig) => boolean,
 ): Promise<RootConfig> {
-  let lastRoot = await readRoot(rootDir);
-  await vi.waitFor(async () => {
-    lastRoot = await readRoot(rootDir);
-    expect(predicate(lastRoot)).toBe(true);
-  }, { timeout: 5000 });
-  return lastRoot;
+  await drainCardActions();
+  const root = await readRoot(rootDir);
+  expect(predicate(root)).toBe(true);
+  return root;
 }
 
 function deferred<T>(): {
