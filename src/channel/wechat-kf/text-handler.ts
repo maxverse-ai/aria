@@ -11,8 +11,6 @@ import type { FileAttachmentStore } from '../../media/file-store';
 import type { AgentAttachment } from '../../policy/run-policy';
 import {
   parseWechatKfCommand,
-  renderWechatKfHelp,
-  renderWechatKfWelcome,
   type WechatKfCommandKind,
   type WechatKfUserCopy,
 } from './commands';
@@ -29,6 +27,12 @@ import {
   type WechatKfImageMaterializer,
 } from './outbound';
 import { renderWechatKfPlainText } from './plain-text-renderer';
+import {
+  assertWechatKfPresentation,
+  createDefaultWechatKfPresentation,
+  type WechatKfPresentation,
+  type WechatKfPresentationProvider,
+} from './presentation';
 import type { WechatKfMessageSink } from './processor';
 import { FileWechatKfReceiptStore } from './receipt-store';
 import { wechatKfActorId, wechatKfScopeId } from './session';
@@ -47,6 +51,7 @@ export interface WechatKfProcessingFeedbackContext {
   externalUserId: string;
   openKfid: string;
   inboundMessageId: string;
+  content: string;
 }
 
 export interface WechatKfProcessingFeedbackHandle {
@@ -71,6 +76,7 @@ export interface WechatKfTextHandlerOptions {
   deliveries: FileWechatKfDeliveryStore;
   authorized: boolean | ((message: WechatKfMessage) => boolean);
   userCopy?: Readonly<WechatKfUserCopy>;
+  presentation?: WechatKfPresentationProvider;
   answerComposer?: WechatKfAnswerComposer;
   imageMaterializer?: WechatKfImageMaterializer;
   processingFeedback?: WechatKfProcessingFeedback;
@@ -85,13 +91,15 @@ export interface WechatKfTextHandlerOptions {
 export class WechatKfTextHandler implements WechatKfMessageSink {
   private readonly inFlight = new Map<string, Promise<void>>();
   private readonly onboardingInFlight = new Map<string, Promise<void>>();
-  private readonly welcomeText: string;
-  private readonly helpText: string;
+  private readonly presentation: WechatKfPresentationProvider;
 
   constructor(private readonly options: WechatKfTextHandlerOptions) {
     if (!options.sessionHmacSecret) throw new Error('wxkf session HMAC secret is required');
-    this.welcomeText = renderWechatKfWelcome(options.userCopy);
-    this.helpText = renderWechatKfHelp(options.userCopy);
+    if (options.presentation && options.userCopy) {
+      throw new Error('wxkf presentation and legacy userCopy cannot both be configured');
+    }
+    const fallback = createDefaultWechatKfPresentation(options.userCopy);
+    this.presentation = options.presentation ?? { resolve: () => fallback };
   }
 
   accept(message: WechatKfMessage): Promise<void> {
@@ -138,29 +146,49 @@ export class WechatKfTextHandler implements WechatKfMessageSink {
     const command = message.msgtype === 'text'
       ? parseWechatKfCommand(message.text!.content)
       : undefined;
+    const presentation = await this.presentation.resolve({
+      actorId,
+      scopeId,
+      message: message.msgtype === 'text'
+        ? { kind: 'text', text: message.text!.content }
+        : { kind: 'image' },
+      ...(command ? { command: command.kind } : {}),
+    });
+    assertWechatKfPresentation(presentation);
 
     if (command) {
       try {
         if (command.kind === 'help') {
           await this.runOnboardingOperation(actorId, async () => {
-            await this.sendDurableContent(message, this.helpText, 'help');
+            await this.sendDurableContent(message, presentation.help, 'help', presentation);
             this.options.onboarding.markIntroduced(actorId);
             await this.options.onboarding.flush();
           });
         } else if (command.kind === 'new') {
           await this.options.host.reset(scopeId);
-          await this.sendDurableContent(message, '已开启新会话，你可以开始提问。', 'new');
+          await this.sendDurableContent(
+            message,
+            presentation.newConversation,
+            'new',
+            presentation,
+          );
         } else if (command.kind === 'stop') {
           const interrupted = await this.options.host.interrupt(scopeId);
           await this.sendDurableContent(
             message,
-            interrupted ? '已停止当前查询。' : '当前没有正在查询的内容。',
+            interrupted ? presentation.stopped : presentation.nothingToStop,
             'stop',
+            presentation,
           );
           await this.audit(command.kind, scopeId, sourceMessageKey, 'success', interrupted);
           return;
         } else {
-          await this.sendDurableContent(message, '不支持该命令，请发送 /help。', 'unknown');
+          await this.sendDurableContent(
+            message,
+            presentation.unknownCommand,
+            'unknown',
+            presentation,
+          );
         }
         await this.audit(command.kind, scopeId, sourceMessageKey, 'success');
       } catch (error) {
@@ -170,7 +198,7 @@ export class WechatKfTextHandler implements WechatKfMessageSink {
       return;
     }
 
-    await this.ensureOnboarding(message, actorId);
+    await this.ensureOnboarding(message, actorId, presentation);
     const authorized = typeof this.options.authorized === 'function'
       ? this.options.authorized(message)
       : this.options.authorized;
@@ -178,6 +206,7 @@ export class WechatKfTextHandler implements WechatKfMessageSink {
       externalUserId,
       openKfid,
       inboundMessageId: message.msgid,
+      content: presentation.processing,
     });
     const persistedAttachments: NormalizedAttachment[] = [];
     try {
@@ -219,9 +248,10 @@ export class WechatKfTextHandler implements WechatKfMessageSink {
           await this.sendDurableContent(
             message,
             error.code === 'image-too-large'
-              ? '图片过大，暂时无法处理。请压缩后重新发送。'
-              : '这张图片暂时无法识别，请重新发送 JPG 或 PNG 图片。',
+              ? presentation.imageTooLarge
+              : presentation.imageInvalid,
             'image-rejected',
+            presentation,
           );
           return;
         }
@@ -249,7 +279,7 @@ export class WechatKfTextHandler implements WechatKfMessageSink {
         return;
       }
       const answer = result.ok ? result.content : result.userVisible;
-      const prepared = await this.prepareDurableAnswer(message, answer);
+      const prepared = await this.prepareDurableAnswer(message, answer, presentation);
       await feedback?.beforeFinal();
       await this.deliverPrepared(message, prepared);
     } finally {
@@ -263,11 +293,21 @@ export class WechatKfTextHandler implements WechatKfMessageSink {
     }
   }
 
-  private async ensureOnboarding(message: WechatKfMessage, actorId: string): Promise<void> {
+  private async ensureOnboarding(
+    message: WechatKfMessage,
+    actorId: string,
+    presentation: Readonly<WechatKfPresentation>,
+  ): Promise<void> {
     await this.runOnboardingOperation(actorId, async () => {
       if (this.options.onboarding.hasIntroduced(actorId)) return;
       try {
-        await this.sendBestEffortContent(message, this.welcomeText, 'welcome', actorId);
+        await this.sendBestEffortContent(
+          message,
+          presentation.welcome,
+          'welcome',
+          actorId,
+          presentation,
+        );
         this.options.onboarding.markIntroduced(actorId);
         await this.options.onboarding.flush();
       } catch (error) {
@@ -294,8 +334,9 @@ export class WechatKfTextHandler implements WechatKfMessageSink {
     message: WechatKfMessage,
     content: string,
     kind: string,
+    presentation: Readonly<WechatKfPresentation>,
   ): Promise<void> {
-    const prepared = await this.prepareDurableContent(message, content, kind);
+    const prepared = await this.prepareDurableContent(message, content, kind, presentation);
     await this.deliverPrepared(message, prepared);
   }
 
@@ -303,8 +344,9 @@ export class WechatKfTextHandler implements WechatKfMessageSink {
     message: WechatKfMessage,
     content: string,
     kind: string,
+    presentation: Readonly<WechatKfPresentation>,
   ): Promise<WechatKfPreparedDelivery> {
-    const rendered = this.renderContent(content);
+    const rendered = this.renderContent(content, presentation);
     return this.options.deliveries.create(
       message.msgid,
       splitWechatKfText(rendered).map((chunk, index) => ({
@@ -318,6 +360,7 @@ export class WechatKfTextHandler implements WechatKfMessageSink {
   private async prepareDurableAnswer(
     message: WechatKfMessage,
     content: string,
+    presentation: Readonly<WechatKfPresentation>,
   ): Promise<WechatKfPreparedDelivery> {
     const chunks: Array<
       | { kind: 'text'; content: string }
@@ -339,7 +382,7 @@ export class WechatKfTextHandler implements WechatKfMessageSink {
           chunks.push({ kind: 'image', assetRef: part.assetRef });
           continue;
         }
-        for (const text of splitWechatKfText(this.renderContent(part.content))) {
+        for (const text of splitWechatKfText(this.renderContent(part.content, presentation))) {
           chunks.push({ kind: 'text', content: text });
         }
       }
@@ -347,7 +390,7 @@ export class WechatKfTextHandler implements WechatKfMessageSink {
       if (!this.options.answerComposer) throw error;
       this.options.onAnswerComposeError?.(error);
       chunks.length = 0;
-      for (const text of splitWechatKfText(this.renderContent(content))) {
+      for (const text of splitWechatKfText(this.renderContent(content, presentation))) {
         chunks.push({ kind: 'text', content: text });
       }
     }
@@ -365,8 +408,9 @@ export class WechatKfTextHandler implements WechatKfMessageSink {
     content: string,
     kind: string,
     stableSource: string,
+    presentation: Readonly<WechatKfPresentation>,
   ): Promise<void> {
-    const rendered = this.renderContent(content);
+    const rendered = this.renderContent(content, presentation);
     for (const [index, chunk] of splitWechatKfText(rendered).entries()) {
       await this.options.api.sendText({
         externalUserId: message.external_userid!,
@@ -377,16 +421,19 @@ export class WechatKfTextHandler implements WechatKfMessageSink {
     }
   }
 
-  private renderContent(content: string): string {
-    const source = content || '暂时没有生成可发送的回答，请稍后重试。';
+  private renderContent(
+    content: string,
+    presentation: Readonly<WechatKfPresentation>,
+  ): string {
+    const source = content || presentation.emptyAnswer;
     let rendered: string;
     try {
-      rendered = renderWechatKfPlainText(source);
+      rendered = renderWechatKfPlainText(source, { imageLabel: presentation.imageLabel });
     } catch (error) {
       this.options.onRenderError?.(error);
-      rendered = '回答已生成，但暂时无法整理为可发送格式，请稍后重试。';
+      rendered = presentation.renderFailure;
     }
-    return rendered || '暂时没有生成可发送的回答，请稍后重试。';
+    return rendered || presentation.emptyAnswer;
   }
 
   private async deliverPrepared(

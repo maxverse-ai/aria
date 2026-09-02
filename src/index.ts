@@ -190,7 +190,19 @@ export {
   extractWechatKfMarkdownImages,
   renderWechatKfPlainText,
 } from './channel/wechat-kf/plain-text-renderer';
-export type { WechatKfMarkdownImage } from './channel/wechat-kf/plain-text-renderer';
+export type {
+  WechatKfMarkdownImage,
+  WechatKfPlainTextRenderOptions,
+} from './channel/wechat-kf/plain-text-renderer';
+export {
+  assertWechatKfPresentation,
+  createDefaultWechatKfPresentation,
+} from './channel/wechat-kf/presentation';
+export type {
+  WechatKfPresentation,
+  WechatKfPresentationProvider,
+  WechatKfPresentationRequest,
+} from './channel/wechat-kf/presentation';
 export { textOnlyWechatKfAnswer } from './channel/wechat-kf/outbound';
 export type {
   WechatKfAnswerComposer,
