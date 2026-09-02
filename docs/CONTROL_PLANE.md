@@ -5,6 +5,9 @@
 > `ManagementApi`. Remaining work is lifecycle housekeeping, durable management
 > audit, advanced actor verification, and removal of compatibility types.
 
+For an independently authenticated path-prefix deployment of the full local
+console, see [Supervisor console behind a reverse proxy](CONSOLE_REVERSE_PROXY.md).
+
 This document is the single source of truth for the current architecture and
 its remaining work. The earlier CLI-centric roadmap is archived in
 [`CLI_CONTROL_PLANE_DESIGN.md`](CLI_CONTROL_PLANE_DESIGN.md).

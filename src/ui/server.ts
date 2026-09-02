@@ -40,14 +40,15 @@ import { modelCatalog } from '../agent/model-catalog/service';
 const DEFAULT_HOST = '127.0.0.1';
 
 /**
- * Start the supervisor's single management console. Binds 127.0.0.1, mints a
- * random per-process token gating every `/api/*` call, rejects non-localhost /
- * cross-origin. Backed by the supervisor: it can list/start/stop/configure any
- * profile in-process (online → live; offline → written to disk).
+ * Start the supervisor's single management console. Binds 127.0.0.1, uses a
+ * random per-process token unless an explicit private token is supplied, and
+ * rejects untrusted origins. Backed by the supervisor: it can
+ * list/start/stop/configure any profile in-process (online → live; offline →
+ * written to disk).
  */
 export async function startUiServer(deps: UiServerDeps): Promise<UiServerHandle> {
   const host = deps.host ?? DEFAULT_HOST;
-  const token = randomBytes(32).toString('hex');
+  const token = deps.token ?? randomBytes(32).toString('hex');
 
   const server = createServer((req, res) => {
     handle(req, res, deps, token).catch((err) => {
@@ -79,7 +80,7 @@ async function handle(
   deps: UiServerDeps,
   token: string,
 ): Promise<void> {
-  if (!isLocalRequest(req)) {
+  if (!isLocalRequest(req, deps.allowedOrigins)) {
     sendJson(res, 403, { error: 'forbidden' });
     return;
   }

@@ -21,6 +21,7 @@ import { configureLogger, gcOldLogs, log, reportError } from '../../core/logger'
 import { loadTelemetryAdapter, telemetry } from '../../core/telemetry';
 import { gcMediaCache } from '../../media/cache';
 import { startUiServer } from '../../ui/server';
+import { uiEnvironment } from '../../ui/environment';
 import { readUiSidecar, removeUiSidecar, writeUiSidecar } from '../../ui/sidecar';
 import type { UiServerHandle } from '../../ui/types';
 import { Supervisor } from '../../runtime/supervisor';
@@ -212,7 +213,12 @@ async function runSupervisorConsole(opts: StartOptions): Promise<void> {
   // Single web console (host sidecar), backed by the supervisor.
   let uiServer: UiServerHandle | undefined;
   try {
-    uiServer = await startUiServer({ supervisor, version: pkg.version, rootDir: appPaths.rootDir });
+    uiServer = await startUiServer({
+      supervisor,
+      version: pkg.version,
+      rootDir: appPaths.rootDir,
+      ...(await uiEnvironment()),
+    });
     await writeUiSidecar(appPaths.hostUiFile, uiServer, new Date().toISOString());
     console.log(`✓ 控制台：${uiServer.url}`);
   } catch (err) {

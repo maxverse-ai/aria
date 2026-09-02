@@ -117,6 +117,23 @@ describe('ui server (supervisor-backed)', () => {
     expect(res.status).toBe(403);
   });
 
+  it('accepts one exact configured reverse-proxy origin with an explicit token', async () => {
+    await handle.close();
+    const proxyToken = 'cd'.repeat(32);
+    handle = await startUiServer({
+      supervisor: stubSupervisor(),
+      version: 'test',
+      rootDir,
+      token: proxyToken,
+      allowedOrigins: ['https://console.example.com'],
+    });
+    base = `http://127.0.0.1:${handle.port}`;
+
+    expect(handle.token).toBe(proxyToken);
+    expect((await get('/api/status', proxyToken, { origin: 'https://console.example.com' })).status).toBe(200);
+    expect((await get('/api/status', proxyToken, { origin: 'https://evil.console.example.com' })).status).toBe(403);
+  });
+
   it('serves the console shell without a token', async () => {
     const res = await get('/');
     expect(res.status).toBe(200);
