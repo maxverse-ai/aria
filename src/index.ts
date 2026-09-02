@@ -212,6 +212,41 @@ export type {
   LarkChannelOwnershipPolicy,
   LarkChannelRolloutMode,
 } from './channel/lark-ownership';
+export {
+  ChannelReliabilityCoordinator,
+  DEFAULT_CHANNEL_RELIABILITY_LEASE_MS,
+} from './channel/reliability/coordinator';
+export {
+  assertChannelReliabilityKey,
+  channelReceiptId,
+  channelReliabilityKey,
+  reliabilityKeyFromEnvelope,
+} from './channel/reliability/key';
+export { InMemoryChannelReliabilityStores } from './channel/reliability/memory-store';
+export {
+  assertChannelRetryPolicy,
+  channelRetryDelay,
+  DEFAULT_CHANNEL_RETRY_POLICY,
+} from './channel/reliability/retry';
+export type {
+  ChannelAnswerCheckpoint,
+  ChannelAnswerProcessor,
+  ChannelAnswerStore,
+  ChannelCompletionReceipt,
+  ChannelDeliveryLedgerEntry,
+  ChannelDeliveryStore,
+  ChannelInboxRecord,
+  ChannelInboxStore,
+  ChannelIntentDeliverer,
+  ChannelReliabilityKey,
+  ChannelReliabilityRunResult,
+  ChannelReliabilityStores,
+  ChannelRetryPolicy,
+  ChannelRetryRecord,
+  ChannelRetryState,
+  ChannelRetryStore,
+} from './channel/reliability/types';
+export type { ChannelReliabilityCoordinatorOptions } from './channel/reliability/coordinator';
 export { WechatKfCallbackHandler } from './channel/wechat-kf/callback';
 export type {
   WechatKfCallbackHandlerOptions,

@@ -275,6 +275,14 @@ Implementation status:
   ownership under ChannelManager. Schema-v2 files are not rewritten. Stored
   channel instances, generic normalized Lark ingress, and all `wechat-kf`
   lifecycle migration remain deferred.
+- Stage 6 adds channel-neutral inbox, completion receipt, answer checkpoint,
+  delivery ledger, worker lease, and persisted retry contracts. A reference
+  coordinator and in-memory store prove duplicate acceptance, answer reuse,
+  partial-delivery resume, expired-lease recovery, bounded provider-aware
+  backoff, and operator-visible terminal states. It opens no connection and
+  does not migrate the existing `wechat-kf` file stores; their equivalence and
+  production composition remain Stage 7 work. See
+  [Channel reliability primitives](./CHANNEL_RELIABILITY.md).
 
 0. **Baseline and decision.** Land this architecture decision, record the
    current seams, and prove unchanged production behavior with repository checks.
