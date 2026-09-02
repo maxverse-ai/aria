@@ -1,6 +1,6 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
-import tailwindcss from '@tailwindcss/vite';
+import {astryxStylex} from '@astryxdesign/build/vite';
 import { viteSingleFile } from 'vite-plugin-singlefile';
 import { fileURLToPath } from 'node:url';
 
@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 // the CLI bundle as a string — the bridge serves it with zero runtime file/CDN
 // deps (works offline).
 export default defineConfig({
-  plugins: [react(), tailwindcss(), viteSingleFile()],
+  plugins: [...astryxStylex(), react(), viteSingleFile()],
   resolve: {
     alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) },
   },
