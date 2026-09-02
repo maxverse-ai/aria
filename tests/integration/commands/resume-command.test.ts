@@ -5,6 +5,7 @@ import { claudeCapability, codexCapability } from '../../../src/agent/capability
 import { ActiveRuns } from '../../../src/bot/active-runs.js';
 import type { ChatModeCache } from '../../../src/bot/chat-mode-cache.js';
 import { PendingQueue } from '../../../src/bot/pending-queue.js';
+import { waitForCardActions } from '../../../src/card/action-executor.js';
 import { handleCardAction } from '../../../src/card/dispatcher.js';
 import {
   tryHandleCommand,
@@ -428,14 +429,7 @@ describe('agent-aware resume commands', () => {
     await expect(
       h.dispatchCard({ cmd: 'models.use', arg: 'claude-sonnet-4-6' }, 'om_fake_1'),
     ).resolves.toBeUndefined();
-
-    await vi.waitFor(() => {
-      expect(
-        h.channel.rawClient.requests.filter(
-          (request) => request.method === 'cardkit.v1.card.update',
-        ),
-      ).toHaveLength(2);
-    });
+    await waitForCardActions();
     const updates = h.channel.rawClient.requests.filter(
       (request) => request.method === 'cardkit.v1.card.update',
     );
