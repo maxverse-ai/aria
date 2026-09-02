@@ -1,10 +1,36 @@
-const TOKEN = new URLSearchParams(location.search).get("token") ?? "";
+interface BrowserLocation {
+  href: string;
+  search: string;
+}
+
+function browserLocation(): BrowserLocation {
+  const value = (globalThis as { location?: BrowserLocation }).location;
+  if (!value) throw new Error("browser location is unavailable");
+  return value;
+}
+
+function currentToken(): string {
+  return new URLSearchParams(browserLocation().search).get("token") ?? "";
+}
+
+/**
+ * Resolve the console API beside the page that served it. The local console is
+ * served from `/`, while an authenticated management plane may mount the same
+ * shell below a path such as `/admin-api/aria-console/`. Keeping the API
+ * relative to the document directory supports both without weakening the
+ * loopback-only server boundary.
+ */
+export function resolveApiUrl(path: string, pageHref: string = browserLocation().href): string {
+  const relativePath = path.replace(/^\/?api\//, "");
+  const apiRoot = new URL("api/", new URL(".", pageHref));
+  return new URL(relativePath, apiRoot).toString();
+}
 
 export async function api<T = unknown>(path: string, opts: RequestInit = {}): Promise<T> {
-  const res = await fetch(path, {
+  const res = await fetch(resolveApiUrl(path), {
     ...opts,
     headers: {
-      "x-ui-token": TOKEN,
+      "x-ui-token": currentToken(),
       "content-type": "application/json",
       ...(opts.headers ?? {}),
     },
