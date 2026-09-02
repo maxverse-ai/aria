@@ -33,6 +33,32 @@ async function tmpRoot(): Promise<string> {
 }
 
 describe('profile store canonical serialization', () => {
+  it('preserves Grok engine configuration across save and load', async () => {
+    const root = await tmpRoot();
+    const configPath = join(root, 'config.json');
+    const profile = createDefaultProfileConfig({
+      agentKind: 'grok',
+      accounts: { app },
+      grok: {
+        binaryPath: '/usr/local/bin/grok',
+        grokHome: '/tmp/grok-home',
+        inheritGrokHome: false,
+      },
+    });
+
+    await saveRootConfig({
+      schemaVersion: 2,
+      activeProfile: 'grok',
+      preferences: {},
+      profiles: { grok: profile },
+    }, configPath);
+
+    const saved = JSON.parse(await readFile(configPath, 'utf8'));
+    expect(saved.profiles.grok.grok).toEqual(profile.grok);
+    const loaded = await loadRootConfig(configPath);
+    expect(loaded?.profiles.grok?.grok).toEqual(profile.grok);
+  });
+
   it('uses root desired state instead of a stale active-profile projection', async () => {
     const root = await tmpRoot();
     const profile = createDefaultProfileConfig({ agentKind: 'claude', accounts: { app } });

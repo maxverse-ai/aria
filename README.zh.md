@@ -33,8 +33,8 @@ Aria 把飞书 / Lark 变成本机编码 Agent 的交互入口。引擎、工具
   聊天是遥控入口，不是计算平面。
 - **能力驱动的引擎**：每个引擎插件独立声明历史、图片、服务档位和实时输入
   能力；界面只展示当前引擎与模型真实支持的控制项。
-- **安全 steering 与回退**：Codex 运行中的合格文本可以由原生
-  `turn/steer` 接收；不支持、延迟或拒绝的输入仍归下一轮队列所有，不会消失。
+- **安全 steering 与回退**：Codex 与 Grok 运行中的合格文本可以通过各自的
+  原生实时输入通道接收；不支持、延迟或拒绝的输入仍归下一轮队列所有，不会消失。
 - **对话隔离**：每个聊天、话题或文档评论线程都有独立会话；profile 则隔离
   应用凭据、Agent 状态、工作空间、日志和 lark-cli 身份。
 - **过程可感知**：流式卡片、可选 COT 过程消息、工具块、运行状态和终态
@@ -99,13 +99,14 @@ Channel 归一化 → 访问 + 寻址 → profile / session / workspace
 | --- | --- | --- |
 | Claude Code | 保留到下一轮 | 原生历史和兼容恢复 |
 | Codex CLI | 通过 App Server `turn/steer` 直接接收文本 | 图片输入和模型上报的 Fast 等服务档位 |
+| Grok Build | 通过 Agent stdio 直接接收文本 | ACP 会话、图片输入和实时模型发现 |
 | OpenCode | 保留到下一轮 | 原生历史和实时模型发现 |
 | DeepSeek Harness | 保留到下一轮 | 内置无头适配器 |
 | Kimi Code | 保留到下一轮 | Claude 兼容传输与原生历史 |
 | Pi | 保留到下一轮 | 原生历史与推理强度控制 |
 
 所有内置引擎共享 Channel 路由、访问控制、profile、工作空间、队列 / freshness
-安全、流式展示和服务管理。原生 steering 当前仅支持 Codex 文本。Fast 不是
+安全、流式展示和服务管理。原生 steering 当前支持 Codex 和 Grok 文本。Fast 不是
 Aria 的通用“加速开关”：只有 Codex App Server 为所选模型上报兼容服务档位时
 才会出现。
 
@@ -129,6 +130,7 @@ Aria 的通用“加速开关”：只有 Codex App Server 为所选模型上报
 - 本机至少安装并登录一个 agent：
   - Claude Code：`claude`，安装说明：https://docs.anthropic.com/en/docs/claude-code/quickstart
   - Codex CLI：`codex`，安装说明：https://developers.openai.com/codex/cli
+  - Grok Build：`grok`，安装说明：https://docs.x.ai/build/cli/
   - OpenCode CLI：`opencode`，安装说明：https://opencode.ai/docs/
   - DeepSeek Harness（`dsh`）、Kimi Code（`kimi`）和 Pi（`pi`）也已内置；
     安装对应 CLI 后即可选择。
@@ -513,6 +515,7 @@ grep '"event":"enter"' ~/.aria/profiles/<profile>/logs/bridge-$(date +%Y%m%d).js
 | --- | --- |
 | 运行中追问、群聊寻址、freshness 与重复抑制 | [对话协调](docs/COORDINATION.md) |
 | Codex App Server、原生 steering、实时状态和服务档位 | [Codex App Server 运行时](docs/CODEX_APP_SERVER.md) |
+| Grok Agent stdio、ACP 会话和直接 steering | [Grok Agent stdio 运行时](docs/GROK_AGENT_STDIO.md) |
 | 内置与外部引擎契约 | [Engine Plugin](docs/PLUGINS.md) |
 | 私有 Release 安装、更新事务、稳定 launcher 与回滚 | [CLI 分发架构](docs/DISTRIBUTION.md) |
 | Profile 状态、托管工作空间和引擎自有布局 | [工作空间与状态布局](docs/WORKSPACE_AND_STATE_LAYOUT.md) |

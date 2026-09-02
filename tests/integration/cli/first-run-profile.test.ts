@@ -20,6 +20,23 @@ afterEach(async () => {
 });
 
 describe('first-run profile bootstrap', () => {
+  it('creates a Grok profile from the registered engine bootstrap', async () => {
+    const root = await makeRoot();
+    const grok = await writeVersionExecutable(root, 'grok', 'grok 1.2.3');
+
+    const profile = await createBootstrapProfileConfig({
+      agentKind: 'grok',
+      accounts: { app: { id: 'cli_grok', secret: '${APP_SECRET}', tenant: 'feishu' } },
+      binaryPath: grok,
+    });
+
+    expect(profile.agentKind).toBe('grok');
+    expect(profile.grok).toEqual({
+      binaryPath: grok,
+      inheritGrokHome: true,
+    });
+  });
+
   it('creates a Codex profile with a default workspace and inherited user Codex home', async () => {
     const root = await makeRoot();
     const workspace = join(root, 'workspace');

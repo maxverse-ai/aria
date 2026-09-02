@@ -51,6 +51,18 @@ export interface CodexConfig {
   inheritCodexHome?: boolean;
 }
 
+export interface GrokConfig {
+  binaryPath: string;
+  realpath?: string;
+  version?: string;
+  sha256?: string;
+  owner?: number;
+  mode?: number;
+  /** GROK_HOME override. Defaults to the user's existing Grok home. */
+  grokHome?: string;
+  inheritGrokHome?: boolean;
+}
+
 export interface OpencodeConfig {
   binaryPath: string;
   realpath?: string;
@@ -208,6 +220,7 @@ export interface ProfileConfig {
   permissions: PermissionConfig;
   permissionSource?: PermissionSource;
   codex?: CodexConfig;
+  grok?: GrokConfig;
   opencode?: OpencodeConfig;
   dsh?: DshConfig;
   kimi?: KimiConfig;
@@ -255,6 +268,7 @@ export interface CreateDefaultProfileConfigInput {
   access?: Partial<ProfileAccess>;
   permissions?: Partial<PermissionConfig>;
   codex?: CodexConfig;
+  grok?: GrokConfig;
   opencode?: OpencodeConfig;
   dsh?: DshConfig;
   kimi?: KimiConfig;
@@ -294,6 +308,7 @@ export function normalizeProfileConfig(input: unknown): ProfileConfig {
     };
     permissions?: Partial<PermissionConfig>;
     codex?: CodexConfig & { flags?: unknown };
+    grok?: GrokConfig;
     opencode?: OpencodeConfig;
     dsh?: DshConfig;
     kimi?: KimiConfig;
@@ -347,6 +362,7 @@ export function normalizeProfileConfig(input: unknown): ProfileConfig {
     permissions,
     permissionSource,
     ...(raw.codex ? { codex: normalizeCodex(raw.codex) } : {}),
+    ...(raw.grok ? { grok: normalizeGrok(raw.grok) } : {}),
     ...(raw.opencode ? { opencode: normalizeOpencode(raw.opencode) } : {}),
     ...(raw.dsh ? { dsh: normalizeDsh(raw.dsh) } : {}),
     ...(raw.kimi ? { kimi: normalizeKimi(raw.kimi) } : {}),
@@ -472,6 +488,19 @@ function normalizeCodex(input: CodexConfig & { flags?: unknown }): CodexConfig {
     inheritCodexHome: input.inheritCodexHome !== false,
   };
   return codex;
+}
+
+function normalizeGrok(input: GrokConfig): GrokConfig {
+  return {
+    binaryPath: input.binaryPath,
+    ...(typeof input.realpath === 'string' ? { realpath: input.realpath } : {}),
+    ...(typeof input.version === 'string' ? { version: input.version } : {}),
+    ...(typeof input.sha256 === 'string' ? { sha256: input.sha256 } : {}),
+    ...(typeof input.owner === 'number' ? { owner: input.owner } : {}),
+    ...(typeof input.mode === 'number' ? { mode: input.mode } : {}),
+    ...(typeof input.grokHome === 'string' ? { grokHome: input.grokHome } : {}),
+    inheritGrokHome: input.inheritGrokHome !== false,
+  };
 }
 
 function normalizeOpencode(input: OpencodeConfig): OpencodeConfig {

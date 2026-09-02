@@ -36,9 +36,10 @@ For a product walkthrough, see the [Feishu document](https://larkcommunity.feish
 - **Capability-driven engines:** every engine plugin advertises its own
   history, image, service-tier, and live-input capabilities. The UI renders
   only controls the selected engine and model actually support.
-- **Safe steering and fallback:** eligible text sent during a Codex run can be
-  accepted by native `turn/steer`; an unsupported, delayed, or rejected input
-  remains owned by the next-turn queue instead of disappearing.
+- **Safe steering and fallback:** eligible text sent during Codex and Grok runs
+  can be accepted by their native live-input transports; an unsupported,
+  delayed, or rejected input remains owned by the next-turn queue instead of
+  disappearing.
 - **Conversation isolation:** each chat, topic, or document-comment thread has
   an independent session, while profiles isolate app credentials, agent state,
   workspaces, logs, and lark-cli identity.
@@ -102,6 +103,7 @@ channel normalization → access + addressing → profile / session / workspace
 | --- | --- | --- |
 | Claude Code | Retained for the next turn | Native history and compatible resume |
 | Codex CLI | Direct text steering through App Server `turn/steer` | Image input and model-reported service tiers such as Fast |
+| Grok Build | Direct text steering through Agent stdio | ACP sessions, image input, and live model discovery |
 | OpenCode | Retained for the next turn | Native history and live model discovery |
 | DeepSeek Harness | Retained for the next turn | Built-in headless adapter |
 | Kimi Code | Retained for the next turn | Claude-compatible transport and native history |
@@ -109,9 +111,9 @@ channel normalization → access + addressing → profile / session / workspace
 
 All built-in engines share channel routing, access control, profiles,
 workspaces, queue/freshness safety, streaming, and service management. Native
-steering is currently Codex text-only. Fast is not a generic Aria speed flag:
-it appears only when Codex App Server reports a compatible service tier for the
-selected model.
+steering is currently text-only for Codex and Grok. Fast is not a generic Aria
+speed flag: it appears only when Codex App Server reports a compatible service
+tier for the selected model.
 
 The current product boundary is deliberately explicit:
 
@@ -132,6 +134,7 @@ The current product boundary is deliberately explicit:
 - At least one local agent installed and logged in:
   - Claude Code: `claude`, see https://docs.anthropic.com/en/docs/claude-code/quickstart
   - Codex CLI: `codex`, see https://developers.openai.com/codex/cli
+  - Grok Build: `grok`, see https://docs.x.ai/build/cli/
   - OpenCode CLI: `opencode`, see https://opencode.ai/docs/
   - DeepSeek Harness (`dsh`), Kimi Code (`kimi`), and Pi (`pi`) are also
     built-in when their corresponding CLI is installed.
@@ -504,7 +507,7 @@ Cloud-doc comments do not need a separate workspace binding or document allowlis
 
 ## FAQ
 
-**The bot stays silent or the local CLI never replies.** Usually the local `claude` or `codex` CLI is not logged in, or the current session points to a working directory that no longer exists. Send `/status` to inspect; `/new` often fixes it by starting a fresh session.
+**The bot stays silent or the local CLI never replies.** Usually the selected local agent CLI is not installed or logged in, or the current session points to a working directory that no longer exists. Send `/status` to inspect; `/new` often fixes it by starting a fresh session.
 
 **The agent subprocess looks frozen (card stuck on the last frame).** The bridge supports an idle watchdog: if the agent emits nothing for N minutes, the process is killed and the card is annotated with the auto-termination reason. Disabled by default. Enable with `/config` globally, or `/timeout 10` for the current session; `/timeout off` disables it for the session; `/timeout default` clears the session override.
 
@@ -524,6 +527,7 @@ legacy global command as a rollback baseline; it does not delete it.
 | --- | --- |
 | Active-run follow-ups, group addressing, freshness, and duplicate suppression | [Conversation coordination](docs/COORDINATION.md) |
 | Codex App Server, native steering, live status, and service tiers | [Codex App Server runtime](docs/CODEX_APP_SERVER.md) |
+| Grok Agent stdio, ACP sessions, and direct steering | [Grok Agent stdio runtime](docs/GROK_AGENT_STDIO.md) |
 | Built-in and external engine contracts | [Engine plugins](docs/PLUGINS.md) |
 | Private Release installation, update transactions, stable launcher, and rollback | [CLI distribution architecture](docs/DISTRIBUTION.md) |
 | Profile state, managed workspaces, and engine-owned layout | [Workspace and state layout](docs/WORKSPACE_AND_STATE_LAYOUT.md) |
