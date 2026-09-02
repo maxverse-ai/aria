@@ -33,8 +33,6 @@ export async function startGrokAgentStdio(
   envOverrides.GROK_DISABLE_AUTOUPDATER = '1';
 
   const args = [
-    'agent',
-    '--no-leader',
     '--sandbox',
     options.access === 'full'
       ? 'off'
@@ -42,6 +40,8 @@ export async function startGrokAgentStdio(
         ? 'workspace'
         : 'read-only',
     ...(options.access === 'full' ? ['--always-approve'] : []),
+    'agent',
+    '--no-leader',
     'stdio',
   ];
   const env = buildAgentLaunchEnv(envOverrides);
