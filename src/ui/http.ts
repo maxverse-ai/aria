@@ -4,14 +4,17 @@ import { timingSafeEqual } from 'node:crypto';
 export const LOCALHOST_HOSTS = new Set(['127.0.0.1', 'localhost', '[::1]', '::1']);
 export const MAX_BODY_BYTES = 256 * 1024;
 
-/** Reject anything not addressed to localhost, and any cross-origin request. */
-export function isLocalRequest(req: IncomingMessage): boolean {
+/** Reject anything not addressed to localhost, and any untrusted origin. */
+export function isLocalRequest(req: IncomingMessage, allowedOrigins: readonly string[] = []): boolean {
   const host = ((req.headers.host ?? '').split(':')[0] ?? '').replace(/^\[|\]$/g, '');
   if (host && !LOCALHOST_HOSTS.has(host) && !LOCALHOST_HOSTS.has(`[${host}]`)) return false;
   const origin = req.headers.origin;
   if (origin) {
     try {
-      if (!LOCALHOST_HOSTS.has(new URL(origin).hostname)) return false;
+      const parsed = new URL(origin);
+      const local = LOCALHOST_HOSTS.has(parsed.hostname);
+      const explicitlyAllowed = parsed.origin === origin && allowedOrigins.includes(origin);
+      if (!local && !explicitlyAllowed) return false;
     } catch {
       return false;
     }

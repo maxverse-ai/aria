@@ -39,6 +39,10 @@ export interface UiServerDeps {
   host?: string;
   /** Bind port; 0 (default) picks an ephemeral port. */
   port?: number;
+  /** API token; defaults to a random per-process value. */
+  token?: string;
+  /** Exact additional origins accepted from a loopback reverse proxy. */
+  allowedOrigins?: string[];
 }
 
 export interface UiServerHandle {
