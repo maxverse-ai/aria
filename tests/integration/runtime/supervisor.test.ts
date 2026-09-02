@@ -177,8 +177,14 @@ describe('Supervisor', () => {
   });
 
   it('reconnects an opt-in manager-owned Lark bridge without leaking either transport', async () => {
+    registerFakeEngine('manager-reconnect-test');
+    const configPath = join(root, 'config.json');
+    const config = (await loadRootConfig(configPath))!;
+    config.profiles.claude!.agentKind = 'manager-reconnect-test';
+    await saveRootConfig(config, configPath);
+
     sup = new Supervisor({
-      configPath: join(root, 'config.json'),
+      configPath,
       rootDir: root,
       runPreflight: false,
       startChannelFn: stubStartChannel,
