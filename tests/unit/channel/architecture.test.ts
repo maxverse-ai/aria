@@ -33,4 +33,10 @@ describe('channel architecture boundary', () => {
     expect(source).toContain('const flow = await conversations.start({');
     expect(source).toContain('conversations.recordEvent({');
   });
+
+  it('does not cut production Supervisor startup over to the Stage 1 registry', async () => {
+    const source = await readFile('src/runtime/supervisor.ts', 'utf8');
+    expect(source).not.toContain('ChannelPluginRegistry');
+    expect(source).not.toContain("channel/plugin/registry");
+  });
 });
