@@ -44,8 +44,9 @@ describe('channel architecture boundary', () => {
   it('runs ChannelManager only as an empty shadow path in Supervisor', async () => {
     const source = await readFile('src/runtime/supervisor.ts', 'utf8');
     expect(source).toContain('new ChannelManager({ profileId: this.profile })');
+    expect(source).toContain('projectSchemaV2ChannelInstances({');
     expect(source).toContain('await this.channelManager.start([])');
     expect(source).not.toContain('ChannelPluginRegistry');
-    expect(source).not.toContain('ResolvedChannelInstance');
+    expect(source).not.toContain('this.channelManager.start(this.resolvedChannelInstances)');
   });
 });

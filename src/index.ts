@@ -125,6 +125,12 @@ export {
   ChannelManager,
   DEFAULT_CHANNEL_MANAGER_DRAIN_MS,
 } from './channel/manager';
+export {
+  BUILT_IN_LARK_CONFIG_VERSION,
+  BUILT_IN_LARK_PLUGIN_ID,
+  projectSchemaV2ChannelInstances,
+  SCHEMA_V2_LARK_INSTANCE_ID,
+} from './channel/instance-resolver';
 export { runChannelPluginContract } from './channel/plugin/contract-test-kit';
 export { ChannelPluginError } from './channel/plugin/errors';
 export { CHANNEL_PLUGIN_ABI_VERSION } from './channel/plugin/types';
@@ -191,6 +197,12 @@ export type {
   ManagedChannelInstanceSnapshot,
   ManagedChannelInstanceState,
 } from './channel/manager';
+export type {
+  LarkChannelConfig,
+  LarkCredentialMode,
+  SchemaV2ChannelInstances,
+  SchemaV2ChannelProjectionInput,
+} from './channel/instance-resolver';
 export { WechatKfCallbackHandler } from './channel/wechat-kf/callback';
 export type {
   WechatKfCallbackHandlerOptions,

@@ -257,8 +257,15 @@ Implementation status:
   empty production instance plan. Its ordered lifecycle, readiness checks,
   drain, close, rollback, isolation, and snapshots are executable without
   opening another provider connection.
-- Stored channel instances and any Lark or `wechat-kf` protocol migration
-  remain disabled until their later stages.
+- Stage 4 purely projects each authoritative schema-v2 profile into one
+  validated, immutable `lark` / `lark-primary` resolved instance. Public
+  transport configuration and credential references are separated; an old
+  inline credential is represented only by a non-secret compatibility mode.
+  The projection itself does not rewrite profile bytes, and the engine
+  `plugins` field is ignored.
+- Stored channel instances and any Lark or `wechat-kf` protocol lifecycle
+  migration remain disabled until their later stages. ChannelManager still
+  starts an empty production plan.
 
 0. **Baseline and decision.** Land this architecture decision, record the
    current seams, and prove unchanged production behavior with repository checks.
