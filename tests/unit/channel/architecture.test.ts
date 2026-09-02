@@ -41,12 +41,16 @@ describe('channel architecture boundary', () => {
     expect(channel).toContain('conversations.recordEvent({');
   });
 
-  it('runs ChannelManager only as an empty shadow path in Supervisor', async () => {
-    const source = await readFile('src/runtime/supervisor.ts', 'utf8');
-    expect(source).toContain('new ChannelManager({ profileId: this.profile })');
-    expect(source).toContain('projectSchemaV2ChannelInstances({');
-    expect(source).toContain('await this.channelManager.start([])');
-    expect(source).not.toContain('ChannelPluginRegistry');
-    expect(source).not.toContain('this.channelManager.start(this.resolvedChannelInstances)');
+  it('routes one Lark owner through the bounded rollout composition', async () => {
+    const supervisor = await readFile('src/runtime/supervisor.ts', 'utf8');
+    const composition = await readFile('src/runtime/lark-channel-runtime.ts', 'utf8');
+
+    expect(supervisor).toContain('projectSchemaV2ChannelInstances({');
+    expect(supervisor).toContain('startProfileLarkChannelRuntime({');
+    expect(composition).toContain("options.policy.owner === 'manager'");
+    expect(composition).toContain("options.policy.owner === 'legacy'");
+    expect(composition).toContain('await manager.start(plans)');
+    expect(composition).not.toContain('wechat-kf');
+    expect(composition).not.toContain('weixin-ilink');
   });
 });

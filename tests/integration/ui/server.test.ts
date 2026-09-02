@@ -52,6 +52,8 @@ function stubSupervisor(): UiSupervisor {
         pid: process.pid,
         startedAt: new Date().toISOString(),
         botName: `bot-${p}`,
+        larkChannelRolloutMode: 'shadow' as const,
+        larkChannelOwner: 'legacy' as const,
       })),
     startProfile: async (p) => {
       online.set(p, await makeControls(p));

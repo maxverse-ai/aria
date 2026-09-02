@@ -131,14 +131,77 @@ afterEach(async () => {
 });
 
 describe('Supervisor', () => {
-  it('projects schema-v2 channel instances without rewriting profile config', async () => {
-    const configPath = join(root, 'config.json');
-    const before = await readFile(configPath, 'utf8');
+  it.each(['shadow', 'opt-in'] as const)(
+    'projects schema-v2 channel instances without rewriting profile config in %s mode',
+    async (mode) => {
+      sup = new Supervisor({
+        configPath: join(root, 'config.json'),
+        rootDir: root,
+        runPreflight: false,
+        startChannelFn: stubStartChannel,
+        larkChannelRolloutMode: mode,
+      });
+      const configPath = join(root, 'config.json');
+      const before = await readFile(configPath, 'utf8');
+
+      await sup.startProfile('claude');
+      await sup.stopProfile('claude');
+
+      expect(await readFile(configPath, 'utf8')).toBe(before);
+    },
+  );
+
+  it.each([
+    ['off', 'legacy'],
+    ['shadow', 'legacy'],
+    ['opt-in', 'manager'],
+    ['default-on', 'manager'],
+  ] as const)('keeps one Lark transport owner in %s rollout mode', async (mode, owner) => {
+    sup = new Supervisor({
+      configPath: join(root, 'config.json'),
+      rootDir: root,
+      runPreflight: false,
+      startChannelFn: stubStartChannel,
+      larkChannelRolloutMode: mode,
+    });
 
     await sup.startProfile('claude');
-    await sup.stopProfile('claude');
+    expect(started).toEqual(['claude']);
+    expect(sup.list()[0]).toMatchObject({
+      larkChannelRolloutMode: mode,
+      larkChannelOwner: owner,
+    });
 
-    expect(await readFile(configPath, 'utf8')).toBe(before);
+    await sup.stopProfile('claude');
+    expect(disconnected).toEqual(['claude']);
+  });
+
+  it('reconnects an opt-in manager-owned Lark bridge without leaking either transport', async () => {
+    registerFakeEngine('manager-reconnect-test');
+    const configPath = join(root, 'config.json');
+    const config = (await loadRootConfig(configPath))!;
+    config.profiles.claude!.agentKind = 'manager-reconnect-test';
+    await saveRootConfig(config, configPath);
+
+    sup = new Supervisor({
+      configPath,
+      rootDir: root,
+      runPreflight: false,
+      startChannelFn: stubStartChannel,
+      larkChannelRolloutMode: 'opt-in',
+    });
+
+    await sup.startProfile('claude');
+    const owner = startedConversationRuntimes[0];
+    await sup.restartProfile('claude');
+
+    expect(started).toEqual(['claude', 'claude']);
+    expect(disconnected).toEqual(['claude']);
+    expect(startedConversationRuntimes).toEqual([owner, owner]);
+    expect(sup.list()[0]).toMatchObject({ larkChannelOwner: 'manager' });
+
+    await sup.stopProfile('claude');
+    expect(disconnected).toEqual(['claude', 'claude']);
   });
 
   it('keeps native read disabled by default and owns an explicitly supplied lifecycle', async () => {
@@ -258,6 +321,29 @@ describe('Supervisor', () => {
 
     await sup.stopProfile('claude');
     expect(disposedAgents).toEqual(['switch-test']);
+  });
+
+  it('reuses the manager-owned Lark transport during an opt-in engine switch', async () => {
+    registerFakeEngine('manager-switch-test');
+    sup = new Supervisor({
+      configPath: join(root, 'config.json'),
+      rootDir: root,
+      runPreflight: false,
+      startChannelFn: stubStartChannel,
+      larkChannelRolloutMode: 'opt-in',
+    });
+
+    await sup.startProfile('claude');
+    await expect(
+      sup.controlsFor('claude')!.switchAgent!('manager-switch-test', actor),
+    ).resolves.toMatchObject({ currentAgentKind: 'manager-switch-test' });
+
+    expect(started).toEqual(['claude']);
+    expect(disconnected).toEqual([]);
+    expect(sup.list()[0]).toMatchObject({
+      agentKind: 'manager-switch-test',
+      larkChannelOwner: 'manager',
+    });
   });
 
   it('keeps the previous engine and projections when candidate readiness fails', async () => {
