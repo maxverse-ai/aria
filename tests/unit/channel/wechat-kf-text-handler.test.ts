@@ -8,6 +8,7 @@ import { FileWechatKfReceiptStore } from '../../../src/channel/wechat-kf/receipt
 import { FileWechatKfDeliveryStore } from '../../../src/channel/wechat-kf/delivery-store';
 import { WechatKfTextHandler } from '../../../src/channel/wechat-kf/text-handler';
 import { WechatKfMediaError } from '../../../src/channel/wechat-kf/client';
+import { createDefaultWechatKfPresentation } from '../../../src/channel/wechat-kf/presentation';
 import type { WechatKfMessage } from '../../../src/channel/wechat-kf/types';
 import { FileAttachmentStore } from '../../../src/media/file-store';
 
@@ -148,6 +149,41 @@ describe('WechatKfTextHandler', () => {
     expect(help).toContain('/new：归档当前上下文并开启新会话');
   });
 
+  it('resolves one deployment-owned presentation for each new inbound message', async () => {
+    const fallback = createDefaultWechatKfPresentation();
+    const resolve = vi.fn(({ message: input }: { message: { kind: string; text?: string } }) => ({
+      ...fallback,
+      welcome: 'Welcome. Ask a product question.',
+      help: 'Product assistant\nAsk a product question.\n\n/help: Show help',
+      processing: 'Looking up the relevant information. Please wait.',
+      imageLabel: 'Image',
+      ...(input.kind === 'text' && input.text === '/help'
+        ? { help: 'English help' }
+        : {}),
+    }));
+    const begin = vi.fn(() => ({
+      beforeFinal: vi.fn().mockResolvedValue(undefined),
+      finish: vi.fn().mockResolvedValue(undefined),
+    }));
+    const harness = await createHarness({
+      presentation: { resolve },
+      processingFeedback: { begin },
+    });
+
+    await harness.handler.accept(message('m-presented-question', 'How do I configure it?'));
+
+    expect(resolve).toHaveBeenCalledOnce();
+    expect(resolve).toHaveBeenCalledWith(expect.objectContaining({
+      message: { kind: 'text', text: 'How do I configure it?' },
+    }));
+    expect(harness.api.sendText.mock.calls[0]?.[0].content).toBe(
+      'Welcome. Ask a product question.',
+    );
+    expect(begin).toHaveBeenCalledWith(expect.objectContaining({
+      content: 'Looking up the relevant information. Please wait.',
+    }));
+  });
+
   it('routes new, stop, and unknown commands deterministically', async () => {
     const processingFeedback = {
       begin: vi.fn(() => ({
@@ -208,6 +244,7 @@ describe('WechatKfTextHandler', () => {
       externalUserId: 'wm_user',
       openKfid: 'wk123',
       inboundMessageId: 'm-feedback',
+      content: '正在为你查询相关信息，请稍等。',
     });
     expect(events).toEqual(['run', 'before-final', 'answer', 'finish']);
   });
@@ -448,6 +485,7 @@ async function createHarness(options: {
   imageMaterializer?: import('../../../src/channel/wechat-kf/outbound').WechatKfImageMaterializer;
   processingFeedback?: import('../../../src/channel/wechat-kf/text-handler').WechatKfProcessingFeedback;
   userCopy?: import('../../../src/channel/wechat-kf/commands').WechatKfUserCopy;
+  presentation?: import('../../../src/channel/wechat-kf/presentation').WechatKfPresentationProvider;
   now?: () => number;
 } = {}) {
   const root = await mkdtemp(join(tmpdir(), 'aria-wxkf-handler-'));
