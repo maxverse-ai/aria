@@ -53,6 +53,7 @@ vi.mock('../../../src/lark-cli/identity-policy', async () => {
 });
 
 const roots: string[] = [];
+const realSetTimeout = setTimeout;
 
 beforeEach(() => {
   engineProbeMocks.probeEngineStatus.mockReset();
@@ -75,8 +76,7 @@ beforeEach(() => {
 });
 
 afterEach(async () => {
-  if (vi.isFakeTimers()) await vi.runAllTimersAsync();
-  await waitForCardActions();
+  await drainCardActions();
   vi.useRealTimers();
   vi.restoreAllMocks();
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
@@ -397,10 +397,25 @@ describe('profile-aware account and config commands', () => {
     await expect(
       listSecretIds(codexPaths),
     ).resolves.not.toContain(secretKeyForApp('cli_new'));
-    await vi.runAllTimersAsync();
-    await waitForCardActions();
+    await drainCardActions();
   });
 });
+
+async function drainCardActions(): Promise<void> {
+  const completion = waitForCardActions();
+  let complete = false;
+  void completion.then(() => {
+    complete = true;
+  });
+
+  for (let attempt = 0; attempt < 200 && !complete; attempt += 1) {
+    if (vi.isFakeTimers()) await vi.runOnlyPendingTimersAsync();
+    await new Promise<void>((resolve) => realSetTimeout(resolve, 5));
+  }
+
+  if (!complete) throw new Error('card actions did not settle after draining pending timers');
+  await completion;
+}
 
 async function createHarness(options: {
   preferences?: RootConfig['profiles'][string]['preferences'];
