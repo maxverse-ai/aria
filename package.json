@@ -1,6 +1,6 @@
 {
   "name": "@maxverse-ai/aria",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "Aria — where your local agent team gathers in Feishu/Lark",
   "type": "module",
   "packageManager": "pnpm@12.0.0",
