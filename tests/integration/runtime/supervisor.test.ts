@@ -171,13 +171,19 @@ describe('Supervisor', () => {
   });
 
   it('reuses one profile conversation runtime across reconnect', async () => {
+    registerFakeEngine('reconnect-test');
+    const configPath = join(root, 'config.json');
+    const config = (await loadRootConfig(configPath))!;
+    config.profiles.claude!.agentKind = 'reconnect-test';
+    await saveRootConfig(config, configPath);
+
     await sup.startProfile('claude');
     const owner = startedConversationRuntimes[0];
 
     await sup.restartProfile('claude');
 
     expect(startedConversationRuntimes).toEqual([owner, owner]);
-    expect(startedAgents).toEqual(['claude', 'claude']);
+    expect(startedAgents).toEqual(['reconnect-test', 'reconnect-test']);
     expect(quiesceCount).toBe(1);
     expect(disconnected).toEqual(['claude']);
     expect(owner?.isClosed()).toBe(false);
