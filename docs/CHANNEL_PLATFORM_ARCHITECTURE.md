@@ -116,6 +116,8 @@ through logs or public read models.
 ABI v1 must be versioned and runtime-validated. Its public boundary uses
 serializable values and opaque identifiers so an in-process implementation can
 later move to a Worker or subprocess without changing channel semantics.
+The concrete Stage 1 surface and plugin-package guidance are documented in
+[Channel Plugin ABI v1](./CHANNEL_PLUGIN_ABI_V1.md).
 
 The minimum contracts are:
 

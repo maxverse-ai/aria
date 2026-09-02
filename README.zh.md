@@ -517,6 +517,8 @@ grep '"event":"enter"' ~/.aria/profiles/<profile>/logs/bridge-$(date +%Y%m%d).js
 | Codex App Server、原生 steering、实时状态和服务档位 | [Codex App Server 运行时](docs/CODEX_APP_SERVER.md) |
 | Grok Agent stdio、ACP 会话和直接 steering | [Grok Agent stdio 运行时](docs/GROK_AGENT_STDIO.md) |
 | 内置与外部引擎契约 | [Engine Plugin](docs/PLUGINS.md) |
+| 多通道插件、生命周期、隔离和渐进式交付 | [通道平台架构](docs/CHANNEL_PLATFORM_ARCHITECTURE.md) |
+| 版本化通道包/运行时契约和测试工具 | [Channel Plugin ABI v1](docs/CHANNEL_PLUGIN_ABI_V1.md) |
 | 私有 Release 安装、更新事务、稳定 launcher 与回滚 | [CLI 分发架构](docs/DISTRIBUTION.md) |
 | Profile 状态、托管工作空间和引擎自有布局 | [工作空间与状态布局](docs/WORKSPACE_AND_STATE_LAYOUT.md) |
 | 控制面命令与扩展边界 | [控制平面](docs/CONTROL_PLANE.md) |

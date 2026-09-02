@@ -115,18 +115,62 @@ export { FileAttachmentStore } from './media/file-store';
 export type { FileAttachmentInput } from './media/file-store';
 export type { ConversationSource } from './conversation/types';
 export { ChannelPluginRegistry } from './channel/plugin/registry';
+export { runChannelPluginContract } from './channel/plugin/contract-test-kit';
+export { ChannelPluginError } from './channel/plugin/errors';
+export { CHANNEL_PLUGIN_ABI_VERSION } from './channel/plugin/types';
+export {
+  assertCanonicalChannelPluginId,
+  assertCapabilityAllowsInbound,
+  assertCapabilityAllowsOutbound,
+  assertChannelDeliveryReceipt,
+  assertChannelDrainOptions,
+  assertChannelDrainResult,
+  assertChannelHealthSnapshot,
+  assertChannelInboundEnvelope,
+  assertChannelIngressAcceptance,
+  assertChannelOutboundIntent,
+  assertChannelPlugin,
+  assertChannelPluginManifest,
+  assertChannelRuntime,
+  assertChannelRuntimeSnapshot,
+  assertResolvedChannelInstance,
+  channelRuntimeKey,
+} from './channel/plugin/validation';
 export type {
+  ChannelAssetContent,
   ChannelCapabilities,
-  ChannelConversationPort,
+  ChannelConfig,
+  ChannelContent,
+  ChannelConversationKind,
+  ChannelDeliveryReceipt,
+  ChannelDrainOptions,
+  ChannelDrainResult,
+  ChannelHealthSnapshot,
+  ChannelInboundEnvelope,
+  ChannelIngressAcceptance,
   ChannelIngressMode,
+  ChannelIngressPort,
+  ChannelInstanceRef,
   ChannelMessageKind,
+  ChannelOutboundIntent,
   ChannelPlugin,
   ChannelPluginContext,
+  ChannelPluginManifest,
   ChannelPluginPackage,
+  ResolvedChannelInstance,
   ChannelRuntime,
   ChannelRuntimeSnapshot,
+  ChannelRuntimeState,
   ChannelStreamingMode,
 } from './channel/plugin/types';
+export type {
+  ChannelPluginErrorKind,
+  ChannelPluginErrorOptions,
+} from './channel/plugin/errors';
+export type {
+  ChannelPluginContractOptions,
+  ChannelPluginContractResult,
+} from './channel/plugin/contract-test-kit';
 export { WechatKfCallbackHandler } from './channel/wechat-kf/callback';
 export type {
   WechatKfCallbackHandlerOptions,

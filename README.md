@@ -530,6 +530,7 @@ legacy global command as a rollback baseline; it does not delete it.
 | Grok Agent stdio, ACP sessions, and direct steering | [Grok Agent stdio runtime](docs/GROK_AGENT_STDIO.md) |
 | Built-in and external engine contracts | [Engine plugins](docs/PLUGINS.md) |
 | Multi-channel plugins, lifecycle, isolation, and progressive delivery | [Channel platform architecture](docs/CHANNEL_PLATFORM_ARCHITECTURE.md) |
+| Versioned channel package/runtime contract and test kit | [Channel Plugin ABI v1](docs/CHANNEL_PLUGIN_ABI_V1.md) |
 | Private Release installation, update transactions, stable launcher, and rollback | [CLI distribution architecture](docs/DISTRIBUTION.md) |
 | Profile state, managed workspaces, and engine-owned layout | [Workspace and state layout](docs/WORKSPACE_AND_STATE_LAYOUT.md) |
 | Control-plane commands and extension boundary | [Control plane](docs/CONTROL_PLANE.md) |
