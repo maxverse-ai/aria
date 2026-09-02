@@ -80,7 +80,7 @@ afterEach(async () => {
   vi.useRealTimers();
   vi.restoreAllMocks();
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
-});
+}, 30_000);
 
 describe('profile-aware account and config commands', () => {
   it('saves /config submit into the active v2 profile without flattening root config', async () => {

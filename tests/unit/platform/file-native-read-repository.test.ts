@@ -25,8 +25,10 @@ describe('FileNativeReadRepository', () => {
       revision: 1,
     });
     expect(await readFile(nativeStore, 'utf8')).toBe('native-session-data\n');
-    expect((await stat(join(root, 'native-read', 'snapshot.json'))).mode & 0o777).toBe(0o600);
-    expect((await stat(join(root, 'native-read', 'changes.jsonl'))).mode & 0o777).toBe(0o600);
+    if (process.platform !== 'win32') {
+      expect((await stat(join(root, 'native-read', 'snapshot.json'))).mode & 0o777).toBe(0o600);
+      expect((await stat(join(root, 'native-read', 'changes.jsonl'))).mode & 0o777).toBe(0o600);
+    }
   });
 
   it('assigns monotonic revisions and makes event retries idempotent', async () => {

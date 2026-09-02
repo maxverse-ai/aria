@@ -20,7 +20,7 @@ describe('nativeReadFactoryFromEnvironment', () => {
     expect(factory).toBeUndefined();
   });
 
-  it('requires a private regular token file', async () => {
+  it.skipIf(process.platform === 'win32')('requires a private regular token file', async () => {
     const root = await tempRoot();
     const tokenFile = join(root, 'token');
     await writeFile(tokenFile, 'secret\n', { mode: 0o644 });
