@@ -246,6 +246,16 @@ Each stage is independently releasable. A stage cannot begin its default-path
 cutover until its predecessor passes the repository gates and its own runtime
 acceptance tests.
 
+Implementation status:
+
+- Stages 0 and 1 established this decision and Channel Plugin ABI v1.
+- Stage 2 gives each live Supervisor profile one
+  `ProfileConversationRuntimeOwner`. Lark reconnects and in-place engine
+  switches reuse that owner; direct `startChannel()` calls and the external
+  profile conversation host retain compatibility-owned lifecycles.
+- ChannelManager, stored channel instances, and any Lark or `wechat-kf`
+  protocol migration remain disabled until their later stages.
+
 0. **Baseline and decision.** Land this architecture decision, record the
    current seams, and prove unchanged production behavior with repository checks.
 1. **Channel ABI v1.** Complete runtime validation, opaque envelopes, lifecycle

@@ -27,11 +27,18 @@ describe('channel architecture boundary', () => {
     }
   });
 
-  it('routes the existing Lark message run through ConversationRuntime', async () => {
-    const source = await readFile('src/bot/channel.ts', 'utf8');
-    expect(source).toContain('const conversations = new ConversationRuntime({');
-    expect(source).toContain('const flow = await conversations.start({');
-    expect(source).toContain('conversations.recordEvent({');
+  it('routes Lark through the profile-owned ConversationRuntime', async () => {
+    const channel = await readFile('src/bot/channel.ts', 'utf8');
+    const supervisor = await readFile('src/runtime/supervisor.ts', 'utf8');
+    const externalHost = await readFile('src/conversation/profile-host.ts', 'utf8');
+
+    expect(channel).not.toContain('new ConversationRuntime({');
+    expect(externalHost).not.toContain('new ConversationRuntime({');
+    expect(supervisor).toContain('new ProfileConversationRuntimeOwner({');
+    expect(supervisor).toContain('conversationRuntime: this.conversationRuntime');
+    expect(channel).toContain('const conversations = conversationRuntime.runtime;');
+    expect(channel).toContain('const flow = await conversations.start({');
+    expect(channel).toContain('conversations.recordEvent({');
   });
 
   it('does not cut production Supervisor startup over to the Stage 1 registry', async () => {

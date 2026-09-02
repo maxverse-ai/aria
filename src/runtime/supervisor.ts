@@ -4,7 +4,7 @@ import pkg from '../../package.json';
 import { startChannel as realStartChannel, type BridgeChannel } from '../bot/channel';
 import type { AgentSwitchResult, Controls } from '../commands';
 import type { AppPaths } from '../config/app-paths';
-import { isComplete, type AppConfig } from '../config/schema';
+import { getMaxConcurrentRuns, isComplete, type AppConfig } from '../config/schema';
 import type { AgentKind, ProfileConfig, RootConfig } from '../config/profile-schema';
 import { loadExternalEnginePlugins } from '../agent/plugin/registry';
 import type { EngineRuntime } from '../agent/runtime/types';
@@ -41,6 +41,7 @@ import {
 } from './engine-switch';
 import { ProfileRuntimeSlot } from './profile-runtime-slot';
 import { modelCatalog } from '../agent/model-catalog/service';
+import { ProfileConversationRuntimeOwner } from '../conversation/profile-runtime-owner';
 import {
   startRuntimeControlServer,
   type RuntimeControlServerHandle,
@@ -106,6 +107,7 @@ class ManagedProfile {
   private runtimeSlot: ProfileRuntimeSlot;
   private runtimeControl?: RuntimeControlServerHandle;
   private nativeReadRuntime?: NativeReadProfileRuntime;
+  private conversationRuntime?: ProfileConversationRuntimeOwner;
 
   constructor(
     readonly profile: string,
@@ -163,6 +165,18 @@ class ManagedProfile {
         this.nativeReadRuntime = nativeReadRuntime;
         await nativeReadRuntime.start();
       }
+      this.conversationRuntime = new ProfileConversationRuntimeOwner({
+        profileId: this.profile,
+        agent: this.runtimeSlot.execution,
+        sessions: this.sessions,
+        sessionCatalog: this.sessionCatalog,
+        workspaces: this.workspaces,
+        maxConcurrentRuns: () => getMaxConcurrentRuns(this.cfg),
+        ...(this.nativeReadRuntime ? { runAudit: this.nativeReadRuntime.runAudit } : {}),
+        ...(this.nativeReadRuntime
+          ? { governanceAudit: this.nativeReadRuntime.governanceAudit }
+          : {}),
+      });
       this.bridge = await this.startChannelFn({
         cfg: this.cfg,
         agent: this.runtimeSlot.execution,
@@ -175,6 +189,7 @@ class ManagedProfile {
         ...(this.nativeReadRuntime ? { messageAudit: this.nativeReadRuntime.messageAudit } : {}),
         ...(this.nativeReadRuntime ? { messageRead: this.nativeReadRuntime.messageRead } : {}),
         ...(this.nativeReadRuntime ? { governanceAudit: this.nativeReadRuntime.governanceAudit } : {}),
+        conversationRuntime: this.conversationRuntime,
       });
       this.runtimeControl = await startRuntimeControlServer({
         profile: this.profile,
@@ -192,6 +207,8 @@ class ManagedProfile {
       // Roll back partial bring-up so a failed start doesn't leak locks/entries.
       await this.runtimeControl?.close().catch(() => undefined);
       this.runtimeControl = undefined;
+      await this.conversationRuntime?.close('profile-bring-up-failed').catch(() => undefined);
+      this.conversationRuntime = undefined;
       await this.nativeReadRuntime?.stop().catch(() => undefined);
       this.nativeReadRuntime = undefined;
       await this.bridge?.disconnect().catch(() => undefined);
@@ -203,10 +220,13 @@ class ManagedProfile {
   }
 
   async stop(): Promise<void> {
-    await this.nativeReadRuntime?.stop().catch((err) =>
-      log.warn('native-read', 'stop-failed', { profile: this.profile, err: String(err) }),
+    await this.conversationRuntime?.close('profile-stop').catch((err) =>
+      log.warn('supervisor', 'conversation-stop-failed', {
+        profile: this.profile,
+        err: String(err),
+      }),
     );
-    this.nativeReadRuntime = undefined;
+    this.conversationRuntime = undefined;
     await this.runtimeControl?.close().catch((err) =>
       log.warn('runtime-control', 'stop-failed', { profile: this.profile, err: String(err) }),
     );
@@ -216,6 +236,10 @@ class ManagedProfile {
     } catch (err) {
       log.warn('supervisor', 'disconnect-failed', { profile: this.profile, err: String(err) });
     }
+    await this.nativeReadRuntime?.stop().catch((err) =>
+      log.warn('native-read', 'stop-failed', { profile: this.profile, err: String(err) }),
+    );
+    this.nativeReadRuntime = undefined;
     await this.engineRuntime.dispose().catch((err) =>
       log.warn('supervisor', 'engine-dispose-failed', { profile: this.profile, err: String(err) }),
     );
@@ -581,6 +605,7 @@ class ManagedProfile {
     let nextAppLock: AcquiredRuntimeLock | undefined;
     let nextBridge: BridgeChannel | undefined;
     let nextEngineRuntime: EngineRuntime | undefined;
+    let resumeRuns: (() => void) | undefined;
     try {
       const nextRuntime = await resolveProfileRuntime({
         config: this.configPath,
@@ -606,10 +631,14 @@ class ManagedProfile {
         );
       }
       const nextControls = this.makeControls(nextRuntime.appPaths, next, nextRuntime.profileConfig);
-      const nextRuntimeSlot = new ProfileRuntimeSlot(nextEngineRuntime);
+      const conversationRuntime = this.conversationRuntime;
+      if (!conversationRuntime) {
+        throw new Error(`profile conversation runtime is unavailable: ${this.profile}`);
+      }
+      resumeRuns = await this.bridge.quiesceAgentRuns('profile-reconnect');
       nextBridge = await this.startChannelFn({
         cfg: next,
-        agent: nextRuntimeSlot.execution,
+        agent: this.runtimeSlot.execution,
         sessions: this.sessions,
         sessionCatalog: this.sessionCatalog,
         workspaces: this.workspaces,
@@ -619,9 +648,9 @@ class ManagedProfile {
         ...(this.nativeReadRuntime ? { messageAudit: this.nativeReadRuntime.messageAudit } : {}),
         ...(this.nativeReadRuntime ? { messageRead: this.nativeReadRuntime.messageRead } : {}),
         ...(this.nativeReadRuntime ? { governanceAudit: this.nativeReadRuntime.governanceAudit } : {}),
+        conversationRuntime,
       });
       const previousBridge = this.bridge;
-      const previousEngineRuntime = this.engineRuntime;
       try {
         await previousBridge.disconnect();
       } catch (err) {
@@ -647,12 +676,13 @@ class ManagedProfile {
       }
       this.cfg = next;
       this.profileConfig = nextRuntime.profileConfig;
-      this.engineRuntime = nextEngineRuntime;
+      const activatedEngineRuntime = nextEngineRuntime;
+      const previousEngineRuntime = this.runtimeSlot.swap(activatedEngineRuntime);
+      this.engineRuntime = activatedEngineRuntime;
       modelCatalog.invalidate({
         profileId: this.profile,
         engineId: nextRuntime.profileConfig.agentKind,
       });
-      this.runtimeSlot = nextRuntimeSlot;
       this.controls = nextControls;
       nextBridge = undefined;
       nextEngineRuntime = undefined;
@@ -663,6 +693,7 @@ class ManagedProfile {
       await nextBridge?.disconnect().catch(() => undefined);
       await nextEngineRuntime?.dispose().catch(() => undefined);
       if (nextAppLock) await nextAppLock.release().catch(() => undefined);
+      resumeRuns?.();
       this.restarting = false;
     }
   }

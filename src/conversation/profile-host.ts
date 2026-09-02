@@ -23,6 +23,7 @@ import type {
 import type { MessageConversationKind } from '../runtime/message-resource';
 import type { RunExecution } from '../runtime/run-executor';
 import { ConversationRuntime } from './runtime';
+import { ProfileConversationRuntimeOwner } from './profile-runtime-owner';
 
 export interface ProfileConversationNativeReadOptions {
   /** Independent provider identity exposed to Native Read consumers. */
@@ -150,7 +151,8 @@ export async function createProfileConversationHost(
     resolved.profileConfig.agentKind,
     resolved.profileConfig,
   );
-  const conversations = new ConversationRuntime({
+  const conversationRuntime = new ProfileConversationRuntimeOwner({
+    profileId: options.profile,
     agent: engine.execution,
     sessions,
     sessionCatalog,
@@ -159,6 +161,7 @@ export async function createProfileConversationHost(
     ...(nativeRead ? { runAudit: nativeRead.runAudit } : {}),
     ...(nativeRead ? { governanceAudit: nativeRead.governanceAudit } : {}),
   });
+  const conversations = conversationRuntime.runtime;
   let closed = false;
   const activeConversations = new Map<string, ActiveProfileConversation>();
   const preparingConversations = new Map<string, PreparingProfileConversation>();
@@ -424,9 +427,10 @@ export async function createProfileConversationHost(
     async close() {
       if (closed) return;
       closed = true;
-      conversations.pauseNewRuns('profile-conversation-host-close');
-      const stopped = await conversations.stopAll();
-      await Promise.allSettled(stopped.map((handle) => handle.run.waitForExit(10_000)));
+      let closeError: unknown;
+      await conversationRuntime.close('profile-conversation-host-close').catch((error) => {
+        closeError = error;
+      });
       await Promise.allSettled([
         sessions.flush(),
         sessionCatalog.flush(),
@@ -436,7 +440,10 @@ export async function createProfileConversationHost(
       await nativeRead?.stop().catch((error) =>
         logNativeReadFailure('stop-failed', error),
       );
-      await engine.dispose();
+      await engine.dispose().catch((error) => {
+        closeError ??= error;
+      });
+      if (closeError) throw closeError;
     },
   };
   return host;

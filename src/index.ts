@@ -96,11 +96,16 @@ export type {
 // Channel plugins translate protocol-specific ingress/egress around one
 // channel-neutral conversation runtime. Deployments own plugin composition.
 export { ConversationRuntime } from './conversation/runtime';
+export {
+  DEFAULT_PROFILE_CONVERSATION_DRAIN_MS,
+  ProfileConversationRuntimeOwner,
+} from './conversation/profile-runtime-owner';
 export type {
   ConversationRuntimeDeps,
   RecordConversationEventInput,
   StartConversationInput,
 } from './conversation/runtime';
+export type { ProfileConversationRuntimeOwnerOptions } from './conversation/profile-runtime-owner';
 export { createProfileConversationHost } from './conversation/profile-host';
 export type {
   CreateProfileConversationHostOptions,
