@@ -42,6 +42,7 @@ import {
 import { ProfileRuntimeSlot } from './profile-runtime-slot';
 import { modelCatalog } from '../agent/model-catalog/service';
 import { ProfileConversationRuntimeOwner } from '../conversation/profile-runtime-owner';
+import { ChannelManager } from '../channel/manager';
 import {
   startRuntimeControlServer,
   type RuntimeControlServerHandle,
@@ -108,6 +109,7 @@ class ManagedProfile {
   private runtimeControl?: RuntimeControlServerHandle;
   private nativeReadRuntime?: NativeReadProfileRuntime;
   private conversationRuntime?: ProfileConversationRuntimeOwner;
+  private channelManager?: ChannelManager;
 
   constructor(
     readonly profile: string,
@@ -177,6 +179,12 @@ class ManagedProfile {
           ? { governanceAudit: this.nativeReadRuntime.governanceAudit }
           : {}),
       });
+      this.channelManager = new ChannelManager({ profileId: this.profile });
+      const channelManagerSnapshot = await this.channelManager.start([]);
+      log.info('channel-manager', 'shadow-ready', {
+        profile: this.profile,
+        instances: channelManagerSnapshot.instanceCount,
+      });
       this.bridge = await this.startChannelFn({
         cfg: this.cfg,
         agent: this.runtimeSlot.execution,
@@ -207,6 +215,8 @@ class ManagedProfile {
       // Roll back partial bring-up so a failed start doesn't leak locks/entries.
       await this.runtimeControl?.close().catch(() => undefined);
       this.runtimeControl = undefined;
+      await this.channelManager?.close().catch(() => undefined);
+      this.channelManager = undefined;
       await this.conversationRuntime?.close('profile-bring-up-failed').catch(() => undefined);
       this.conversationRuntime = undefined;
       await this.nativeReadRuntime?.stop().catch(() => undefined);
@@ -220,6 +230,13 @@ class ManagedProfile {
   }
 
   async stop(): Promise<void> {
+    await this.channelManager?.close().catch((err) =>
+      log.warn('channel-manager', 'shadow-stop-failed', {
+        profile: this.profile,
+        err: String(err),
+      }),
+    );
+    this.channelManager = undefined;
     await this.conversationRuntime?.close('profile-stop').catch((err) =>
       log.warn('supervisor', 'conversation-stop-failed', {
         profile: this.profile,

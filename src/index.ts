@@ -120,6 +120,11 @@ export { FileAttachmentStore } from './media/file-store';
 export type { FileAttachmentInput } from './media/file-store';
 export type { ConversationSource } from './conversation/types';
 export { ChannelPluginRegistry } from './channel/plugin/registry';
+export {
+  CHANNEL_MANAGER_SNAPSHOT_VERSION,
+  ChannelManager,
+  DEFAULT_CHANNEL_MANAGER_DRAIN_MS,
+} from './channel/manager';
 export { runChannelPluginContract } from './channel/plugin/contract-test-kit';
 export { ChannelPluginError } from './channel/plugin/errors';
 export { CHANNEL_PLUGIN_ABI_VERSION } from './channel/plugin/types';
@@ -176,6 +181,16 @@ export type {
   ChannelPluginContractOptions,
   ChannelPluginContractResult,
 } from './channel/plugin/contract-test-kit';
+export type {
+  ChannelManagerDrainFailure,
+  ChannelManagerDrainResult,
+  ChannelManagerOptions,
+  ChannelManagerSnapshot,
+  ChannelManagerStartPlan,
+  ChannelManagerState,
+  ManagedChannelInstanceSnapshot,
+  ManagedChannelInstanceState,
+} from './channel/manager';
 export { WechatKfCallbackHandler } from './channel/wechat-kf/callback';
 export type {
   WechatKfCallbackHandlerOptions,

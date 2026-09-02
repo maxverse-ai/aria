@@ -253,8 +253,12 @@ Implementation status:
   `ProfileConversationRuntimeOwner`. Lark reconnects and in-place engine
   switches reuse that owner; direct `startChannel()` calls and the external
   profile conversation host retain compatibility-owned lifecycles.
-- ChannelManager, stored channel instances, and any Lark or `wechat-kf`
-  protocol migration remain disabled until their later stages.
+- Stage 3 composes one profile-owned `ChannelManager` in shadow mode with an
+  empty production instance plan. Its ordered lifecycle, readiness checks,
+  drain, close, rollback, isolation, and snapshots are executable without
+  opening another provider connection.
+- Stored channel instances and any Lark or `wechat-kf` protocol migration
+  remain disabled until their later stages.
 
 0. **Baseline and decision.** Land this architecture decision, record the
    current seams, and prove unchanged production behavior with repository checks.

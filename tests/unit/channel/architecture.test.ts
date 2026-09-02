@@ -41,9 +41,11 @@ describe('channel architecture boundary', () => {
     expect(channel).toContain('conversations.recordEvent({');
   });
 
-  it('does not cut production Supervisor startup over to the Stage 1 registry', async () => {
+  it('runs ChannelManager only as an empty shadow path in Supervisor', async () => {
     const source = await readFile('src/runtime/supervisor.ts', 'utf8');
+    expect(source).toContain('new ChannelManager({ profileId: this.profile })');
+    expect(source).toContain('await this.channelManager.start([])');
     expect(source).not.toContain('ChannelPluginRegistry');
-    expect(source).not.toContain("channel/plugin/registry");
+    expect(source).not.toContain('ResolvedChannelInstance');
   });
 });
