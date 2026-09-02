@@ -398,7 +398,7 @@ describe('profile-aware account and config commands', () => {
       listSecretIds(codexPaths),
     ).resolves.not.toContain(secretKeyForApp('cli_new'));
     await drainCardActions();
-  }, 15_000);
+  });
 });
 
 async function drainCardActions(): Promise<void> {
