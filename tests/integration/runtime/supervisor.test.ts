@@ -131,6 +131,16 @@ afterEach(async () => {
 });
 
 describe('Supervisor', () => {
+  it('projects schema-v2 channel instances without rewriting profile config', async () => {
+    const configPath = join(root, 'config.json');
+    const before = await readFile(configPath, 'utf8');
+
+    await sup.startProfile('claude');
+    await sup.stopProfile('claude');
+
+    expect(await readFile(configPath, 'utf8')).toBe(before);
+  });
+
   it('keeps native read disabled by default and owns an explicitly supplied lifecycle', async () => {
     const lifecycle: string[] = [];
     sup = new Supervisor({

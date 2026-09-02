@@ -43,6 +43,8 @@ import { ProfileRuntimeSlot } from './profile-runtime-slot';
 import { modelCatalog } from '../agent/model-catalog/service';
 import { ProfileConversationRuntimeOwner } from '../conversation/profile-runtime-owner';
 import { ChannelManager } from '../channel/manager';
+import { projectSchemaV2ChannelInstances } from '../channel/instance-resolver';
+import type { ResolvedChannelInstance } from '../channel/plugin/types';
 import {
   startRuntimeControlServer,
   type RuntimeControlServerHandle,
@@ -110,6 +112,7 @@ class ManagedProfile {
   private nativeReadRuntime?: NativeReadProfileRuntime;
   private conversationRuntime?: ProfileConversationRuntimeOwner;
   private channelManager?: ChannelManager;
+  private resolvedChannelInstances: readonly ResolvedChannelInstance[] = [];
 
   constructor(
     readonly profile: string,
@@ -180,10 +183,18 @@ class ManagedProfile {
           : {}),
       });
       this.channelManager = new ChannelManager({ profileId: this.profile });
+      this.resolvedChannelInstances = projectSchemaV2ChannelInstances({
+        profileId: this.profile,
+        profile: {
+          schemaVersion: this.profileConfig.schemaVersion,
+          accounts: this.cfg.accounts,
+        },
+      });
       const channelManagerSnapshot = await this.channelManager.start([]);
       log.info('channel-manager', 'shadow-ready', {
         profile: this.profile,
         instances: channelManagerSnapshot.instanceCount,
+        resolvedInstances: this.resolvedChannelInstances.length,
       });
       this.bridge = await this.startChannelFn({
         cfg: this.cfg,
@@ -217,6 +228,7 @@ class ManagedProfile {
       this.runtimeControl = undefined;
       await this.channelManager?.close().catch(() => undefined);
       this.channelManager = undefined;
+      this.resolvedChannelInstances = [];
       await this.conversationRuntime?.close('profile-bring-up-failed').catch(() => undefined);
       this.conversationRuntime = undefined;
       await this.nativeReadRuntime?.stop().catch(() => undefined);
@@ -237,6 +249,7 @@ class ManagedProfile {
       }),
     );
     this.channelManager = undefined;
+    this.resolvedChannelInstances = [];
     await this.conversationRuntime?.close('profile-stop').catch((err) =>
       log.warn('supervisor', 'conversation-stop-failed', {
         profile: this.profile,
@@ -632,6 +645,13 @@ class ManagedProfile {
       const next = nextRuntime.cfg;
       if (!isComplete(next)) throw new Error('config incomplete after change');
       assertReconnectAgentKindUnchanged(this.profileConfig.agentKind, nextRuntime.profileConfig.agentKind);
+      const nextResolvedChannelInstances = projectSchemaV2ChannelInstances({
+        profileId: this.profile,
+        profile: {
+          schemaVersion: nextRuntime.profileConfig.schemaVersion,
+          accounts: next.accounts,
+        },
+      });
       nextEngineRuntime = createProfileEngineRuntime(nextRuntime.profileConfig, {
         ...nextRuntime.appPaths,
         configPath: nextRuntime.configPath,
@@ -693,6 +713,7 @@ class ManagedProfile {
       }
       this.cfg = next;
       this.profileConfig = nextRuntime.profileConfig;
+      this.resolvedChannelInstances = nextResolvedChannelInstances;
       const activatedEngineRuntime = nextEngineRuntime;
       const previousEngineRuntime = this.runtimeSlot.swap(activatedEngineRuntime);
       this.engineRuntime = activatedEngineRuntime;
