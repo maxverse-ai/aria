@@ -56,6 +56,7 @@ type StoredProfileConfig = Pick<
   | 'workspaces'
   | 'permissions'
   | 'codex'
+  | 'grok'
   | 'opencode'
   | 'dsh'
   | 'kimi'
@@ -98,6 +99,7 @@ function serializeProfileConfig(profile: ProfileConfig): StoredProfileConfig {
     workspaces: profile.workspaces,
     permissions: profile.permissions,
     ...(profile.codex ? { codex: profile.codex } : {}),
+    ...(profile.grok ? { grok: profile.grok } : {}),
     ...(profile.opencode ? { opencode: profile.opencode } : {}),
     ...(profile.dsh ? { dsh: profile.dsh } : {}),
     ...(profile.kimi ? { kimi: profile.kimi } : {}),

@@ -70,6 +70,26 @@ export function codexCapability(profile: Pick<ProfileConfig, 'permissions'>): Ag
   };
 }
 
+export function grokCapability(profile: Pick<ProfileConfig, 'permissions'>): AgentCapability {
+  return {
+    agentId: 'grok',
+    sessionKind: 'grok-session',
+    promptInjection: 'stdin-prefix',
+    systemPrompt: BRIDGE_SYSTEM_PROMPT,
+    supportsNativeHistory: true,
+    callback: {
+      marker: '__bridge_cb',
+      legacyMarkers: [],
+    },
+    permissions: {
+      maxAccess: profile.permissions.maxAccess,
+    },
+    finalReply: 'separate',
+    supportsImages: true,
+    steering: { mode: 'direct', textOnly: true },
+  };
+}
+
 export function opencodeCapability(profile: Pick<ProfileConfig, 'permissions'>): AgentCapability {
   const maxAccess = profile.permissions.maxAccess;
   return {

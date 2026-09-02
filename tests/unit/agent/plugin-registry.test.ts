@@ -27,6 +27,7 @@ describe('engine plugin registry', () => {
     const ids = listEnginePlugins().map((plugin) => plugin.id);
     expect(ids).toContain('claude');
     expect(ids).toContain('codex');
+    expect(ids).toContain('grok');
     expect(ids).toContain('opencode');
     expect(ids).toContain('dsh');
     expect(ids).toContain('kimi');
