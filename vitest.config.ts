@@ -7,8 +7,7 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
   test: process.platform === "win32"
     ? {
-        minWorkers: 2,
-        maxWorkers: 2,
+        fileParallelism: false,
       }
     : undefined,
   plugins: [
