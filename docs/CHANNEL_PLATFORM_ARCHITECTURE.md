@@ -263,9 +263,18 @@ Implementation status:
   inline credential is represented only by a non-secret compatibility mode.
   The projection itself does not rewrite profile bytes, and the engine
   `plugins` field is ignored.
-- Stored channel instances and any Lark or `wechat-kf` protocol lifecycle
-  migration remain disabled until their later stages. ChannelManager still
-  starts an empty production plan.
+- Stage 5 adds a built-in Lark lifecycle adapter and the temporary
+  `ARIA_LARK_CHANNEL_ROLLOUT` control. `off` is a hard legacy rollback,
+  `shadow` starts an empty manager beside the one legacy bridge, and `opt-in`
+  or `default-on` make ChannelManager the sole Lark bridge owner. The current
+  no-variable default remains `shadow`; changing it to `default-on` requires a
+  later reviewed stage after opt-in runtime evidence. Every mode opens exactly
+  one provider connection per profile, including reconnect and shutdown.
+- The adapter deliberately keeps the proven Lark inbound handlers and shared
+  profile conversation runtime intact while moving start, drain and close
+  ownership under ChannelManager. Schema-v2 files are not rewritten. Stored
+  channel instances, generic normalized Lark ingress, and all `wechat-kf`
+  lifecycle migration remain deferred.
 
 0. **Baseline and decision.** Land this architecture decision, record the
    current seams, and prove unchanged production behavior with repository checks.

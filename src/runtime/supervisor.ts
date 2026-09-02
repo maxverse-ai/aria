@@ -1,7 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import pkg from '../../package.json';
-import { startChannel as realStartChannel, type BridgeChannel } from '../bot/channel';
+import {
+  startChannel as realStartChannel,
+  type BridgeChannel,
+  type StartChannelDeps,
+} from '../bot/channel';
 import type { AgentSwitchResult, Controls } from '../commands';
 import type { AppPaths } from '../config/app-paths';
 import { getMaxConcurrentRuns, isComplete, type AppConfig } from '../config/schema';
@@ -42,8 +46,16 @@ import {
 import { ProfileRuntimeSlot } from './profile-runtime-slot';
 import { modelCatalog } from '../agent/model-catalog/service';
 import { ProfileConversationRuntimeOwner } from '../conversation/profile-runtime-owner';
-import { ChannelManager } from '../channel/manager';
-import { projectSchemaV2ChannelInstances } from '../channel/instance-resolver';
+import {
+  projectSchemaV2ChannelInstances,
+  type LarkChannelConfig,
+} from '../channel/instance-resolver';
+import {
+  LARK_CHANNEL_ROLLOUT_ENV,
+  resolveLarkChannelOwnership,
+  type LarkChannelOwnershipPolicy,
+  type LarkChannelRolloutMode,
+} from '../channel/lark-ownership';
 import type { ResolvedChannelInstance } from '../channel/plugin/types';
 import {
   startRuntimeControlServer,
@@ -54,6 +66,10 @@ import type {
   NativeReadRuntimeFactory,
 } from './native-read-runtime';
 import { ProfileRuntimeReconciler } from './profile-runtime-reconciler';
+import {
+  startProfileLarkChannelRuntime,
+  type ProfileLarkChannelRuntime,
+} from './lark-channel-runtime';
 import {
   ConfigChangeService,
   MANAGEMENT_API_VERSION,
@@ -79,6 +95,8 @@ export interface SupervisorOptions {
   runPreflight?: boolean;
   /** Explicit opt-in composition hook. Undefined keeps the native read API off. */
   createNativeReadRuntime?: NativeReadRuntimeFactory;
+  /** Temporary Lark lifecycle rollout override; defaults to the process environment. */
+  larkChannelRolloutMode?: LarkChannelRolloutMode;
 }
 
 export interface ManagedStatus {
@@ -89,6 +107,8 @@ export interface ManagedStatus {
   startedAt?: string;
   botName?: string;
   appId?: string;
+  larkChannelRolloutMode: LarkChannelRolloutMode;
+  larkChannelOwner: LarkChannelOwnershipPolicy['owner'];
 }
 
 /**
@@ -111,8 +131,8 @@ class ManagedProfile {
   private runtimeControl?: RuntimeControlServerHandle;
   private nativeReadRuntime?: NativeReadProfileRuntime;
   private conversationRuntime?: ProfileConversationRuntimeOwner;
-  private channelManager?: ChannelManager;
-  private resolvedChannelInstances: readonly ResolvedChannelInstance[] = [];
+  private larkChannelRuntime?: ProfileLarkChannelRuntime;
+  private resolvedChannelInstances: readonly ResolvedChannelInstance<LarkChannelConfig>[] = [];
 
   constructor(
     readonly profile: string,
@@ -125,6 +145,7 @@ class ManagedProfile {
     private sessionCatalog: SessionCatalog,
     private workspaces: WorkspaceStore,
     private startChannelFn: StartChannelFn,
+    private larkChannelPolicy: Readonly<LarkChannelOwnershipPolicy>,
     private onExitCommand: (profile: string) => void,
     private createNativeReadRuntime?: SupervisorOptions['createNativeReadRuntime'],
   ) {
@@ -182,33 +203,29 @@ class ManagedProfile {
           ? { governanceAudit: this.nativeReadRuntime.governanceAudit }
           : {}),
       });
-      this.channelManager = new ChannelManager({ profileId: this.profile });
-      this.resolvedChannelInstances = projectSchemaV2ChannelInstances({
+      const resolvedChannelInstances = projectSchemaV2ChannelInstances({
         profileId: this.profile,
         profile: {
           schemaVersion: this.profileConfig.schemaVersion,
           accounts: this.cfg.accounts,
         },
       });
-      const channelManagerSnapshot = await this.channelManager.start([]);
-      log.info('channel-manager', 'shadow-ready', {
-        profile: this.profile,
-        instances: channelManagerSnapshot.instanceCount,
-        resolvedInstances: this.resolvedChannelInstances.length,
-      });
-      this.bridge = await this.startChannelFn({
+      this.resolvedChannelInstances = resolvedChannelInstances;
+      this.larkChannelRuntime = await this.startLarkChannelRuntime({
         cfg: this.cfg,
-        agent: this.runtimeSlot.execution,
-        sessions: this.sessions,
-        sessionCatalog: this.sessionCatalog,
-        workspaces: this.workspaces,
         controls: this.controls,
         appPaths: this.appPaths,
-        ...(this.nativeReadRuntime ? { runAudit: this.nativeReadRuntime.runAudit } : {}),
-        ...(this.nativeReadRuntime ? { messageAudit: this.nativeReadRuntime.messageAudit } : {}),
-        ...(this.nativeReadRuntime ? { messageRead: this.nativeReadRuntime.messageRead } : {}),
-        ...(this.nativeReadRuntime ? { governanceAudit: this.nativeReadRuntime.governanceAudit } : {}),
         conversationRuntime: this.conversationRuntime,
+        instance: resolvedChannelInstances[0],
+      });
+      this.bridge = this.larkChannelRuntime.bridge;
+      const channelManagerSnapshot = this.larkChannelRuntime.snapshot();
+      log.info('channel-manager', 'rollout-ready', {
+        profile: this.profile,
+        mode: this.larkChannelPolicy.mode,
+        owner: this.larkChannelPolicy.owner,
+        instances: channelManagerSnapshot?.instanceCount ?? 0,
+        resolvedInstances: this.resolvedChannelInstances.length,
       });
       this.runtimeControl = await startRuntimeControlServer({
         profile: this.profile,
@@ -226,14 +243,13 @@ class ManagedProfile {
       // Roll back partial bring-up so a failed start doesn't leak locks/entries.
       await this.runtimeControl?.close().catch(() => undefined);
       this.runtimeControl = undefined;
-      await this.channelManager?.close().catch(() => undefined);
-      this.channelManager = undefined;
+      await this.larkChannelRuntime?.close().catch(() => undefined);
+      this.larkChannelRuntime = undefined;
       this.resolvedChannelInstances = [];
       await this.conversationRuntime?.close('profile-bring-up-failed').catch(() => undefined);
       this.conversationRuntime = undefined;
       await this.nativeReadRuntime?.stop().catch(() => undefined);
       this.nativeReadRuntime = undefined;
-      await this.bridge?.disconnect().catch(() => undefined);
       if (this.entry) unregisterSync(this.entry.id, this.appPaths.userRegistryFile);
       await releaseRuntimeLocks(this.locks);
       this.locks = [];
@@ -242,13 +258,13 @@ class ManagedProfile {
   }
 
   async stop(): Promise<void> {
-    await this.channelManager?.close().catch((err) =>
-      log.warn('channel-manager', 'shadow-stop-failed', {
+    await this.larkChannelRuntime?.close().catch((err) =>
+      log.warn('channel-manager', 'rollout-stop-failed', {
         profile: this.profile,
         err: String(err),
       }),
     );
-    this.channelManager = undefined;
+    this.larkChannelRuntime = undefined;
     this.resolvedChannelInstances = [];
     await this.conversationRuntime?.close('profile-stop').catch((err) =>
       log.warn('supervisor', 'conversation-stop-failed', {
@@ -261,11 +277,6 @@ class ManagedProfile {
       log.warn('runtime-control', 'stop-failed', { profile: this.profile, err: String(err) }),
     );
     this.runtimeControl = undefined;
-    try {
-      await this.bridge?.disconnect();
-    } catch (err) {
-      log.warn('supervisor', 'disconnect-failed', { profile: this.profile, err: String(err) });
-    }
     await this.nativeReadRuntime?.stop().catch((err) =>
       log.warn('native-read', 'stop-failed', { profile: this.profile, err: String(err) }),
     );
@@ -294,7 +305,38 @@ class ManagedProfile {
       startedAt: this.startedAt,
       botName: this.botName,
       appId: this.appId,
+      larkChannelRolloutMode: this.larkChannelPolicy.mode,
+      larkChannelOwner: this.larkChannelPolicy.owner,
     };
+  }
+
+  private startLarkChannelRuntime(input: {
+    cfg: AppConfig;
+    controls: Controls;
+    appPaths: AppPaths;
+    conversationRuntime: ProfileConversationRuntimeOwner;
+    instance: ResolvedChannelInstance<LarkChannelConfig>;
+  }): Promise<ProfileLarkChannelRuntime> {
+    const deps: StartChannelDeps = {
+      cfg: input.cfg,
+      agent: this.runtimeSlot.execution,
+      sessions: this.sessions,
+      sessionCatalog: this.sessionCatalog,
+      workspaces: this.workspaces,
+      controls: input.controls,
+      appPaths: input.appPaths,
+      ...(this.nativeReadRuntime ? { runAudit: this.nativeReadRuntime.runAudit } : {}),
+      ...(this.nativeReadRuntime ? { messageAudit: this.nativeReadRuntime.messageAudit } : {}),
+      ...(this.nativeReadRuntime ? { messageRead: this.nativeReadRuntime.messageRead } : {}),
+      ...(this.nativeReadRuntime ? { governanceAudit: this.nativeReadRuntime.governanceAudit } : {}),
+      conversationRuntime: input.conversationRuntime,
+    };
+    return startProfileLarkChannelRuntime({
+      profileId: this.profile,
+      policy: this.larkChannelPolicy,
+      instance: input.instance,
+      startBridge: () => this.startChannelFn(deps),
+    });
   }
 
   private makeControls(
@@ -633,7 +675,7 @@ class ManagedProfile {
     if (this.restarting) return;
     this.restarting = true;
     let nextAppLock: AcquiredRuntimeLock | undefined;
-    let nextBridge: BridgeChannel | undefined;
+    let nextLarkChannelRuntime: ProfileLarkChannelRuntime | undefined;
     let nextEngineRuntime: EngineRuntime | undefined;
     let resumeRuns: (() => void) | undefined;
     try {
@@ -673,27 +715,22 @@ class ManagedProfile {
         throw new Error(`profile conversation runtime is unavailable: ${this.profile}`);
       }
       resumeRuns = await this.bridge.quiesceAgentRuns('profile-reconnect');
-      nextBridge = await this.startChannelFn({
+      nextLarkChannelRuntime = await this.startLarkChannelRuntime({
         cfg: next,
-        agent: this.runtimeSlot.execution,
-        sessions: this.sessions,
-        sessionCatalog: this.sessionCatalog,
-        workspaces: this.workspaces,
         controls: nextControls,
         appPaths: nextRuntime.appPaths,
-        ...(this.nativeReadRuntime ? { runAudit: this.nativeReadRuntime.runAudit } : {}),
-        ...(this.nativeReadRuntime ? { messageAudit: this.nativeReadRuntime.messageAudit } : {}),
-        ...(this.nativeReadRuntime ? { messageRead: this.nativeReadRuntime.messageRead } : {}),
-        ...(this.nativeReadRuntime ? { governanceAudit: this.nativeReadRuntime.governanceAudit } : {}),
         conversationRuntime,
+        instance: nextResolvedChannelInstances[0],
       });
-      const previousBridge = this.bridge;
+      const nextBridge = nextLarkChannelRuntime.bridge;
+      const previousLarkChannelRuntime = this.larkChannelRuntime;
       try {
-        await previousBridge.disconnect();
+        await previousLarkChannelRuntime?.close();
       } catch (err) {
         log.warn('supervisor', 'old-disconnect-failed', { profile: this.profile, err: String(err) });
       }
       this.bridge = nextBridge;
+      this.larkChannelRuntime = nextLarkChannelRuntime;
       await updateEntry(
         this.entry.id,
         {
@@ -722,13 +759,13 @@ class ManagedProfile {
         engineId: nextRuntime.profileConfig.agentKind,
       });
       this.controls = nextControls;
-      nextBridge = undefined;
+      nextLarkChannelRuntime = undefined;
       nextEngineRuntime = undefined;
       await previousEngineRuntime.dispose().catch((err) =>
         log.warn('supervisor', 'engine-dispose-failed', { profile: this.profile, err: String(err) }),
       );
     } finally {
-      await nextBridge?.disconnect().catch(() => undefined);
+      await nextLarkChannelRuntime?.close().catch(() => undefined);
       await nextEngineRuntime?.dispose().catch(() => undefined);
       if (nextAppLock) await nextAppLock.release().catch(() => undefined);
       resumeRuns?.();
@@ -744,8 +781,13 @@ class ManagedProfile {
  */
 export class Supervisor {
   private managed = new Map<string, ManagedProfile>();
+  private readonly larkChannelPolicy: Readonly<LarkChannelOwnershipPolicy>;
 
-  constructor(private opts: SupervisorOptions) {}
+  constructor(private opts: SupervisorOptions) {
+    this.larkChannelPolicy = resolveLarkChannelOwnership(
+      opts.larkChannelRolloutMode ?? process.env[LARK_CHANNEL_ROLLOUT_ENV],
+    );
+  }
 
   private get startChannelFn(): StartChannelFn {
     return this.opts.startChannelFn ?? realStartChannel;
@@ -832,6 +874,7 @@ export class Supervisor {
         sessionCatalog,
         workspaces,
         this.startChannelFn,
+        this.larkChannelPolicy,
         (p) => void this.stopProfile(p).catch(() => undefined),
         this.opts.createNativeReadRuntime,
       );

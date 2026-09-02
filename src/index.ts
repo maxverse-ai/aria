@@ -131,6 +131,11 @@ export {
   projectSchemaV2ChannelInstances,
   SCHEMA_V2_LARK_INSTANCE_ID,
 } from './channel/instance-resolver';
+export {
+  CURRENT_DEFAULT_LARK_CHANNEL_ROLLOUT_MODE,
+  LARK_CHANNEL_ROLLOUT_ENV,
+  resolveLarkChannelOwnership,
+} from './channel/lark-ownership';
 export { runChannelPluginContract } from './channel/plugin/contract-test-kit';
 export { ChannelPluginError } from './channel/plugin/errors';
 export { CHANNEL_PLUGIN_ABI_VERSION } from './channel/plugin/types';
@@ -203,6 +208,10 @@ export type {
   SchemaV2ChannelInstances,
   SchemaV2ChannelProjectionInput,
 } from './channel/instance-resolver';
+export type {
+  LarkChannelOwnershipPolicy,
+  LarkChannelRolloutMode,
+} from './channel/lark-ownership';
 export { WechatKfCallbackHandler } from './channel/wechat-kf/callback';
 export type {
   WechatKfCallbackHandlerOptions,
