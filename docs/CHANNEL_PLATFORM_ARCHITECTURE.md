@@ -72,11 +72,11 @@ The repository already contains the correct starting seams:
   policy and execution;
 - Management API and Native Read already separate writes from redacted reads.
 
-They are not yet one platform. Lark is still composed directly by the
-Supervisor, the channel registry is not the Supervisor lifecycle authority, and
-`createProfileConversationHost()` creates an independent engine and session
-state. Customer Service deployment composition is still external. These are
-migration seams, not contracts to reproduce for a new channel.
+They are not yet one platform. Lark and Customer Service now have bounded
+ChannelManager ownership adapters, but their normalized ingress and external
+deployment composition are still compatibility seams. Stored channel instances,
+the external plugin loader, and the unified operations surface remain later
+stages. These seams are not contracts to reproduce for a new channel.
 
 ## Ownership boundaries
 
@@ -283,6 +283,14 @@ Implementation status:
   does not migrate the existing `wechat-kf` file stores; their equivalence and
   production composition remain Stage 7 work. See
   [Channel reliability primitives](./CHANNEL_RELIABILITY.md).
+- Stage 7 adds a process-safe file implementation of those ports and composes
+  the existing `wechat-kf` callback/sync runtime through a built-in lifecycle
+  adapter. `shadow` remains the no-variable default, `opt-in` makes
+  ChannelManager the sole connection owner, and `off` is the hard rollback.
+  The old message inbox is written before shared acceptance and retained until
+  completion, so rollback needs no state conversion. Existing callback paths,
+  raw ids, cursor files, receipts, prepared deliveries, and conversation state
+  remain unchanged. Personal WeChat is still deferred to Stage 11.
 
 0. **Baseline and decision.** Land this architecture decision, record the
    current seams, and prove unchanged production behavior with repository checks.

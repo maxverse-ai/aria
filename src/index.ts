@@ -224,6 +224,10 @@ export {
 } from './channel/reliability/key';
 export { InMemoryChannelReliabilityStores } from './channel/reliability/memory-store';
 export {
+  FileChannelReliabilityStores,
+  FILE_CHANNEL_RELIABILITY_SCHEMA_VERSION,
+} from './channel/reliability/file-store';
+export {
   assertChannelRetryPolicy,
   channelRetryDelay,
   DEFAULT_CHANNEL_RETRY_POLICY,
@@ -284,6 +288,38 @@ export type {
   WechatKfDurableMessageSinkOptions,
   WechatKfProcessingErrorContext,
 } from './channel/wechat-kf/durable-sink';
+export {
+  createBuiltInWechatKfChannelPlugin,
+  createWechatKfChannelInstance,
+  WECHAT_KF_CHANNEL_CONFIG_VERSION,
+} from './channel/wechat-kf/channel-plugin';
+export type {
+  BuiltInWechatKfChannelPluginAdapter,
+  BuiltInWechatKfChannelPluginOptions,
+  WechatKfBridgeSnapshot,
+  WechatKfChannelBridge,
+  WechatKfChannelConfig,
+} from './channel/wechat-kf/channel-plugin';
+export {
+  CURRENT_DEFAULT_WECHAT_KF_CHANNEL_ROLLOUT_MODE,
+  resolveWechatKfChannelOwnership,
+  WECHAT_KF_CHANNEL_ROLLOUT_ENV,
+} from './channel/wechat-kf/ownership';
+export type {
+  WechatKfChannelOwnershipPolicy,
+  WechatKfChannelRolloutMode,
+} from './channel/wechat-kf/ownership';
+export {
+  WECHAT_KF_DEFAULT_INSTANCE_ID,
+  WECHAT_KF_PLUGIN_ID,
+  WechatKfReliableMessageSink,
+  wechatKfMessageEnvelope,
+} from './channel/wechat-kf/reliable-message-sink';
+export type {
+  WechatKfReliabilityContext,
+  WechatKfReliableMessageSinkOptions,
+  WechatKfReliableMessageSinkSnapshot,
+} from './channel/wechat-kf/reliable-message-sink';
 export { FileWechatKfDeliveryStore } from './channel/wechat-kf/delivery-store';
 export type {
   WechatKfDeliveryChunk,
@@ -368,6 +404,11 @@ export type {
   WechatKfUploadImageInput,
   WechatKfUploadImageResult,
 } from './channel/wechat-kf/types';
+export { startProfileWechatKfChannelRuntime } from './runtime/wechat-kf-channel-runtime';
+export type {
+  ProfileWechatKfChannelRuntime,
+  StartProfileWechatKfChannelRuntimeOptions,
+} from './runtime/wechat-kf-channel-runtime';
 
 // Stable outbound contracts. Aria itself is pass-through; deployments may
 // observe or govern these envelopes without patching the channel SDK.

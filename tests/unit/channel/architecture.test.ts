@@ -53,4 +53,23 @@ describe('channel architecture boundary', () => {
     expect(composition).not.toContain('wechat-kf');
     expect(composition).not.toContain('weixin-ilink');
   });
+
+  it('migrates wechat-kf through its own reliability and lifecycle adapters', async () => {
+    const composition = await readFile('src/runtime/wechat-kf-channel-runtime.ts', 'utf8');
+    const reliability = await readFile(
+      'src/channel/wechat-kf/reliable-message-sink.ts',
+      'utf8',
+    );
+    const ownership = await readFile('src/channel/wechat-kf/ownership.ts', 'utf8');
+
+    expect(composition).toContain("options.policy.owner === 'manager'");
+    expect(composition).toContain("options.policy.owner === 'legacy'");
+    expect(composition).toContain('await manager.start');
+    expect(reliability).toContain('ChannelReliabilityCoordinator');
+    expect(reliability).toContain('compatibilityInbox.enqueue');
+    expect(reliability).toContain("WECHAT_KF_PLUGIN_ID = 'wechat-kf'");
+    expect(ownership).toContain("CURRENT_DEFAULT_WECHAT_KF_CHANNEL_ROLLOUT_MODE = 'shadow'");
+    expect(composition).not.toContain('weixin-ilink');
+    expect(reliability).not.toContain("pluginId: 'weixin-ilink'");
+  });
 });

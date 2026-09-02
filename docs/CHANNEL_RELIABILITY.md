@@ -1,7 +1,7 @@
 # Channel reliability primitives
 
-Status: Stage 6 reference contracts are complete. Production channel migration
-is intentionally deferred.
+Status: Stage 6 contracts and the Stage 7 `wechat-kf` file adapter are complete.
+Production ownership remains behind a bounded rollout switch.
 
 ## Boundary
 
@@ -62,14 +62,20 @@ and have a unique delivery id.
 - `ChannelRetryStore`: persisted retry or operator-visible terminal state.
 
 `InMemoryChannelReliabilityStores` is a deterministic reference and test
-implementation. It deliberately does not claim process durability. A production
-adapter must persist every operation atomically, preserve first-write-wins
-semantics across concurrent processes, and return detached values that callers
-cannot mutate behind the store.
+implementation. `FileChannelReliabilityStores` is the low-volume production
+adapter: it locks mutations across processes, atomically replaces one mode-0600
+snapshot, preserves first-write-wins records, and returns detached values. A
+higher-volume deployment can replace these ports without changing the
+coordinator or a channel plugin.
 
-The current `wechat-kf` file stores remain unchanged. Stage 7 must adapt or
-migrate them only after running equivalent duplicate, partial-delivery,
-crash/restart, and failure-injection tests against these contracts.
+Stage 7 deliberately keeps the existing `wechat-kf` receipt, answer/delivery,
+onboarding, cursor, and raw message formats unchanged. The transitional
+`WechatKfReliableMessageSink` uses the shared file stores for durable acceptance,
+leases, retry state, and completion while the proven handler remains the
+answer/delivery compatibility adapter. Each accepted message is also written to
+the old `messages` inbox before provider cursor advancement. It is removed from
+that inbox only after shared completion, so the `off` rollback path can resume
+every unfinished message without a data conversion.
 
 ## Retry and terminal states
 
@@ -98,7 +104,22 @@ Durable acceptance is the boundary after which a plugin may acknowledge a push
 or advance a provider cursor, subject to that provider's ordering rules. The
 coordinator does not acknowledge protocols and does not own provider cursors.
 
-This stage adds no production cutover or new network connection. Lark ownership
-and existing `wechat-kf` deployment behavior remain unchanged, so rollback is
-the removal of unused Stage 6 composition code. Stage 7 is the first stage
-allowed to compose `wechat-kf` through these primitives.
+The callback acknowledgement, `sync_msg` cursor, provider identities, rendering,
+API calls, and provider error classification remain `wechat-kf` owned. The
+reliability adapter never imports or aliases `weixin-ilink` state.
+
+The temporary `ARIA_WECHAT_KF_CHANNEL_ROLLOUT` control has four modes:
+
+- `off`: hard rollback; the legacy runtime owns the only provider connection;
+- `shadow`: the legacy runtime stays authoritative while an empty
+  `ChannelManager` exercises lifecycle observation (the current default);
+- `opt-in`: `ChannelManager` owns the only provider connection for a selected
+  deployment;
+- `default-on`: reserved for a later reviewed default change after opt-in
+  runtime evidence.
+
+No mode opens two provider connections. A rollout may switch to `opt-in` only
+after the deployment-specific idle guard confirms that no agent run or message
+delivery is active. Draining with durable or retrying inbox work reports
+`drained: false`; an operator must wait or use the unchanged `off` rollback path,
+never interrupt active work to force a restart.
