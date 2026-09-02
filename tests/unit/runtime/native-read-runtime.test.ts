@@ -26,7 +26,9 @@ describe('DefaultNativeReadProfileRuntime', () => {
     });
     runtimes.push(runtime);
 
-    await expect(stat(paths.nativeReadEndpoint)).rejects.toMatchObject({ code: 'ENOENT' });
+    if (process.platform !== 'win32') {
+      await expect(stat(paths.nativeReadEndpoint)).rejects.toMatchObject({ code: 'ENOENT' });
+    }
     await Promise.all([runtime.start(), runtime.start()]);
 
     const response = await get(paths.nativeReadEndpoint, '/v1/sessions', 'secret');
@@ -38,7 +40,9 @@ describe('DefaultNativeReadProfileRuntime', () => {
     expect(await readFile(paths.nativeReadJournalFile, 'utf8')).not.toContain('thread-secret-1');
 
     await runtime.stop();
-    await expect(stat(paths.nativeReadEndpoint)).rejects.toMatchObject({ code: 'ENOENT' });
+    if (process.platform !== 'win32') {
+      await expect(stat(paths.nativeReadEndpoint)).rejects.toMatchObject({ code: 'ENOENT' });
+    }
   });
 
   it('refreshes newly observed catalog entries without restarting the API', async () => {

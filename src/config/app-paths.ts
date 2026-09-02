@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { resolveAriaRoots, type AriaRoots } from './layout-paths';
 
@@ -100,7 +101,7 @@ export function resolveAppPaths(opts: ResolveAppPathsOptions = {}): AppPaths {
     nativeReadEndpoint:
       process.platform === 'win32'
         ? `\\\\.\\pipe\\aria-native-read-${controlId}`
-        : join(profileDir, 'native-read', 'read.sock'),
+        : join(tmpdir(), `aria-native-read-${controlId}.sock`),
     runtimeControlFile: join(profileDir, 'runtime-control.json'),
     runtimeControlEndpoint:
       process.platform === 'win32'

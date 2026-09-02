@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { request } from 'node:http';
 import { mkdtemp, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -19,7 +20,7 @@ afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
 
-describe('native read Unix HTTP server', () => {
+describe('native read local HTTP server', () => {
   it('requires a bearer token and enforces per-resource scopes', async () => {
     const server = await setup(['read:meta']);
 
@@ -81,7 +82,9 @@ async function setup(scopes: NativeReadScope[]) {
   const repository = new FileNativeReadRepository({
     profileId: '***REMOVED***', snapshotFile: join(root, 'snapshot.json'), journalFile: join(root, 'changes.jsonl'),
   });
-  const endpoint = join(root, 'read.sock');
+  const endpoint = process.platform === 'win32'
+    ? `\\\\.\\pipe\\aria-read-api-${randomUUID()}`
+    : join(root, 'read.sock');
   const handle = await startNativeReadHttpServer({
     endpoint, token: 'secret', scopes, repository, instanceId: 'instance-1',
     serverVersion: 'test', now: () => new Date('2026-08-27T00:00:00.000Z'),
