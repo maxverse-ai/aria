@@ -2,6 +2,7 @@ import { randomUUID, timingSafeEqual } from 'node:crypto';
 import { chmod, mkdir, rm } from 'node:fs/promises';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { dirname } from 'node:path';
+import { setTimeout as delay } from 'node:timers/promises';
 import type { NativeReadRepository } from '../application/control/native-read-repository';
 import { NativeReadRepositoryError } from '../application/control/native-read-repository';
 import {
@@ -58,7 +59,15 @@ export async function startNativeReadHttpServer(
     });
   });
   await listen(server, options.endpoint);
-  if (process.platform !== 'win32') await chmod(options.endpoint, 0o600);
+  if (process.platform !== 'win32') {
+    try {
+      await secureUnixSocket(options.endpoint);
+    } catch (error) {
+      await close(server);
+      await rm(options.endpoint, { force: true });
+      throw error;
+    }
+  }
   return {
     endpoint: options.endpoint,
     instanceId,
@@ -67,6 +76,19 @@ export async function startNativeReadHttpServer(
       if (process.platform !== 'win32') await rm(options.endpoint, { force: true });
     },
   };
+}
+
+async function secureUnixSocket(endpoint: string): Promise<void> {
+  const attempts = 20;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      await chmod(endpoint, 0o600);
+      return;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT' || attempt === attempts - 1) throw error;
+      await delay(10);
+    }
+  }
 }
 
 async function handleRequest(
