@@ -1,31 +1,34 @@
 import { useEffect, useRef, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
-import { CheckCircle2 } from "lucide-react";
+import { Badge } from "@astryxdesign/core/Badge";
+import { Banner } from "@astryxdesign/core/Banner";
+import { Button } from "@astryxdesign/core/Button";
+import { Card } from "@astryxdesign/core/Card";
+import { Center } from "@astryxdesign/core/Center";
+import { Icon } from "@astryxdesign/core/Icon";
+import { Link } from "@astryxdesign/core/Link";
+import { Selector } from "@astryxdesign/core/Selector";
+import { Spinner } from "@astryxdesign/core/Spinner";
+import { HStack, VStack } from "@astryxdesign/core/Stack";
+import { Step, Stepper } from "@astryxdesign/core/Stepper";
+import { Text } from "@astryxdesign/core/Text";
+import { TextInput } from "@astryxdesign/core/TextInput";
+import { useToast } from "@astryxdesign/core/Toast";
+import {
+  ArrowPathIcon,
+  CheckCircleIcon,
+  QrCodeIcon,
+} from "@heroicons/react/24/outline";
 import { apiGet, apiPost } from "@/lib/api";
 import type { AgentKind, OnboardState } from "@/lib/types";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { toast } from "@/components/ui/sonner";
 
-// New-profile wizard: scan a Feishu QR to create a fresh app (same flow as the
-// CLI `registerApp` wizard). The QR renders immediately; once scanned, the user
-// names the new profile and confirms — so there's no rush and it never
-// overwrites an existing profile.
 type Phase = "loading" | "waiting" | "confirm" | "creating" | "error";
 
 function uniqueName(base: string, existing: string[]): string {
   if (!existing.includes(base)) return base;
-  let i = 2;
-  while (existing.includes(`${base}-${i}`)) i++;
-  return `${base}-${i}`;
+  let index = 2;
+  while (existing.includes(`${base}-${index}`)) index += 1;
+  return `${base}-${index}`;
 }
 
 export function OnboardWizard({ onCreated }: { onCreated: (profile: string) => void }) {
@@ -36,19 +39,20 @@ export function OnboardWizard({ onCreated }: { onCreated: (profile: string) => v
   const [existing, setExisting] = useState<string[]>([]);
   const [qr, setQr] = useState<{ sessionId: string; qrUrl: string; expireIn: number } | null>(null);
   const [phase, setPhase] = useState<Phase>("loading");
-
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
   const scanned = useRef(false);
+  const showToast = useToast();
 
   useEffect(() => {
-    apiGet<OnboardState>("/api/onboard/state")
-      .then((s) => {
-        setDetected(s.detectedAgents);
-        setExisting(s.profiles);
-        if (s.detectedAgents.length && !s.detectedAgents.includes("claude"))
-          setAgentKind(s.detectedAgents[0]!);
+    void apiGet<OnboardState>("/api/onboard/state")
+      .then((state) => {
+        setDetected(state.detectedAgents);
+        setExisting(state.profiles);
+        if (state.detectedAgents.length && !state.detectedAgents.includes("claude")) {
+          setAgentKind(state.detectedAgents[0]!);
+        }
       })
-      .catch(() => {});
+      .catch(() => undefined);
   }, []);
 
   const stopPolling = () => {
@@ -56,43 +60,42 @@ export function OnboardWizard({ onCreated }: { onCreated: (profile: string) => v
     timer.current = null;
   };
 
+  async function poll(sessionId: string) {
+    let state: { status: string; error?: string; botName?: string; suggestedProfile?: string };
+    try {
+      state = await apiGet(`/api/profiles/qr/status?sessionId=${encodeURIComponent(sessionId)}`);
+    } catch {
+      return;
+    }
+    if (state.status === "scanned" && !scanned.current) {
+      scanned.current = true;
+      stopPolling();
+      setBotName(state.botName ?? "");
+      setProfileName(state.suggestedProfile || uniqueName(agentKind, existing));
+      setPhase("confirm");
+    } else if (state.status === "error") {
+      stopPolling();
+      setPhase("error");
+      showToast({ body: state.error ?? "扫码创建失败", type: "error" });
+    }
+  }
+
   async function generate() {
     stopPolling();
     scanned.current = false;
     setQr(null);
     setPhase("loading");
     try {
-      const r = await apiPost<{ sessionId: string; qrUrl: string; expireIn: number }>(
+      const result = await apiPost<{ sessionId: string; qrUrl: string; expireIn: number }>(
         "/api/profiles/qr/start",
         {},
       );
-      setQr(r);
+      setQr(result);
       setPhase("waiting");
-      timer.current = setInterval(() => void poll(r.sessionId), 2000);
+      timer.current = setInterval(() => void poll(result.sessionId), 2_000);
     } catch (e) {
       setPhase("error");
-      toast.error(String((e as Error).message ?? e));
-    }
-  }
-
-  async function poll(sessionId: string) {
-    let s: { status: string; error?: string; botName?: string; suggestedProfile?: string };
-    try {
-      s = await apiGet(`/api/profiles/qr/status?sessionId=${encodeURIComponent(sessionId)}`);
-    } catch {
-      return; // transient; keep polling
-    }
-    if (s.status === "scanned" && !scanned.current) {
-      scanned.current = true;
-      stopPolling();
-      // App created — prefill the profile name from the scanned app's name.
-      setBotName(s.botName ?? "");
-      setProfileName(s.suggestedProfile || uniqueName(agentKind, existing));
-      setPhase("confirm");
-    } else if (s.status === "error") {
-      stopPolling();
-      setPhase("error");
-      toast.error(s.error ?? "扫码创建失败");
+      showToast({ body: String((e as Error).message ?? e), type: "error" });
     }
   }
 
@@ -100,94 +103,123 @@ export function OnboardWizard({ onCreated }: { onCreated: (profile: string) => v
     if (!qr) return;
     setPhase("creating");
     try {
-      const r = await apiPost<{ profile: string }>("/api/profiles/qr/finish", {
+      const result = await apiPost<{ profile: string }>("/api/profiles/qr/finish", {
         sessionId: qr.sessionId,
         agentKind,
         profile: profileName.trim(),
       });
-      toast.success(`profile「${r.profile}」已创建`);
-      onCreated(r.profile);
+      showToast({ body: `Profile「${result.profile}」已创建` });
+      onCreated(result.profile);
     } catch (e) {
-      setPhase("confirm"); // let the user fix the name / retry
-      toast.error(String((e as Error).message ?? e));
+      setPhase("confirm");
+      showToast({ body: String((e as Error).message ?? e), type: "error" });
     }
   }
 
-  // Auto-render the QR on open.
   useEffect(() => {
     void generate();
     return stopPolling;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  if (phase === "confirm" || phase === "creating") {
-    return (
-      <div className="space-y-4">
-        <div className="flex items-center gap-2 text-sm text-success">
-          <CheckCircle2 className="size-4" /> 应用已创建{botName ? `：${botName}` : ""}，确认后完成
-        </div>
-        <div className="space-y-1.5">
-          <Label>AI Agent</Label>
-          <Select value={agentKind} onValueChange={(v) => setAgentKind(v as AgentKind)}>
-            <SelectTrigger><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="claude">Claude Code</SelectItem>
-              <SelectItem value="codex">Codex</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-        <div className="space-y-1.5">
-          <Label>Profile 名称</Label>
-          <Input
-            value={profileName}
-            onChange={(e) => setProfileName(e.target.value)}
-            placeholder={agentKind}
-          />
-          {existing.includes(profileName.trim()) && (
-            <p className="text-xs text-destructive">已存在同名 profile，请换个名字（不会覆盖现有的）。</p>
-          )}
-        </div>
-        <div className="flex justify-end">
-          <Button
-            onClick={confirmCreate}
-            disabled={phase === "creating" || !profileName.trim() || existing.includes(profileName.trim())}
-          >
-            {phase === "creating" ? "创建中…" : "确定创建"}
-          </Button>
-        </div>
-      </div>
-    );
-  }
+  const activeStep = phase === "confirm" || phase === "creating" ? 1 : 0;
+  const duplicate = existing.includes(profileName.trim());
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-col items-center gap-3 py-2">
-        <div className="flex size-[232px] items-center justify-center rounded-lg border bg-white p-4">
-          {qr ? (
-            <QRCodeSVG value={qr.qrUrl} size={200} />
-          ) : (
-            <span className="text-sm text-muted-foreground">
-              {phase === "error" ? "二维码生成失败" : "生成二维码中…"}
-            </span>
+    <VStack gap={5}>
+      <Stepper activeStep={activeStep} density="compact" indicatorPosition="on-track" label="创建 Profile 进度">
+        <Step step={0} label="创建飞书应用" description="扫码授权" />
+        <Step step={1} label="绑定本地 Agent" description="确认名称与引擎" />
+      </Stepper>
+
+      {activeStep === 1 ? (
+        <VStack gap={4}>
+          <Banner
+            status="success"
+            title="飞书应用已创建"
+            description={botName ? `已识别应用：${botName}` : "继续确认本地 Profile 信息。"}
+            icon={<Icon icon={CheckCircleIcon} size="md" />}
+            collapsible={false}
+          />
+          <Selector
+            label="AI Agent"
+            description="选择该 Profile 使用的本地执行器。"
+            value={agentKind}
+            options={[
+              { value: "claude", label: "Claude Code", disabled: detected.length > 0 && !detected.includes("claude") },
+              { value: "codex", label: "Codex", disabled: detected.length > 0 && !detected.includes("codex") },
+            ]}
+            onChange={(value) => setAgentKind(value as AgentKind)}
+            width="100%"
+          />
+          <TextInput
+            label="Profile 名称"
+            description="名称必须唯一，不会覆盖已有 Profile。"
+            value={profileName}
+            onChange={setProfileName}
+            placeholder={agentKind}
+            status={duplicate ? { type: "error", message: "已存在同名 Profile，请换一个名称。" } : undefined}
+            width="100%"
+          />
+          <HStack hAlign="end">
+            <Button
+              label="完成创建"
+              variant="primary"
+              isLoading={phase === "creating"}
+              isDisabled={phase === "creating" || !profileName.trim() || duplicate}
+              onClick={() => void confirmCreate()}
+            />
+          </HStack>
+        </VStack>
+      ) : (
+        <VStack gap={4} hAlign="center">
+          <Card padding={4} variant="muted" width={248} height={248}>
+            <Center width="100%" height="100%">
+              {qr ? (
+                <Card padding={3} style={{ background: "white" }}>
+                  <QRCodeSVG value={qr.qrUrl} size={196} />
+                </Card>
+              ) : phase === "loading" ? (
+                <Spinner size="lg" label="生成二维码中…" />
+              ) : (
+                <Icon icon={QrCodeIcon} size="lg" color="secondary" />
+              )}
+            </Center>
+          </Card>
+          <VStack gap={1} hAlign="center">
+            <Text weight="semibold">用飞书 App 扫码创建新应用</Text>
+            <Text type="supporting" color="secondary">
+              {phase === "error" ? "二维码生成失败，请重试。" : "扫码完成后自动进入下一步。"}
+            </Text>
+            {qr && (
+              <HStack gap={2} vAlign="center" wrap="wrap" hAlign="center">
+                <Badge variant="neutral" label={`约 ${Math.max(1, Math.round(qr.expireIn / 60))} 分钟有效`} />
+                <Link href={qr.qrUrl} isExternalLink type="supporting">在浏览器打开</Link>
+              </HStack>
+            )}
+          </VStack>
+          {(phase === "error" || phase === "waiting") && (
+            <Button
+              label="重新生成"
+              variant="secondary"
+              icon={<Icon icon={ArrowPathIcon} size="sm" />}
+              onClick={() => void generate()}
+            />
           )}
-        </div>
-        <p className="text-sm text-muted-foreground">
-          {phase === "error" ? "请重试" : "用飞书 App 扫码创建新应用，扫完再填 Profile 名称"}
-        </p>
-        {qr && (
-          <p className="text-xs text-muted-foreground">
-            有效期约 {Math.max(1, Math.round(qr.expireIn / 60))} 分钟 ·{" "}
-            <a href={qr.qrUrl} target="_blank" rel="noreferrer" className="text-primary underline">在浏览器打开</a>
-          </p>
-        )}
-        {(phase === "error" || phase === "waiting") && (
-          <Button variant="outline" size="sm" onClick={generate}>重新生成</Button>
-        )}
-      </div>
-      {detected.length === 0 && (
-        <p className="text-center text-xs text-muted-foreground">未检测到已安装的 agent，请确保 claude 或 codex 已安装。</p>
+        </VStack>
       )}
-      <p className="text-center text-xs text-muted-foreground">扫码人会成为应用 owner，自动豁免访问控制。</p>
-    </div>
+
+      {detected.length === 0 && (
+        <Banner
+          status="warning"
+          title="未检测到本地 Agent"
+          description="请先安装 Claude Code 或 Codex，再完成 Profile 创建。"
+          collapsible={false}
+        />
+      )}
+      <Text type="supporting" color="secondary" justify="center" display="block">
+        扫码人会成为应用 owner，并自动豁免访问控制。
+      </Text>
+    </VStack>
   );
 }

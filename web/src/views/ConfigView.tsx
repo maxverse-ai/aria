@@ -1,5 +1,45 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { QRCodeSVG } from "qrcode.react";
+import { Badge } from "@astryxdesign/core/Badge";
+import { Banner } from "@astryxdesign/core/Banner";
+import { Button } from "@astryxdesign/core/Button";
+import { Card } from "@astryxdesign/core/Card";
+import { Dialog, DialogHeader } from "@astryxdesign/core/Dialog";
+import { Divider } from "@astryxdesign/core/Divider";
+import { EmptyState } from "@astryxdesign/core/EmptyState";
+import { Grid } from "@astryxdesign/core/Grid";
+import { Icon } from "@astryxdesign/core/Icon";
+import {
+  Layout,
+  LayoutContent,
+  LayoutFooter,
+  LayoutHeader,
+} from "@astryxdesign/core/Layout";
+import { Link } from "@astryxdesign/core/Link";
+import { List, ListItem } from "@astryxdesign/core/List";
+import { NumberInput } from "@astryxdesign/core/NumberInput";
+import { Selector } from "@astryxdesign/core/Selector";
+import { Spinner } from "@astryxdesign/core/Spinner";
+import { HStack, VStack } from "@astryxdesign/core/Stack";
+import { StatusDot } from "@astryxdesign/core/StatusDot";
+import { Switch } from "@astryxdesign/core/Switch";
+import { Tab, TabList } from "@astryxdesign/core/TabList";
+import { Heading, Text } from "@astryxdesign/core/Text";
+import { TextInput } from "@astryxdesign/core/TextInput";
+import { useToast } from "@astryxdesign/core/Toast";
+import {
+  ArrowPathIcon,
+  ChatBubbleLeftRightIcon,
+  CheckCircleIcon,
+  Cog6ToothIcon,
+  KeyIcon,
+  LockClosedIcon,
+  PlusIcon,
+  ShieldCheckIcon,
+  TrashIcon,
+  UserGroupIcon,
+  VideoCameraIcon,
+} from "@heroicons/react/24/outline";
 import { apiGet, apiPost } from "@/lib/api";
 import type {
   ConfigView as ConfigData,
@@ -12,58 +52,41 @@ import type {
   UserAuthStatus,
   UserChat,
 } from "@/lib/types";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
-import { Badge } from "@/components/ui/badge";
-import { Separator } from "@/components/ui/separator";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { toast } from "@/components/ui/sonner";
 
 export function ConfigView({ profile }: { profile: string }) {
   const [cfg, setCfg] = useState<ConfigData | null>(null);
   const [saving, setSaving] = useState(false);
   const [modelRefreshing, setModelRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // chat_id → display name, for the allowed-chats list. Seeded from the bot's
-  // known chats and topped up with names captured when adding from the picker.
   const [chatNames, setChatNames] = useState<Record<string, string>>({});
+  const showToast = useToast();
 
   const load = () =>
     apiGet<ConfigData>(`/api/config?profile=${encodeURIComponent(profile)}`)
-      .then((c) => {
-        setCfg(c);
+      .then((config) => {
+        setCfg(config);
         setError(null);
+        return config;
       })
-      .catch((e) => setError(String(e.message ?? e)));
+      .catch((e) => {
+        setError(String(e.message ?? e));
+        return null;
+      });
 
   const loadChatNames = () =>
     apiGet<{ chats: { id: string; name: string }[] }>(`/api/chats?profile=${encodeURIComponent(profile)}`)
-      .then((r) => setChatNames((m) => ({ ...m, ...Object.fromEntries(r.chats.map((c) => [c.id, c.name])) })))
-      .catch(() => {});
+      .then((result) => {
+        setChatNames((current) => ({
+          ...current,
+          ...Object.fromEntries(result.chats.map((chat) => [chat.id, chat.name])),
+        }));
+      })
+      .catch(() => undefined);
 
   const loadModels = async (force = false) => {
     setModelRefreshing(true);
     try {
-      if (force) {
-        await apiPost<ModelCatalogView>(`/api/models?profile=${encodeURIComponent(profile)}`, {});
-      }
+      if (force) await apiPost<ModelCatalogView>(`/api/models?profile=${encodeURIComponent(profile)}`, {});
       const deadline = Date.now() + 5_000;
       let snapshot: ModelCatalogView;
       do {
@@ -73,7 +96,7 @@ export function ConfigView({ profile }: { profile: string }) {
         await new Promise((resolve) => setTimeout(resolve, 500));
       } while (Date.now() < deadline);
     } catch (e) {
-      if (force) toast.error(String((e as Error).message ?? e));
+      if (force) showToast({ body: String((e as Error).message ?? e), type: "error" });
     } finally {
       setModelRefreshing(false);
     }
@@ -87,33 +110,52 @@ export function ConfigView({ profile }: { profile: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profile]);
 
-  if (error) return <p className="text-destructive text-sm">加载失败：{error}</p>;
-  if (!cfg) return <p className="text-muted-foreground text-sm">加载中…</p>;
+  if (error) {
+    return (
+      <EmptyState
+        title="配置加载失败"
+        description={error}
+        actions={<Button label="重试" onClick={() => void load()} />}
+      />
+    );
+  }
 
-  const set = <K extends keyof ConfigData>(k: K, v: ConfigData[K]) =>
-    setCfg({ ...cfg, [k]: v });
+  if (!cfg) {
+    return (
+      <Card padding={6}>
+        <HStack gap={2} hAlign="center" vAlign="center">
+          <Spinner size="sm" aria-label="正在加载配置" />
+          <Text color="secondary">正在加载配置…</Text>
+        </HStack>
+      </Card>
+    );
+  }
+
+  const update = <K extends keyof ConfigData>(key: K, value: ConfigData[K]) =>
+    setCfg({ ...cfg, [key]: value });
   const team = cfg.mode === "team";
 
   async function save() {
-    if (!cfg) return;
+    const current = cfg;
+    if (!current) return;
     setSaving(true);
     try {
       const next = await apiPost<ConfigData>(`/api/config?profile=${encodeURIComponent(profile)}`, {
-        mode: cfg.mode,
-        meeting: cfg.meeting,
-        model: cfg.model,
-        messageReply: cfg.messageReply,
-        showToolCalls: cfg.showToolCalls,
-        cotMessages: cfg.cotMessages,
-        maxConcurrentRuns: cfg.maxConcurrentRuns,
-        runIdleTimeoutMinutes: cfg.runIdleTimeoutMinutes,
-        requireMentionInGroup: cfg.requireMentionInGroup,
-        larkCliIdentity: cfg.larkCliIdentity,
+        mode: current.mode,
+        meeting: current.meeting,
+        model: current.model,
+        messageReply: current.messageReply,
+        showToolCalls: current.showToolCalls,
+        cotMessages: current.cotMessages,
+        maxConcurrentRuns: current.maxConcurrentRuns,
+        runIdleTimeoutMinutes: current.runIdleTimeoutMinutes,
+        requireMentionInGroup: current.requireMentionInGroup,
+        larkCliIdentity: current.larkCliIdentity,
       });
       setCfg(next);
-      toast.success(next.live ? "已保存，立即生效" : "已保存，下次启动该 profile 生效");
+      showToast({ body: next.live ? "已保存，立即生效" : "已保存，下次启动该 Profile 生效" });
     } catch (e) {
-      toast.error(String((e as Error).message ?? e));
+      showToast({ body: String((e as Error).message ?? e), type: "error" });
     } finally {
       setSaving(false);
     }
@@ -122,469 +164,590 @@ export function ConfigView({ profile }: { profile: string }) {
   async function access(action: "add" | "remove", kind: "user" | "admin" | "chat", id: string) {
     if (!id.trim()) return;
     try {
-      const acc = await apiPost<ConfigData["access"]>(
+      const next = await apiPost<ConfigData["access"]>(
         `/api/access?profile=${encodeURIComponent(profile)}`,
         { action, kind, id: id.trim() },
       );
-      setCfg((c) => (c ? { ...c, access: acc } : c));
+      setCfg((current) => current ? { ...current, access: next } : current);
     } catch (e) {
-      toast.error(String((e as Error).message ?? e));
+      showToast({ body: String((e as Error).message ?? e), type: "error" });
     }
   }
 
-  // Set (true/false) or clear (null = follow global) a chat's @-mention override.
   async function setMention(id: string, requireMention: boolean | null) {
     try {
-      const acc = await apiPost<ConfigData["access"]>(
+      const next = await apiPost<ConfigData["access"]>(
         `/api/access?profile=${encodeURIComponent(profile)}`,
         { action: "set-mention", kind: "chat", id, requireMention },
       );
-      setCfg((c) => (c ? { ...c, access: acc } : c));
+      setCfg((current) => current ? { ...current, access: next } : current);
     } catch (e) {
-      toast.error(String((e as Error).message ?? e));
+      showToast({ body: String((e as Error).message ?? e), type: "error" });
     }
   }
 
   return (
-    <div className="space-y-4">
-      <Card>
-        <CardHeader className="flex-row items-center justify-between">
-          <CardTitle>运行模式</CardTitle>
-          <Badge variant={cfg.live ? "success" : "secondary"}>
-            {cfg.live ? "即时生效" : "下次启动生效"}
-          </Badge>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <Field label="个人版 / 团队版" hint="团队版：任何人 @ 即可使用（不做白名单）；CLI 强制只用应用身份。管理命令仍限 owner/管理员。">
-            <SelectRow value={cfg.mode} onChange={(v) => set("mode", v as ConfigData["mode"])}
-              options={[["personal", "个人版（默认）"], ["team", "团队版"]]} />
-          </Field>
-        </CardContent>
-      </Card>
+    <VStack gap={4}>
+      <SettingsPanel
+        title="运行模式"
+        description="决定 Profile 的访问模型与身份边界。"
+        icon={Cog6ToothIcon}
+        badge={<Badge variant={cfg.live ? "success" : "neutral"} label={cfg.live ? "即时生效" : "下次启动生效"} />}
+      >
+        <Selector
+          label="个人版 / 团队版"
+          description="团队版允许任何人通过 @ 使用，CLI 强制应用身份；管理命令仍限 owner/管理员。"
+          value={cfg.mode}
+          options={[
+            { value: "personal", label: "个人版（默认）" },
+            { value: "team", label: "团队版" },
+          ]}
+          onChange={(value) => update("mode", value as ConfigData["mode"])}
+          width="100%"
+        />
+      </SettingsPanel>
 
-      <Card>
-        <CardHeader><CardTitle>回复与运行</CardTitle></CardHeader>
-        <CardContent className="space-y-4">
-          <Field label="模型" hint="模型目录在后台刷新；查询超时会继续使用最近缓存。">
-            <div className="flex gap-2">
-              <div className="flex-1">
-                <SelectRow value={cfg.model} onChange={(v) => set("model", v)}
-                  options={cfg.models.map((m) => [m.value, m.label])} />
-              </div>
-              <Button variant="outline" disabled={modelRefreshing} onClick={() => void loadModels(true)}>
-                {modelRefreshing ? "刷新中…" : "刷新"}
-              </Button>
-            </div>
-          </Field>
-          <Field label="消息回复方式">
-            <SelectRow value={cfg.messageReply} onChange={(v) => set("messageReply", v as ConfigData["messageReply"])}
-              options={[["markdown", "消息卡片（默认）"], ["text", "纯文本"]]} />
-          </Field>
-          <ToggleRow label="工具调用显示" hint="显示 bot 执行的命令与文件读写过程" checked={cfg.showToolCalls}
-            onChange={(v) => set("showToolCalls", v)} />
-          <Field label="COT 过程消息">
-            <SelectRow value={cfg.cotMessages} onChange={(v) => set("cotMessages", v as ConfigData["cotMessages"])}
-              options={[["off", "关闭"], ["brief", "简略"], ["detailed", "详细"]]} />
-          </Field>
-          <div className="grid grid-cols-2 gap-4">
-            <Field label="并发上限（1-50）">
-              <Input type="number" min={1} max={50} value={cfg.maxConcurrentRuns}
-                onChange={(e) => set("maxConcurrentRuns", Number(e.target.value))} />
-            </Field>
-            <Field label="探活分钟（0=关闭）">
-              <Input type="number" min={0} max={120} value={cfg.runIdleTimeoutMinutes}
-                onChange={(e) => set("runIdleTimeoutMinutes", Number(e.target.value))} />
-            </Field>
-          </div>
-          <ToggleRow label="群里需要 @ bot（全局默认）"
-            hint="关闭后群里任何消息都会触发（需 im:message.group_msg 权限）。可在下方「允许响应的群」为单个群单独设置，优先级高于此项。"
-            checked={cfg.requireMentionInGroup} onChange={(v) => set("requireMentionInGroup", v)} />
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader><CardTitle>lark-cli 身份策略</CardTitle></CardHeader>
-        <CardContent className="space-y-2">
-          <SelectRow value={cfg.larkCliIdentity} onChange={(v) => set("larkCliIdentity", v as ConfigData["larkCliIdentity"])}
-            options={[["bot-only", "只允许应用身份"], ["user-default", "允许用户身份"]]} />
-          <p className="text-xs text-muted-foreground">
-            只允许应用身份：不访问个人资源。允许用户身份：可访问已授权用户的日历/邮箱/云盘等。
-          </p>
-          {team && (
-            <p className="text-xs text-primary">⚠️ 团队版已开启：本项被覆盖为「只允许应用身份」。切回个人版后恢复。</p>
-          )}
-        </CardContent>
-      </Card>
-
-      <MeetingCard
-        profile={profile}
-        cfg={cfg.meeting}
-        onChange={(next) => set("meeting", next)}
-      />
-
-      <Card>
-        <CardHeader><CardTitle>访问控制</CardTitle></CardHeader>
-        <CardContent className="space-y-4">
-          {team && (
-            <p className="text-xs text-primary">团队版下访问控制不生效（任何人可用）；以下配置保留，切回个人版后恢复。</p>
-          )}
-          <AccessList label="允许私聊的用户（open_id）" placeholder="ou_..." ids={cfg.access.allowedUsers}
-            onAdd={(id) => access("add", "user", id)} onRemove={(id) => access("remove", "user", id)} />
-          <Separator />
-          <AllowedChats
-            profile={profile}
-            ids={cfg.access.allowedChats}
-            chatRequireMention={cfg.access.chatRequireMention}
-            chatNames={chatNames}
-            globalRequire={cfg.requireMentionInGroup}
-            onAdd={(id, name) => {
-              void access("add", "chat", id);
-              if (name) setChatNames((m) => ({ ...m, [id]: name }));
-            }}
-            onRemove={(id) => access("remove", "chat", id)}
-            onSetMention={setMention}
+      <SettingsPanel
+        title="回复与运行"
+        description="模型、呈现方式与并发控制。"
+        icon={ChatBubbleLeftRightIcon}
+      >
+        <Grid columns={{ minWidth: 280, max: 2, repeat: "fit" }} gap={4}>
+          <VStack gap={2}>
+            <Selector
+              label="模型"
+              description="目录在后台刷新，超时会继续使用最近缓存。"
+              value={cfg.model}
+              options={cfg.models.map((model) => ({ value: model.value, label: model.label }))}
+              onChange={(value) => update("model", value)}
+              width="100%"
+            />
+            <Button
+              label="刷新模型目录"
+              variant="ghost"
+              size="sm"
+              icon={<Icon icon={ArrowPathIcon} size="sm" />}
+              isLoading={modelRefreshing}
+              isDisabled={modelRefreshing}
+              onClick={() => void loadModels(true)}
+            />
+          </VStack>
+          <Selector
+            label="消息回复方式"
+            value={cfg.messageReply}
+            options={[
+              { value: "markdown", label: "消息卡片（默认）" },
+              { value: "text", label: "纯文本" },
+            ]}
+            onChange={(value) => update("messageReply", value as ConfigData["messageReply"])}
+            width="100%"
           />
-          <Separator />
-          <AccessList label="管理员（open_id）" placeholder="ou_..." ids={cfg.access.admins}
-            onAdd={(id) => access("add", "admin", id)} onRemove={(id) => access("remove", "admin", id)} />
-        </CardContent>
-      </Card>
+          <Selector
+            label="COT 过程消息"
+            value={cfg.cotMessages}
+            options={[
+              { value: "off", label: "关闭" },
+              { value: "brief", label: "简略" },
+              { value: "detailed", label: "详细" },
+            ]}
+            onChange={(value) => update("cotMessages", value as ConfigData["cotMessages"])}
+            width="100%"
+          />
+          <NumberInput
+            label="并发上限"
+            description="允许范围 1–50。"
+            value={cfg.maxConcurrentRuns}
+            min={1}
+            max={50}
+            isIntegerOnly
+            onChange={(value) => update("maxConcurrentRuns", value)}
+            width="100%"
+          />
+          <NumberInput
+            label="探活分钟"
+            description="0 表示关闭，最大 120 分钟。"
+            value={cfg.runIdleTimeoutMinutes}
+            min={0}
+            max={120}
+            isIntegerOnly
+            onChange={(value) => update("runIdleTimeoutMinutes", value)}
+            width="100%"
+          />
+        </Grid>
+        <Divider />
+        <Switch
+          label="显示工具调用"
+          description="在回复中显示 bot 执行的命令与文件读写过程。"
+          value={cfg.showToolCalls}
+          onChange={(value) => update("showToolCalls", value)}
+          labelPosition="start"
+          labelSpacing="spread"
+          width="100%"
+        />
+        <Switch
+          label="群消息默认需要 @ bot"
+          description="单个群可以在访问控制中覆盖此默认值。"
+          value={cfg.requireMentionInGroup}
+          onChange={(value) => update("requireMentionInGroup", value)}
+          labelPosition="start"
+          labelSpacing="spread"
+          width="100%"
+        />
+      </SettingsPanel>
 
-      <div className="sticky bottom-0 flex justify-end gap-2 border-t bg-background/90 py-3 backdrop-blur">
-        <Button variant="outline" onClick={() => load()} disabled={saving}>重新加载</Button>
-        <Button onClick={save} disabled={saving}>{saving ? "保存中…" : "保存"}</Button>
-      </div>
-    </div>
+      <SettingsPanel
+        title="lark-cli 身份策略"
+        description="控制 bot 能否访问用户个人资源。"
+        icon={KeyIcon}
+      >
+        <Selector
+          label="默认身份"
+          value={cfg.larkCliIdentity}
+          options={[
+            { value: "bot-only", label: "只允许应用身份" },
+            { value: "user-default", label: "允许用户身份" },
+          ]}
+          onChange={(value) => update("larkCliIdentity", value as ConfigData["larkCliIdentity"])}
+          width="100%"
+        />
+        <Text type="supporting" color="secondary">
+          应用身份不访问个人资源；用户身份可访问已授权用户的日历、邮箱和云盘等。
+        </Text>
+        {team && (
+          <Banner
+            status="info"
+            title="团队版会覆盖身份策略"
+            description="当前固定为只允许应用身份，切回个人版后恢复。"
+            collapsible={false}
+          />
+        )}
+      </SettingsPanel>
+
+      <MeetingPanel profile={profile} config={cfg.meeting} onChange={(meeting) => update("meeting", meeting)} />
+
+      <SettingsPanel
+        title="访问控制"
+        description="管理可用用户、群与管理员。"
+        icon={ShieldCheckIcon}
+      >
+        {team && (
+          <Banner
+            status="info"
+            title="团队版下白名单不生效"
+            description="配置会保留，切回个人版后恢复。"
+            collapsible={false}
+          />
+        )}
+        <AccessList
+          label="允许私聊的用户"
+          placeholder="ou_..."
+          ids={cfg.access.allowedUsers}
+          onAdd={(id) => void access("add", "user", id)}
+          onRemove={(id) => void access("remove", "user", id)}
+        />
+        <Divider />
+        <AllowedChats
+          profile={profile}
+          ids={cfg.access.allowedChats}
+          chatRequireMention={cfg.access.chatRequireMention}
+          chatNames={chatNames}
+          globalRequire={cfg.requireMentionInGroup}
+          onAdd={(id, name) => {
+            void access("add", "chat", id);
+            if (name) setChatNames((current) => ({ ...current, [id]: name }));
+          }}
+          onRemove={(id) => void access("remove", "chat", id)}
+          onSetMention={(id, mention) => void setMention(id, mention)}
+        />
+        <Divider />
+        <AccessList
+          label="管理员"
+          placeholder="ou_..."
+          ids={cfg.access.admins}
+          onAdd={(id) => void access("add", "admin", id)}
+          onRemove={(id) => void access("remove", "admin", id)}
+        />
+      </SettingsPanel>
+
+      <Card elevation="med" padding={0} style={{ position: "sticky", bottom: 12, zIndex: 1 }}>
+        <Layout
+          footer={
+            <LayoutFooter padding={3}>
+              <HStack gap={2} hAlign="end" vAlign="center">
+                <Button label="重新加载" variant="ghost" isDisabled={saving} onClick={() => void load()} />
+                <Button
+                  label="保存配置"
+                  variant="primary"
+                  isLoading={saving}
+                  isDisabled={saving}
+                  onClick={() => void save()}
+                />
+              </HStack>
+            </LayoutFooter>
+          }
+        />
+      </Card>
+    </VStack>
   );
 }
 
-/**
- * Permission pre-flight. When the app identity lacks a scope, Feishu's own
- * scope-apply URL comes back in the error — we render it as a button plus a QR
- * (for granting from a phone). The URL is opaque: linked/encoded as-is, never
- * rebuilt.
- */
-function MeetingPreflightPanel({ pre, checking, onRecheck }: {
-  pre: MeetingPreflight | null;
+function SettingsPanel({
+  title,
+  description,
+  icon,
+  badge,
+  headerAction,
+  children,
+}: {
+  title: string;
+  description?: string;
+  icon: typeof Cog6ToothIcon;
+  badge?: ReactNode;
+  headerAction?: ReactNode;
+  children: ReactNode;
+}) {
+  return (
+    <Card padding={0}>
+      <Layout
+        header={
+          <LayoutHeader padding={4} hasDivider>
+            <HStack gap={3} hAlign="between" vAlign="center" wrap="wrap">
+              <HStack gap={3} vAlign="center">
+                <Icon icon={icon} color="secondary" />
+                <VStack gap={0.5}>
+                  <Heading level={3}>{title}</Heading>
+                  {description && <Text type="supporting" color="secondary">{description}</Text>}
+                </VStack>
+              </HStack>
+              {headerAction ?? badge}
+            </HStack>
+          </LayoutHeader>
+        }
+        content={<LayoutContent padding={4}><VStack gap={4}>{children}</VStack></LayoutContent>}
+      />
+    </Card>
+  );
+}
+
+function MeetingPreflightPanel({
+  preflight,
+  checking,
+  onRecheck,
+}: {
+  preflight: MeetingPreflight | null;
   checking: boolean;
   onRecheck: () => void;
 }) {
-  if (!pre) {
-    return <p className="text-xs text-muted-foreground">{checking ? "检查权限中…" : "—"}</p>;
-  }
-
-  if (pre.status === "ok") {
+  if (!preflight) {
     return (
-      <div className="flex items-center gap-2">
-        <Badge variant="success">应用权限已就绪</Badge>
-        <Button variant="ghost" size="sm" disabled={checking} onClick={onRecheck}>重新检查</Button>
-      </div>
+      <HStack gap={2} vAlign="center">
+        {checking && <Spinner size="sm" aria-label="检查会议权限" />}
+        <Text type="supporting" color="secondary">{checking ? "检查权限中…" : "尚未检查"}</Text>
+      </HStack>
     );
   }
 
-  const isScope = pre.status === "scope-missing";
+  if (preflight.status === "ok") {
+    return (
+      <Banner
+        status="success"
+        title="应用权限已就绪"
+        description="会议智能体所需的应用权限检查通过。"
+        icon={<Icon icon={CheckCircleIcon} size="md" />}
+        endContent={
+          <Button label="重新检查" variant="ghost" size="sm" isLoading={checking} onClick={onRecheck} />
+        }
+        collapsible={false}
+      />
+    );
+  }
+
+  const scopeMissing = preflight.status === "scope-missing";
   return (
-    <div className="space-y-3 rounded-md border border-destructive/40 bg-destructive/5 p-3">
-      <div className="flex items-center gap-2">
-        <Badge variant="destructive">
-          {isScope ? "缺少应用权限" : pre.status === "not-in-beta" ? "内测未开通" : "权限状态未知"}
-        </Badge>
-        <Button variant="ghost" size="sm" disabled={checking} onClick={onRecheck}>重新检查</Button>
-      </div>
-      <p className="text-xs text-muted-foreground">{pre.message}</p>
-
-      {isScope && (
-        <div className="space-y-1">
-          <p className="text-xs">
-            需要为应用（bot 身份）开通以下权限。探针一次只能报出撞到的那一个，建议一起开完，
-            否则入会成功但发言仍会失败：
-          </p>
-          <ul className="space-y-0.5">
-            {pre.requiredScopes.map((r) => {
-              const missing = pre.missingScopes.includes(r.scope);
-              return (
-                <li key={r.scope} className="text-xs">
-                  <span className={missing ? "font-mono text-destructive" : "font-mono"}>{r.scope}</span>
-                  <span className="text-muted-foreground">
-                    {" — "}{r.purpose}{missing ? "（已确认缺失）" : ""}
-                  </span>
-                </li>
-              );
-            })}
-          </ul>
-        </div>
-      )}
-
-      {pre.consoleUrl && (
-        <div className="flex items-start gap-4">
-          <div className="space-y-2">
-            <Button asChild size="sm">
-              <a href={pre.consoleUrl} target="_blank" rel="noreferrer">去开通权限</a>
-            </Button>
-            <p className="text-xs text-muted-foreground">开通后点「重新检查」；生效后需重启该 profile。</p>
-          </div>
-          <div className="rounded-md border bg-white p-2">
-            <QRCodeSVG value={pre.consoleUrl} size={96} />
-          </div>
-        </div>
-      )}
-
-      {pre.betaChatUrl && (
-        <div className="flex items-start gap-4">
-          <div className="space-y-2">
-            <Button asChild size="sm">
-              <a href={pre.betaChatUrl} target="_blank" rel="noreferrer">加入内测群申请开通</a>
-            </Button>
-            <p className="text-xs text-muted-foreground">开通后点「重新检查」。</p>
-          </div>
-          <div className="rounded-md border bg-white p-2">
-            <QRCodeSVG value={pre.betaChatUrl} size={96} />
-          </div>
-        </div>
-      )}
-
-      <div className="space-y-1 border-t pt-2">
-        <p className="text-xs">另外需在开发者后台以「长连接」模式订阅事件（无查询接口，只能人工确认）：</p>
-        <ul className="space-y-0.5">
-          {pre.requiredEvents.map((e) => (
-            <li key={e} className="font-mono text-xs text-muted-foreground">{e}</li>
-          ))}
-        </ul>
-        <p className="text-xs text-muted-foreground">未订阅也可用：会自动降级为轮询，只是字幕慢几秒。</p>
-      </div>
-    </div>
+    <Banner
+      status={scopeMissing ? "error" : "warning"}
+      title={scopeMissing ? "缺少应用权限" : preflight.status === "not-in-beta" ? "内测未开通" : "权限状态未知"}
+      description={preflight.message}
+      endContent={<Button label="重新检查" variant="ghost" size="sm" isLoading={checking} onClick={onRecheck} />}
+      collapsible={false}
+    >
+      <VStack gap={4}>
+        {scopeMissing && (
+          <List density="compact" hasDividers>
+            {preflight.requiredScopes.map((scope) => (
+              <ListItem
+                key={scope.scope}
+                label={<Text type="code">{scope.scope}</Text>}
+                description={`${scope.purpose}${preflight.missingScopes.includes(scope.scope) ? "（已确认缺失）" : ""}`}
+                startContent={
+                  <StatusDot
+                    variant={preflight.missingScopes.includes(scope.scope) ? "error" : "neutral"}
+                    label={preflight.missingScopes.includes(scope.scope) ? "缺失" : "待确认"}
+                  />
+                }
+              />
+            ))}
+          </List>
+        )}
+        {(preflight.consoleUrl || preflight.betaChatUrl) && (
+          <HStack gap={4} vAlign="start" wrap="wrap">
+            <VStack gap={2}>
+              {preflight.consoleUrl && (
+                <Button label="去开通权限" variant="primary" href={preflight.consoleUrl} target="_blank" rel="noreferrer" />
+              )}
+              {preflight.betaChatUrl && (
+                <Button label="加入内测群申请" href={preflight.betaChatUrl} target="_blank" rel="noreferrer" />
+              )}
+              <Text type="supporting" color="secondary">完成后重新检查；权限变更后需重启 Profile。</Text>
+            </VStack>
+            <Card padding={2} style={{ background: "white" }}>
+              <QRCodeSVG value={preflight.consoleUrl ?? preflight.betaChatUrl!} size={104} />
+            </Card>
+          </HStack>
+        )}
+        <VStack gap={2}>
+          <Text weight="semibold">还需以长连接模式订阅事件</Text>
+          <List density="compact">
+            {preflight.requiredEvents.map((event) => (
+              <ListItem key={event} label={<Text type="code">{event}</Text>} />
+            ))}
+          </List>
+          <Text type="supporting" color="secondary">未订阅时会自动降级为轮询，字幕会慢几秒。</Text>
+        </VStack>
+      </VStack>
+    </Banner>
   );
 }
 
-/**
- * In-meeting agent ("智能体入会"). Settings plus a live view of the joined
- * meetings — including whether `vc.bot.*` pushes are actually arriving, which
- * is the one thing that can't be verified from code alone.
- */
-function MeetingCard({ profile, cfg, onChange }: {
+function MeetingPanel({
+  profile,
+  config,
+  onChange,
+}: {
   profile: string;
-  cfg: MeetingConfig;
+  config: MeetingConfig;
   onChange: (next: MeetingConfig) => void;
 }) {
   const [live, setLive] = useState<MeetingsView | null>(null);
-  const [pre, setPre] = useState<MeetingPreflight | null>(null);
+  const [preflightState, setPreflightState] = useState<MeetingPreflight | null>(null);
   const [checking, setChecking] = useState(false);
-  const [joinNo, setJoinNo] = useState("");
+  const [meetingNo, setMeetingNo] = useState("");
   const [busy, setBusy] = useState(false);
+  const showToast = useToast();
 
-  const set = <K extends keyof MeetingConfig>(k: K, v: MeetingConfig[K]) => onChange({ ...cfg, [k]: v });
+  const update = <K extends keyof MeetingConfig>(key: K, value: MeetingConfig[K]) =>
+    onChange({ ...config, [key]: value });
 
   const load = () =>
     apiGet<MeetingsView>(`/api/meetings?profile=${encodeURIComponent(profile)}`)
       .then(setLive)
       .catch(() => setLive(null));
 
-  async function preflight() {
+  async function checkPreflight() {
     setChecking(true);
     try {
-      setPre(await apiGet<MeetingPreflight>(`/api/meetings/preflight?profile=${encodeURIComponent(profile)}`));
+      setPreflightState(
+        await apiGet<MeetingPreflight>(`/api/meetings/preflight?profile=${encodeURIComponent(profile)}`),
+      );
     } catch (e) {
-      toast.error(String((e as Error).message ?? e));
-    } finally { setChecking(false); }
+      showToast({ body: String((e as Error).message ?? e), type: "error" });
+    } finally {
+      setChecking(false);
+    }
   }
 
   useEffect(() => {
-    if (!cfg.enabled) return;
+    if (!config.enabled) return;
     void load();
-    void preflight();
-    // Sessions and push counters move on their own; poll while the card is open.
-    const timer = setInterval(() => void load(), 5000);
+    void checkPreflight();
+    const timer = setInterval(() => void load(), 5_000);
     return () => clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [profile, cfg.enabled]);
+  }, [profile, config.enabled]);
 
   async function join() {
-    const no = joinNo.replace(/\s/g, "");
-    if (!/^\d{9}$/.test(no)) {
-      toast.error("会议号必须是 9 位数字");
+    const normalized = meetingNo.replace(/\s/g, "");
+    if (!/^\d{9}$/.test(normalized)) {
+      showToast({ body: "会议号必须是 9 位数字", type: "error" });
       return;
     }
     setBusy(true);
     try {
-      await apiPost("/api/meetings/join", { profile, meetingNo: no });
-      setJoinNo("");
-      toast.success("已入会");
+      await apiPost("/api/meetings/join", { profile, meetingNo: normalized });
+      setMeetingNo("");
+      showToast({ body: "已入会" });
       await load();
     } catch (e) {
-      toast.error(String((e as Error).message ?? e));
-    } finally { setBusy(false); }
+      showToast({ body: String((e as Error).message ?? e), type: "error" });
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function leave(meetingId: string) {
     setBusy(true);
     try {
       await apiPost("/api/meetings/leave", { profile, meetingId });
-      toast.success("已离会");
+      showToast({ body: "已离会" });
       await load();
     } catch (e) {
-      toast.error(String((e as Error).message ?? e));
-    } finally { setBusy(false); }
+      showToast({ body: String((e as Error).message ?? e), type: "error" });
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
-    <Card>
-      <CardHeader className="flex-row items-center justify-between">
-        <CardTitle>会议智能体</CardTitle>
-        <Switch checked={cfg.enabled} onCheckedChange={(v) => set("enabled", v)} />
-      </CardHeader>
-      <CardContent className="space-y-4">
-        <p className="text-xs text-muted-foreground">
-          让 bot 作为参会人加入飞书会议，读字幕/弹幕并作答。需要应用已开通内测与
-          <span className="font-mono"> vc:meeting.bot.join:write</span>。开关变更后需重启该 profile 生效。
-        </p>
-
-        {cfg.enabled && (
-          <>
-            <MeetingPreflightPanel pre={pre} checking={checking} onRecheck={preflight} />
-
-            <div className="grid grid-cols-2 gap-4">
-              <Field label="回答发到哪">
-                <SelectRow
-                  value={cfg.respondIn}
-                  onChange={(v) => set("respondIn", v as MeetingConfig["respondIn"])}
-                  options={[["meeting", "会中消息"], ["im", "IM 私聊"], ["both", "两者"]]}
+    <SettingsPanel
+      title="会议智能体"
+      description="作为参会人读取字幕与会中消息并作答。"
+      icon={VideoCameraIcon}
+      headerAction={
+        <Switch
+          label="启用会议智能体"
+          isLabelHidden
+          value={config.enabled}
+          onChange={(value) => update("enabled", value)}
+        />
+      }
+    >
+      <Banner
+        status="info"
+        title="需要会议 Bot 内测与应用权限"
+        description="开关变更后需重启 Profile 生效。"
+        collapsible={false}
+      />
+      {config.enabled && (
+        <>
+          <MeetingPreflightPanel preflight={preflightState} checking={checking} onRecheck={() => void checkPreflight()} />
+          <Grid columns={{ minWidth: 260, max: 2, repeat: "fit" }} gap={4}>
+            <Selector
+              label="回答发到哪"
+              value={config.respondIn}
+              options={[
+                { value: "meeting", label: "会中消息" },
+                { value: "im", label: "IM 私聊" },
+                { value: "both", label: "两者" },
+              ]}
+              onChange={(value) => update("respondIn", value as MeetingConfig["respondIn"])}
+              width="100%"
+            />
+            <TextInput
+              label="会中触发前缀"
+              description="@ bot 当前名称始终有效。"
+              value={config.trigger}
+              onChange={(value) => update("trigger", value)}
+              width="100%"
+            />
+            <NumberInput
+              label="字幕上下文条数"
+              value={config.transcript.keep}
+              min={10}
+              max={2_000}
+              isIntegerOnly
+              onChange={(value) => update("transcript", { ...config.transcript, keep: value })}
+              width="100%"
+            />
+            <NumberInput
+              label="字幕定稿防抖"
+              description="0 表示关闭。"
+              value={config.transcript.stabilizeMs}
+              min={0}
+              max={30_000}
+              units="ms"
+              isIntegerOnly
+              onChange={(value) => update("transcript", { ...config.transcript, stabilizeMs: value })}
+              width="100%"
+            />
+          </Grid>
+          <Switch
+            label="被邀请时自动入会"
+            description="依赖 vc.bot.meeting_invited_v1 长连接推送。"
+            value={config.autoJoinOnInvite}
+            onChange={(value) => update("autoJoinOnInvite", value)}
+            labelPosition="start"
+            labelSpacing="spread"
+            width="100%"
+          />
+          <Switch
+            label="会议结束自动生成纪要"
+            value={config.summaryOnEnd}
+            onChange={(value) => update("summaryOnEnd", value)}
+            labelPosition="start"
+            labelSpacing="spread"
+            width="100%"
+          />
+          {config.summaryOnEnd && (
+            <Selector
+              label="纪要发送目标"
+              value={config.summaryTarget}
+              options={[
+                { value: "origin", label: "入会来源的聊天" },
+                { value: "owner", label: "Bot owner 私聊" },
+              ]}
+              onChange={(value) => update("summaryTarget", value as MeetingConfig["summaryTarget"])}
+              width="100%"
+            />
+          )}
+          <Divider />
+          {!live?.available ? (
+            <Banner
+              status="warning"
+              title="实时会议状态不可用"
+              description={live?.reason ?? "正在加载运行状态…"}
+              collapsible={false}
+            />
+          ) : (
+            <VStack gap={3}>
+              <HStack gap={2} vAlign="center" wrap="wrap">
+                <Heading level={4}>在会会议（{live.sessions.length}）</Heading>
+                <Badge
+                  variant={live.push.hooked ? (live.push.received > 0 ? "success" : "neutral") : "error"}
+                  label={live.push.hooked
+                    ? live.push.received > 0
+                      ? `推送正常 · ${live.push.received} 条`
+                      : "推送已挂载 · 未收到"
+                    : "推送未挂载"}
                 />
-              </Field>
-              <Field
-                label="会中触发前缀"
-                hint="会中弹幕以此开头才会问 agent。@ 加 bot 当前名字始终有效，这里只是额外再认一个前缀。"
-              >
-                <Input value={cfg.trigger} onChange={(e) => set("trigger", e.target.value)} />
-              </Field>
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <Field label="字幕上下文条数（10-2000）">
-                <Input type="number" min={10} max={2000} value={cfg.transcript.keep}
-                  onChange={(e) => set("transcript", { ...cfg.transcript, keep: Number(e.target.value) })} />
-              </Field>
-              <Field label="字幕定稿防抖 ms（0=不防抖）">
-                <Input type="number" min={0} max={30000} value={cfg.transcript.stabilizeMs}
-                  onChange={(e) => set("transcript", { ...cfg.transcript, stabilizeMs: Number(e.target.value) })} />
-              </Field>
-            </div>
-            <ToggleRow label="被邀请时自动入会" hint="依赖 vc.bot.meeting_invited_v1 推送（需在开发者后台订阅）"
-              checked={cfg.autoJoinOnInvite} onChange={(v) => set("autoJoinOnInvite", v)} />
-            <ToggleRow label="会议结束自动出纪要" checked={cfg.summaryOnEnd}
-              onChange={(v) => set("summaryOnEnd", v)} />
-            {cfg.summaryOnEnd && (
-              <Field
-                label="纪要发到哪"
-                hint="所选目标不可用时自动回落到另一个（从控制台入会没有来源聊天；owner 未解析出来时没有私聊），不会丢掉纪要。"
-              >
-                <SelectRow
-                  value={cfg.summaryTarget}
-                  onChange={(v) => set("summaryTarget", v as MeetingConfig["summaryTarget"])}
-                  options={[
-                    ["origin", "入会来源的聊天（群/私聊）"],
-                    ["owner", "bot owner 私聊"],
-                  ]}
-                />
-              </Field>
-            )}
-
-            <Separator />
-
-            {/* Live state — needs the profile to be online. */}
-            {!live?.available ? (
-              <p className="text-xs text-muted-foreground">{live?.reason ?? "加载中…"}</p>
-            ) : (
-              <div className="space-y-2">
-                <div className="flex items-center gap-2">
-                  <Label>在会会议（{live.sessions.length}）</Label>
-                  <Badge variant={live.push.hooked ? (live.push.received > 0 ? "success" : "secondary") : "destructive"}>
-                    {live.push.hooked
-                      ? live.push.received > 0
-                        ? `推送正常 · ${live.push.received} 条`
-                        : "推送已挂载 · 未收到"
-                      : "推送未挂载"}
-                  </Badge>
-                </div>
-                {live.push.hooked && live.push.received === 0 && (
-                  <p className="text-xs text-muted-foreground">
-                    钩子已装好但还没收到事件。确认开发者后台已用「长连接」模式订阅 vc.bot.* 三个事件；期间靠轮询兜底，功能可用。
-                  </p>
-                )}
-                {!live.push.hooked && live.push.reason && (
-                  <p className="text-xs text-destructive">{live.push.reason}</p>
-                )}
-                <div className="divide-y rounded-md border">
-                  {live.sessions.length === 0 && (
-                    <p className="px-3 py-2 text-xs text-muted-foreground">（暂无）</p>
-                  )}
-                  {live.sessions.map((s) => (
-                    <div key={s.meetingId} className="flex items-center gap-2 px-3 py-2">
-                      <div className="min-w-0 flex-1">
-                        <div className="truncate text-sm">{s.topic ?? s.meetingNo}</div>
-                        <div className="truncate text-xs text-muted-foreground">
-                          {s.meetingNo} · {s.source === "push" ? "推送" : "轮询"} · 字幕 {s.transcriptLines} 条 · 参会 {s.participants} 人
-                        </div>
-                        {/* Which activity types actually arrived — tells apart
-                            "nothing was sent" from "sent but unparsed" (`?`). */}
-                        <div className="truncate text-xs text-muted-foreground">
-                          收到事件：{Object.keys(s.eventCounts).length === 0
-                            ? "无"
-                            : Object.entries(s.eventCounts).map(([k, v]) => `${k}×${v}`).join(" · ")}
-                        </div>
-                      </div>
-                      <Button variant="ghost" size="sm" disabled={busy} onClick={() => leave(s.meetingId)}>离会</Button>
-                    </div>
+              </HStack>
+              {live.push.hooked && live.push.received === 0 && (
+                <Text type="supporting" color="secondary">尚未收到 vc.bot.* 推送，期间会用轮询兜底。</Text>
+              )}
+              {!live.push.hooked && live.push.reason && (
+                <Banner status="error" title="推送未挂载" description={live.push.reason} collapsible={false} />
+              )}
+              {live.sessions.length === 0 ? (
+                <EmptyState title="暂无在会会议" description="输入 9 位会议号即可手动入会。" isCompact />
+              ) : (
+                <List density="spacious" hasDividers>
+                  {live.sessions.map((session) => (
+                    <ListItem
+                      key={session.meetingId}
+                      label={session.topic ?? session.meetingNo}
+                      description={`${session.meetingNo} · ${session.source === "push" ? "推送" : "轮询"} · 字幕 ${session.transcriptLines} 条 · 参会 ${session.participants} 人 · 事件 ${Object.entries(session.eventCounts).map(([key, value]) => `${key}×${value}`).join(" / ") || "无"}`}
+                      startContent={<StatusDot variant="success" label="在会" isPulsing />}
+                      endContent={<Button label="离会" variant="ghost" size="sm" isDisabled={busy} onClick={() => void leave(session.meetingId)} />}
+                    />
                   ))}
-                </div>
-                <div className="flex gap-2">
-                  <Input placeholder="9 位会议号" value={joinNo} onChange={(e) => setJoinNo(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === "Enter") void join(); }} />
-                  <Button variant="outline" disabled={busy} onClick={join}>入会</Button>
-                </div>
-              </div>
-            )}
-          </>
-        )}
-      </CardContent>
-    </Card>
-  );
-}
-
-function Field({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
-  return (
-    <div className="space-y-1.5">
-      <Label>{label}</Label>
-      {children}
-      {hint && <p className="text-xs text-muted-foreground">{hint}</p>}
-    </div>
-  );
-}
-
-function ToggleRow({ label, hint, checked, onChange }: {
-  label: string; hint?: string; checked: boolean; onChange: (v: boolean) => void;
-}) {
-  return (
-    <div className="flex items-center justify-between gap-4">
-      <div className="space-y-0.5">
-        <Label>{label}</Label>
-        {hint && <p className="text-xs text-muted-foreground">{hint}</p>}
-      </div>
-      <Switch checked={checked} onCheckedChange={onChange} />
-    </div>
-  );
-}
-
-function SelectRow({ value, onChange, options }: {
-  value: string; onChange: (v: string) => void; options: [string, string][];
-}) {
-  return (
-    <Select value={value} onValueChange={onChange}>
-      <SelectTrigger><SelectValue /></SelectTrigger>
-      <SelectContent>
-        {options.map(([v, l]) => (
-          <SelectItem key={v} value={v}>{l}</SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
+                </List>
+              )}
+              <HStack gap={2} vAlign="end" wrap="wrap">
+                <TextInput
+                  label="手动入会"
+                  isLabelHidden
+                  placeholder="9 位会议号"
+                  value={meetingNo}
+                  onChange={setMeetingNo}
+                  onEnter={() => void join()}
+                  width="100%"
+                />
+                <Button label="入会" variant="secondary" isLoading={busy} isDisabled={busy} onClick={() => void join()} />
+              </HStack>
+            </VStack>
+          )}
+        </>
+      )}
+    </SettingsPanel>
   );
 }
 
@@ -611,169 +774,229 @@ function AllowedChats({
   const [draft, setDraft] = useState("");
 
   return (
-    <div className="space-y-2">
-      <Label>允许响应的群（{ids.length}）</Label>
-      <div className="divide-y rounded-md border">
-        {ids.length === 0 && <p className="px-3 py-2 text-xs text-muted-foreground">（暂无）</p>}
-        {ids.map((id) => {
-          const override = chatRequireMention[id];
-          const value = override === undefined ? "global" : override ? "on" : "off";
-          return (
-            <div key={id} className="flex items-center gap-2 px-3 py-2">
-              <div className="min-w-0 flex-1">
-                {chatNames[id] && <div className="truncate text-sm">{chatNames[id]}</div>}
-                <div className="truncate font-mono text-xs text-muted-foreground">{id}</div>
-              </div>
-              <Select
-                value={value}
-                onValueChange={(v) => onSetMention(id, v === "global" ? null : v === "on")}
-              >
-                <SelectTrigger className="h-8 w-[150px]"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="global">@：跟随全局（{globalRequire ? "需@" : "无需@"}）</SelectItem>
-                  <SelectItem value="on">需要 @</SelectItem>
-                  <SelectItem value="off">无需 @</SelectItem>
-                </SelectContent>
-              </Select>
-              <Button variant="ghost" size="sm" onClick={() => onRemove(id)}>移除</Button>
-            </div>
-          );
-        })}
-      </div>
-      <div className="flex gap-2">
-        <Button variant="outline" onClick={() => setPickerOpen(true)}>选择群</Button>
-        <Input placeholder="或手动输入 oc_..." value={draft} onChange={(e) => setDraft(e.target.value)} />
-        <Button variant="outline" onClick={() => { onAdd(draft); setDraft(""); }}>添加</Button>
-      </div>
-      <p className="text-xs text-muted-foreground">
-        每个群可单独设置是否需要 @ bot；「跟随全局」时用上面「回复与运行」里的默认值。
-      </p>
+    <VStack gap={3}>
+      <HStack hAlign="between" vAlign="center">
+        <VStack gap={0.5}>
+          <Heading level={4}>允许响应的群</Heading>
+          <Text type="supporting" color="secondary">每个群可覆盖全局 @ 策略。</Text>
+        </VStack>
+        <Badge variant="neutral" label={ids.length} />
+      </HStack>
+      {ids.length === 0 ? (
+        <EmptyState title="没有允许的群" description="从群选择器或手动输入 chat_id。" isCompact />
+      ) : (
+        <List density="spacious" hasDividers>
+          {ids.map((id) => {
+            const override = chatRequireMention[id];
+            const value = override === undefined ? "global" : override ? "on" : "off";
+            return (
+              <ListItem
+                key={id}
+                label={chatNames[id] ?? id}
+                description={chatNames[id] ? id : undefined}
+                startContent={<Icon icon={UserGroupIcon} size="sm" color="secondary" />}
+                endContent={
+                  <HStack gap={2} vAlign="center" wrap="wrap">
+                    <Selector
+                      label={`@ 策略：${chatNames[id] ?? id}`}
+                      isLabelHidden
+                      value={value}
+                      options={[
+                        { value: "global", label: `跟随全局（${globalRequire ? "需 @" : "无需 @"}）` },
+                        { value: "on", label: "需要 @" },
+                        { value: "off", label: "无需 @" },
+                      ]}
+                      onChange={(next) => onSetMention(id, next === "global" ? null : next === "on")}
+                      width={170}
+                    />
+                    <Button label="移除" variant="ghost" size="sm" onClick={() => onRemove(id)} />
+                  </HStack>
+                }
+              />
+            );
+          })}
+        </List>
+      )}
+      <Grid columns={{ minWidth: 240, max: 2, repeat: "fit" }} gap={2}>
+        <Button
+          label="选择群"
+          variant="secondary"
+          icon={<Icon icon={PlusIcon} size="sm" />}
+          width="100%"
+          onClick={() => setPickerOpen(true)}
+        />
+        <HStack gap={2} vAlign="end">
+          <TextInput
+            label="手动输入群 chat_id"
+            isLabelHidden
+            placeholder="oc_..."
+            value={draft}
+            onChange={setDraft}
+            onEnter={() => {
+              onAdd(draft);
+              setDraft("");
+            }}
+            width="100%"
+          />
+          <Button
+            label="添加"
+            variant="ghost"
+            isDisabled={!draft.trim()}
+            onClick={() => {
+              onAdd(draft);
+              setDraft("");
+            }}
+          />
+        </HStack>
+      </Grid>
       <GroupPicker
         profile={profile}
-        open={pickerOpen}
+        isOpen={pickerOpen}
         onOpenChange={setPickerOpen}
         added={ids}
         onPick={onAdd}
       />
-    </div>
+    </VStack>
   );
 }
 
-function GroupPicker({ profile, open, onOpenChange, added, onPick }: {
+function GroupPicker({
+  profile,
+  isOpen,
+  onOpenChange,
+  added,
+  onPick,
+}: {
   profile: string;
-  open: boolean;
+  isOpen: boolean;
   onOpenChange: (open: boolean) => void;
   added: string[];
   onPick: (id: string, name?: string) => void;
 }) {
+  const [tab, setTab] = useState("bot");
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-2xl">
-        <DialogHeader>
-          <DialogTitle>选择群</DialogTitle>
-          <DialogDescription>
-            从 bot 已加入的群里选，或用你的飞书身份从「我的群」里选（可把 bot 拉进去）。
-          </DialogDescription>
-        </DialogHeader>
-        <Tabs defaultValue="bot" className="min-w-0">
-          <TabsList className="grid w-full grid-cols-2">
-            <TabsTrigger value="bot">bot 所在的群</TabsTrigger>
-            <TabsTrigger value="mine">我的群</TabsTrigger>
-          </TabsList>
-          <TabsContent value="bot" className="min-w-0">
-            <BotChatsPane profile={profile} open={open} added={added} onPick={onPick} />
-          </TabsContent>
-          <TabsContent value="mine" className="min-w-0">
-            <MyChatsPane profile={profile} open={open} added={added} onPick={onPick} />
-          </TabsContent>
-        </Tabs>
-      </DialogContent>
+    <Dialog isOpen={isOpen} onOpenChange={onOpenChange} width={720} purpose="form">
+      <Layout
+        header={<DialogHeader title="选择群" onOpenChange={onOpenChange} />}
+        content={
+          <LayoutContent padding={4}>
+            <VStack gap={4}>
+              <Text color="secondary">从 bot 已加入的群选择，或通过你的飞书身份浏览“我的群”。</Text>
+              <TabList value={tab} onChange={setTab} layout="fill" role="tablist" hasDivider>
+                <Tab value="bot" label="Bot 所在的群" panelId="bot-chat-panel" />
+                <Tab value="mine" label="我的群" panelId="my-chat-panel" />
+              </TabList>
+              <div id={tab === "bot" ? "bot-chat-panel" : "my-chat-panel"} role="tabpanel">
+                {tab === "bot" ? (
+                  <BotChatsPane profile={profile} isOpen={isOpen} added={added} onPick={onPick} />
+                ) : (
+                  <MyChatsPane profile={profile} isOpen={isOpen} added={added} onPick={onPick} />
+                )}
+              </div>
+            </VStack>
+          </LayoutContent>
+        }
+      />
     </Dialog>
   );
 }
 
-function BotChatsPane({ profile, open, added, onPick }: {
+function BotChatsPane({
+  profile,
+  isOpen,
+  added,
+  onPick,
+}: {
   profile: string;
-  open: boolean;
+  isOpen: boolean;
   added: string[];
   onPick: (id: string, name?: string) => void;
 }) {
   const [chats, setChats] = useState<KnownChat[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const showToast = useToast();
 
   useEffect(() => {
-    if (!open) return;
+    if (!isOpen) return;
     setChats(null);
     setError(null);
-    apiGet<{ chats: KnownChat[] }>(`/api/chats?profile=${encodeURIComponent(profile)}`)
-      .then((r) => setChats(r.chats))
+    void apiGet<{ chats: KnownChat[] }>(`/api/chats?profile=${encodeURIComponent(profile)}`)
+      .then((result) => setChats(result.chats))
       .catch((e) => setError(String((e as Error).message ?? e)));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, profile]);
+  }, [isOpen, profile]);
 
   const addedSet = new Set(added);
+  if (error) return <Banner status="error" title="群列表加载失败" description={error} collapsible={false} />;
+  if (chats === null) return <Spinner size="sm" label="正在读取 Bot 所在群…" />;
+  if (chats.length === 0) {
+    return <EmptyState title="没有找到群" description="确认 Profile 在线且 bot 已被加入群聊。" isCompact />;
+  }
+
   return (
-    <div className="space-y-2 py-2">
-      <p className="text-xs text-muted-foreground">只列出 bot 已加入的群（需要该 profile 在线）。</p>
-      {error && <p className="text-sm text-destructive">加载失败：{error}</p>}
-      {!error && chats === null && <p className="text-sm text-muted-foreground">加载中…</p>}
-      {chats && chats.length === 0 && (
-        <p className="text-sm text-muted-foreground">没有找到群。确认该 profile 在线，且 bot 已被拉进群聊。</p>
-      )}
-      {chats && chats.length > 0 && (
-        <div className="max-h-[46vh] divide-y overflow-y-auto rounded-md border">
-          {chats.map((c) => (
-            <div key={c.id} className="flex items-center gap-2 px-3 py-2">
-              <div className="min-w-0 flex-1">
-                <div className="truncate text-sm">{c.name}</div>
-                <div className="truncate font-mono text-xs text-muted-foreground">{c.id}</div>
-              </div>
-              {addedSet.has(c.id) ? (
-                <Badge variant="secondary">已添加</Badge>
-              ) : (
-                <Button size="sm" variant="outline" onClick={() => { onPick(c.id, c.name); toast.success("添加成功"); }}>添加</Button>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
+    <List density="spacious" hasDividers style={{ maxHeight: "46dvh", overflowY: "auto" }}>
+      {chats.map((chat) => (
+        <ListItem
+          key={chat.id}
+          label={chat.name}
+          description={chat.id}
+          startContent={<Icon icon={UserGroupIcon} size="sm" color="secondary" />}
+          endContent={addedSet.has(chat.id)
+            ? <Badge variant="success" label="已添加" />
+            : (
+              <Button
+                label="添加"
+                variant="secondary"
+                size="sm"
+                onClick={() => {
+                  onPick(chat.id, chat.name);
+                  showToast({ body: "添加成功" });
+                }}
+              />
+            )}
+        />
+      ))}
+    </List>
   );
 }
 
-// Minimal scopes, matching the backend. Listing needs only view; adding a
-// member additionally needs the write scope (requested on demand).
 const LIST_SCOPES = ["im:chat:read"];
 const ADD_BOT_SCOPES = ["im:chat:read", "im:chat.members:write_only"];
 
-function MyChatsPane({ profile, open, added, onPick }: {
+function MyChatsPane({
+  profile,
+  isOpen,
+  added,
+  onPick,
+}: {
   profile: string;
-  open: boolean;
+  isOpen: boolean;
   added: string[];
   onPick: (id: string, name?: string) => void;
 }) {
   const [status, setStatus] = useState<UserAuthStatus | null>(null);
   const [chats, setChats] = useState<UserChat[] | null>(null);
-  const [nextToken, setNextToken] = useState<string | undefined>(undefined);
+  const [nextToken, setNextToken] = useState<string | undefined>();
   const [query, setQuery] = useState("");
   const [listing, setListing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [login, setLogin] = useState<DeviceLogin | null>(null);
   const [busy, setBusy] = useState(false);
-  // A chat we couldn't add yet because the add-member scope was missing; retried
-  // after the user grants it. Also drives the authorize-prompt wording.
   const [pendingPull, setPendingPull] = useState<string | null>(null);
+  const showToast = useToast();
   const addedSet = new Set(added);
-
-  const canList = Boolean(status?.loggedIn && status?.scopes.includes("im:chat:read"));
+  const canList = Boolean(status?.loggedIn && status.scopes.includes("im:chat:read"));
 
   const loadStatus = () =>
     apiGet<UserAuthStatus>(`/api/auth/status?profile=${encodeURIComponent(profile)}`)
-      .then((s) => { setStatus(s); return s; })
-      .catch((e) => { setError(String((e as Error).message ?? e)); return null; });
+      .then((next) => {
+        setStatus(next);
+        return next;
+      })
+      .catch((e) => {
+        setError(String((e as Error).message ?? e));
+        return null;
+      });
 
-  // Fetch a page of chats (8 at a time). reset=true starts over with the current
-  // search query; otherwise it appends the next page via the pagination token.
   async function fetchChats(reset: boolean) {
     setListing(true);
     setError(null);
@@ -782,9 +1005,9 @@ function MyChatsPane({ profile, open, added, onPick }: {
       const params = new URLSearchParams({ profile });
       if (query.trim()) params.set("query", query.trim());
       if (!reset && nextToken) params.set("pageToken", nextToken);
-      const r = await apiGet<{ chats: UserChat[]; nextPageToken?: string }>(`/api/user-chats?${params.toString()}`);
-      setChats((prev) => (reset || !prev ? r.chats : [...prev, ...r.chats]));
-      setNextToken(r.nextPageToken);
+      const result = await apiGet<{ chats: UserChat[]; nextPageToken?: string }>(`/api/user-chats?${params}`);
+      setChats((current) => reset || !current ? result.chats : [...current, ...result.chats]);
+      setNextToken(result.nextPageToken);
     } catch (e) {
       setError(String((e as Error).message ?? e));
     } finally {
@@ -793,22 +1016,30 @@ function MyChatsPane({ profile, open, added, onPick }: {
   }
 
   useEffect(() => {
-    if (!open) return;
-    setChats(null); setNextToken(undefined); setQuery("");
-    setLogin(null); setError(null); setStatus(null); setPendingPull(null);
-    void loadStatus().then((s) => {
-      if (s?.loggedIn && s.scopes.includes("im:chat:read")) void fetchChats(true);
+    if (!isOpen) return;
+    setChats(null);
+    setNextToken(undefined);
+    setQuery("");
+    setLogin(null);
+    setError(null);
+    setStatus(null);
+    setPendingPull(null);
+    void loadStatus().then((next) => {
+      if (next?.loggedIn && next.scopes.includes("im:chat:read")) void fetchChats(true);
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, profile]);
+  }, [isOpen, profile]);
 
   async function startAuth(scopes: string[]) {
-    setBusy(true); setError(null);
+    setBusy(true);
+    setError(null);
     try {
       setLogin(await apiPost<DeviceLogin>("/api/auth/login/start", { profile, scopes }));
     } catch (e) {
       setError(String((e as Error).message ?? e));
-    } finally { setBusy(false); }
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function completeAuth() {
@@ -817,158 +1048,220 @@ function MyChatsPane({ profile, open, added, onPick }: {
     try {
       await apiPost("/api/auth/login/complete", { profile, deviceCode: login.deviceCode });
       setLogin(null);
-      toast.success("授权成功");
-      const s = await loadStatus();
+      showToast({ body: "授权成功" });
+      const next = await loadStatus();
       const pull = pendingPull;
       setPendingPull(null);
-      if (pull) {
-        await pullBot(pull);
-      } else if (s?.loggedIn && s.scopes.includes("im:chat:read")) {
-        await fetchChats(true);
-      }
+      if (pull) await pullBot(pull);
+      else if (next?.loggedIn && next.scopes.includes("im:chat:read")) await fetchChats(true);
     } catch (e) {
-      toast.error(String((e as Error).message ?? e));
-    } finally { setBusy(false); }
+      showToast({ body: String((e as Error).message ?? e), type: "error" });
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function pullBot(id: string) {
     setBusy(true);
     try {
-      const r = await apiPost<{ ok: boolean; pending?: boolean; needAuth?: boolean; message?: string }>(
+      const result = await apiPost<{ ok: boolean; pending?: boolean; needAuth?: boolean; message?: string }>(
         "/api/chats/add-bot",
         { profile, chatId: id },
       );
-      if (r.needAuth) {
-        // Missing the add-member scope → grant it, then retry this pull.
+      if (result.needAuth) {
         setPendingPull(id);
-        toast.message("拉bot进群需要额外授权（添加群成员）");
+        showToast({ body: "拉 bot 进群需要额外授权" });
         await startAuth(ADD_BOT_SCOPES);
         return;
       }
-      if (!r.ok) {
-        toast.error(r.message ?? "把 bot 拉进群失败");
+      if (!result.ok) {
+        showToast({ body: result.message ?? "把 bot 拉进群失败", type: "error" });
         return;
       }
-      if (r.pending) {
-        toast.success("已申请，等待群主/管理员通过");
-      } else {
-        onPick(id, chats?.find((c) => c.id === id)?.name);
-        toast.success("已把 bot 拉进群，并加入允许列表");
+      if (result.pending) showToast({ body: "已申请，等待群主或管理员通过" });
+      else {
+        onPick(id, chats?.find((chat) => chat.id === id)?.name);
+        showToast({ body: "已把 bot 拉进群，并加入允许列表" });
       }
-      // Mark it in-place so the row updates without losing the current page.
-      setChats((prev) => prev?.map((c) => (c.id === id ? { ...c, botInIt: true } : c)) ?? prev);
+      setChats((current) => current?.map((chat) => chat.id === id ? { ...chat, botInIt: true } : chat) ?? current);
     } catch (e) {
-      toast.error(String((e as Error).message ?? e));
-    } finally { setBusy(false); }
+      showToast({ body: String((e as Error).message ?? e), type: "error" });
+    } finally {
+      setBusy(false);
+    }
   }
 
-  // Device flow in progress (either the initial view-groups grant, or the
-  // on-demand add-member grant) → show the QR / completion UI.
   if (login) {
     return (
-      <div className="space-y-3 py-2">
-        <p className="text-sm text-muted-foreground">
-          {pendingPull ? "把 bot 拉进群需要授权「添加群成员」权限。" : "列出「我的群」需要授权「查看群」权限。"}
-        </p>
-        <div className="flex flex-col items-center gap-2">
-          <div className="rounded-lg border bg-white p-3"><QRCodeSVG value={login.verificationUrl} size={160} /></div>
-          <a href={login.verificationUrl} target="_blank" rel="noreferrer" className="break-all text-sm text-primary underline">
-            在浏览器打开授权
-          </a>
-          {login.userCode && (
-            <p className="text-xs text-muted-foreground">验证码：<span className="font-mono">{login.userCode}</span></p>
-          )}
-        </div>
-        <p className="text-xs text-muted-foreground">在浏览器里同意授权后，点下面按钮完成。</p>
-        <div className="flex gap-2">
-          <Button className="flex-1" onClick={completeAuth} disabled={busy}>{busy ? "确认中…" : "我已完成授权"}</Button>
-          <Button variant="outline" onClick={() => { setLogin(null); setPendingPull(null); }} disabled={busy}>取消</Button>
-        </div>
-      </div>
+      <VStack gap={4} hAlign="center">
+        <Text color="secondary">
+          {pendingPull ? "需要授权添加群成员权限。" : "需要授权查看群权限。"}
+        </Text>
+        <Card padding={3} style={{ background: "white" }}>
+          <QRCodeSVG value={login.verificationUrl} size={168} />
+        </Card>
+        <Link href={login.verificationUrl} isExternalLink>在浏览器打开授权</Link>
+        {login.userCode && <Badge variant="neutral" label={`验证码：${login.userCode}`} />}
+        <HStack gap={2} wrap="wrap" hAlign="center">
+          <Button label="我已完成授权" variant="primary" isLoading={busy} onClick={() => void completeAuth()} />
+          <Button
+            label="取消"
+            variant="ghost"
+            isDisabled={busy}
+            onClick={() => {
+              setLogin(null);
+              setPendingPull(null);
+            }}
+          />
+        </HStack>
+      </VStack>
     );
   }
 
-  // Authorized for listing? If not, prompt the view-only grant.
   if (status && !canList) {
     return (
-      <div className="space-y-3 py-2">
-        <p className="text-sm text-muted-foreground">列出「我的群」需要用你的飞书身份授权一次（只需「查看群」权限）。</p>
-        {error && <p className="text-sm text-destructive">{error}</p>}
-        <Button onClick={() => startAuth(LIST_SCOPES)} disabled={busy}>{busy ? "请稍候…" : "去授权（查看群）"}</Button>
-      </div>
+      <EmptyState
+        title="需要飞书用户授权"
+        description="浏览“我的群”只申请查看群权限。"
+        actions={<Button label="去授权" variant="primary" isLoading={busy} onClick={() => void startAuth(LIST_SCOPES)} />}
+        isCompact
+      />
     );
   }
 
   return (
-    <div className="space-y-2 py-2">
-      {status?.userName && <p className="text-xs text-muted-foreground">已授权：{status.userName}</p>}
-      <div className="flex gap-2">
-        <Input
+    <VStack gap={3}>
+      {status?.userName && <Badge variant="success" label={`已授权：${status.userName}`} />}
+      <HStack gap={2} vAlign="end">
+        <TextInput
+          label="搜索我的群"
+          isLabelHidden
           placeholder="按群名搜索…"
           value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          onKeyDown={(e) => { if (e.key === "Enter") void fetchChats(true); }}
+          onChange={setQuery}
+          onEnter={() => void fetchChats(true)}
+          width="100%"
         />
-        <Button variant="outline" disabled={listing} onClick={() => void fetchChats(true)}>搜索</Button>
-      </div>
-      {error && <p className="text-sm text-destructive">{error}</p>}
-      {!error && chats === null && listing && <p className="text-sm text-muted-foreground">加载中…</p>}
-      {chats && chats.length === 0 && (
-        <p className="text-sm text-muted-foreground">{query.trim() ? "没搜到匹配的群。" : "没找到你所在的群。"}</p>
+        <Button label="搜索" variant="secondary" isLoading={listing} onClick={() => void fetchChats(true)} />
+      </HStack>
+      {error && <Banner status="error" title="群列表加载失败" description={error} collapsible={false} />}
+      {!error && chats === null && listing && <Spinner size="sm" label="正在加载…" />}
+      {chats?.length === 0 && (
+        <EmptyState title={query.trim() ? "没有匹配的群" : "没有找到你所在的群"} isCompact />
       )}
       {chats && chats.length > 0 && (
-        <div className="max-h-[46vh] divide-y overflow-y-auto rounded-md border">
-          {chats.map((c) => (
-            <div key={c.id} className="flex items-center gap-2 px-3 py-2">
-              <div className="min-w-0 flex-1">
-                <div className="truncate text-sm">{c.name}</div>
-                <div className="truncate font-mono text-xs text-muted-foreground">{c.id}</div>
-              </div>
-              {!c.botInIt && (
-                <Button size="sm" variant="ghost" disabled={busy} onClick={() => pullBot(c.id)}>拉bot进群</Button>
-              )}
-              {addedSet.has(c.id) ? (
-                <Badge variant="secondary">已添加</Badge>
-              ) : (
-                <Button size="sm" variant="outline" onClick={() => { onPick(c.id, c.name); toast.success("添加成功"); }}>添加</Button>
-              )}
-            </div>
+        <List density="spacious" hasDividers style={{ maxHeight: "46dvh", overflowY: "auto" }}>
+          {chats.map((chat) => (
+            <ListItem
+              key={chat.id}
+              label={chat.name}
+              description={chat.id}
+              startContent={<Icon icon={UserGroupIcon} size="sm" color="secondary" />}
+              endContent={
+                <HStack gap={2} vAlign="center" wrap="wrap">
+                  {!chat.botInIt && (
+                    <Button label="拉 bot 进群" variant="ghost" size="sm" isDisabled={busy} onClick={() => void pullBot(chat.id)} />
+                  )}
+                  {addedSet.has(chat.id) ? (
+                    <Badge variant="success" label="已添加" />
+                  ) : (
+                    <Button
+                      label="添加"
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => {
+                        onPick(chat.id, chat.name);
+                        showToast({ body: "添加成功" });
+                      }}
+                    />
+                  )}
+                </HStack>
+              }
+            />
           ))}
-        </div>
+        </List>
       )}
       {nextToken && (
-        <Button variant="ghost" size="sm" className="w-full" disabled={listing} onClick={() => void fetchChats(false)}>
-          {listing ? "加载中…" : "加载更多"}
-        </Button>
+        <Button
+          label="加载更多"
+          variant="ghost"
+          width="100%"
+          isLoading={listing}
+          onClick={() => void fetchChats(false)}
+        />
       )}
-      <p className="text-xs text-muted-foreground">
-        bot 不在的群，先「拉bot进群」它才能在群里响应；「添加」只是把群加入允许列表。
-      </p>
-    </div>
+      <Text type="supporting" color="secondary">
+        Bot 不在的群需要先拉入群；“添加”只会将群加入允许列表。
+      </Text>
+    </VStack>
   );
 }
 
-function AccessList({ label, placeholder, ids, onAdd, onRemove }: {
-  label: string; placeholder: string; ids: string[];
-  onAdd: (id: string) => void; onRemove: (id: string) => void;
+function AccessList({
+  label,
+  placeholder,
+  ids,
+  onAdd,
+  onRemove,
+}: {
+  label: string;
+  placeholder: string;
+  ids: string[];
+  onAdd: (id: string) => void;
+  onRemove: (id: string) => void;
 }) {
   const [draft, setDraft] = useState("");
   return (
-    <div className="space-y-2">
-      <Label>{label}（{ids.length}）</Label>
-      <div className="rounded-md border divide-y">
-        {ids.length === 0 && <p className="px-3 py-2 text-xs text-muted-foreground">（暂无）</p>}
-        {ids.map((id) => (
-          <div key={id} className="flex items-center gap-2 px-3 py-2">
-            <span className="flex-1 truncate font-mono text-xs">{id}</span>
-            <Button variant="ghost" size="sm" onClick={() => onRemove(id)}>移除</Button>
-          </div>
-        ))}
-      </div>
-      <div className="flex gap-2">
-        <Input placeholder={placeholder} value={draft} onChange={(e) => setDraft(e.target.value)} />
-        <Button variant="outline" onClick={() => { onAdd(draft); setDraft(""); }}>添加</Button>
-      </div>
-    </div>
+    <VStack gap={3}>
+      <HStack hAlign="between" vAlign="center">
+        <Heading level={4}>{label}</Heading>
+        <Badge variant="neutral" label={ids.length} />
+      </HStack>
+      {ids.length === 0 ? (
+        <EmptyState title="暂无条目" isCompact />
+      ) : (
+        <List density="compact" hasDividers>
+          {ids.map((id) => (
+            <ListItem
+              key={id}
+              label={<Text type="code">{id}</Text>}
+              startContent={<Icon icon={LockClosedIcon} size="sm" color="secondary" />}
+              endContent={
+                <Button
+                  label="移除"
+                  variant="ghost"
+                  size="sm"
+                  icon={<Icon icon={TrashIcon} size="sm" />}
+                  onClick={() => onRemove(id)}
+                />
+              }
+            />
+          ))}
+        </List>
+      )}
+      <HStack gap={2} vAlign="end">
+        <TextInput
+          label={`添加${label}`}
+          isLabelHidden
+          placeholder={placeholder}
+          value={draft}
+          onChange={setDraft}
+          onEnter={() => {
+            onAdd(draft);
+            setDraft("");
+          }}
+          width="100%"
+        />
+        <Button
+          label="添加"
+          variant="secondary"
+          isDisabled={!draft.trim()}
+          onClick={() => {
+            onAdd(draft);
+            setDraft("");
+          }}
+        />
+      </HStack>
+    </VStack>
   );
 }

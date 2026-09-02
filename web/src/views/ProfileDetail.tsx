@@ -1,29 +1,43 @@
 import { useCallback, useEffect, useState } from "react";
-import { ArrowLeft } from "lucide-react";
+import { AlertDialog } from "@astryxdesign/core/AlertDialog";
+import { Badge } from "@astryxdesign/core/Badge";
+import { Button } from "@astryxdesign/core/Button";
+import { Card } from "@astryxdesign/core/Card";
+import { EmptyState } from "@astryxdesign/core/EmptyState";
+import { Grid } from "@astryxdesign/core/Grid";
+import { Icon } from "@astryxdesign/core/Icon";
+import {
+  Layout,
+  LayoutContent,
+  LayoutHeader,
+} from "@astryxdesign/core/Layout";
+import { List, ListItem } from "@astryxdesign/core/List";
+import { MetadataList, MetadataListItem } from "@astryxdesign/core/MetadataList";
+import { HStack, VStack } from "@astryxdesign/core/Stack";
+import { StatusDot } from "@astryxdesign/core/StatusDot";
+import { Heading, Text } from "@astryxdesign/core/Text";
+import { useToast } from "@astryxdesign/core/Toast";
+import {
+  ArrowLeftIcon,
+  BoltIcon,
+  ClockIcon,
+  CommandLineIcon,
+  CpuChipIcon,
+  PlayIcon,
+  StopIcon,
+} from "@heroicons/react/24/outline";
 import { apiGet, apiPost } from "@/lib/api";
 import type { BotInfo, ProfileInfo } from "@/lib/types";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import { toast } from "@/components/ui/sonner";
 import { ConfigView } from "./ConfigView";
 
 function uptime(ms: number): string {
-  const s = Math.floor(ms / 1000);
-  if (s < 60) return `${s}s`;
-  const m = Math.floor(s / 60);
-  if (m < 60) return `${m}m`;
-  const h = Math.floor(m / 60);
-  if (h < 24) return `${h}h${m % 60}m`;
-  return `${Math.floor(h / 24)}d${h % 24}h`;
+  const seconds = Math.floor(ms / 1000);
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ${minutes % 60}m`;
+  return `${Math.floor(hours / 24)}d ${hours % 24}h`;
 }
 
 export function ProfileDetail({ profile, onBack }: { profile: string; onBack: () => void }) {
@@ -32,31 +46,32 @@ export function ProfileDetail({ profile, onBack }: { profile: string; onBack: ()
   const [confirm, setConfirm] = useState(false);
   const [stopping, setStopping] = useState(false);
   const [starting, setStarting] = useState(false);
+  const showToast = useToast();
 
   const loadRuntime = useCallback(async () => {
-    const [pr, bt] = await Promise.all([
+    const [profileData, botData] = await Promise.all([
       apiGet<{ profiles: ProfileInfo[] }>("/api/profiles").catch(() => ({ profiles: [] })),
       apiGet<{ bots: BotInfo[] }>("/api/bots").catch(() => ({ bots: [] })),
     ]);
-    setInfo(pr.profiles.find((p) => p.name === profile) ?? null);
-    setBots(bt.bots.filter((b) => b.profileName === profile));
+    setInfo(profileData.profiles.find((entry) => entry.name === profile) ?? null);
+    setBots(botData.bots.filter((bot) => bot.profileName === profile));
   }, [profile]);
 
   useEffect(() => {
     void loadRuntime();
-    const t = setInterval(loadRuntime, 5000);
-    return () => clearInterval(t);
+    const timer = setInterval(() => void loadRuntime(), 5_000);
+    return () => clearInterval(timer);
   }, [loadRuntime]);
 
   async function confirmStop() {
     setStopping(true);
     try {
       await apiPost("/api/profiles/stop", { profile });
-      toast.success(`已停止 ${profile}`);
+      showToast({ body: `已停止 ${profile}` });
       setConfirm(false);
-      setTimeout(loadRuntime, 500);
+      setTimeout(() => void loadRuntime(), 500);
     } catch (e) {
-      toast.error(String((e as Error).message ?? e));
+      showToast({ body: String((e as Error).message ?? e), type: "error" });
     } finally {
       setStopping(false);
     }
@@ -66,78 +81,187 @@ export function ProfileDetail({ profile, onBack }: { profile: string; onBack: ()
     setStarting(true);
     try {
       await apiPost("/api/profiles/start", { profile });
-      toast.success(`已启动 ${profile}`);
-      setTimeout(loadRuntime, 500);
+      showToast({ body: `已启动 ${profile}` });
+      setTimeout(() => void loadRuntime(), 500);
     } catch (e) {
-      toast.error(String((e as Error).message ?? e));
+      showToast({ body: String((e as Error).message ?? e), type: "error" });
     } finally {
       setStarting(false);
     }
   }
 
   const running = info?.running ?? bots.length > 0;
+  const longestUptime = bots.reduce((max, bot) => Math.max(max, bot.uptimeMs), 0);
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center gap-3">
-        <Button variant="ghost" size="icon" onClick={onBack} aria-label="返回">
-          <ArrowLeft />
-        </Button>
-        <h1 className="text-2xl font-semibold">{profile}</h1>
-        {info && <Badge variant="secondary">{info.agentKind}</Badge>}
-        {running ? <Badge variant="success">在线</Badge> : <Badge variant="outline">未运行</Badge>}
-        {!running && (
-          <Button className="ml-auto" size="sm" disabled={starting} onClick={start}>
-            {starting ? "启动中…" : "启动"}
-          </Button>
+    <VStack gap={6}>
+      <HStack gap={4} hAlign="between" vAlign="start" wrap="wrap">
+        <HStack gap={3} vAlign="start">
+          <Button
+            label="返回运行总览"
+            variant="ghost"
+            isIconOnly
+            icon={<Icon icon={ArrowLeftIcon} size="sm" />}
+            onClick={onBack}
+          />
+          <VStack gap={1}>
+            <HStack gap={2} vAlign="center" wrap="wrap">
+              <Heading level={1}>{profile}</Heading>
+              {info && <Badge variant="neutral" label={info.agentKind} />}
+              <Badge variant={running ? "success" : "neutral"} label={running ? "在线" : "未运行"} />
+            </HStack>
+            <Text color="secondary">运行状态、接入信息与完整配置。</Text>
+          </VStack>
+        </HStack>
+        {running ? (
+          <Button
+            label="停止 Profile"
+            variant="destructive"
+            icon={<Icon icon={StopIcon} size="sm" />}
+            onClick={() => setConfirm(true)}
+          />
+        ) : (
+          <Button
+            label="启动 Profile"
+            variant="primary"
+            icon={<Icon icon={PlayIcon} size="sm" />}
+            isLoading={starting}
+            isDisabled={starting}
+            onClick={() => void start()}
+          />
         )}
-      </div>
+      </HStack>
 
-      <Card>
-        <CardHeader className="flex-row items-center justify-between">
-          <CardTitle>运行状态</CardTitle>
-          {running && (
-            <Button variant="destructive" size="sm" onClick={() => setConfirm(true)}>停止</Button>
-          )}
-        </CardHeader>
-        <CardContent>
-          {bots.length === 0 ? (
-            <div className="flex items-center justify-between gap-3">
-              <p className="text-sm text-muted-foreground">未运行。点右上角「启动」在主进程内上线。</p>
-              <Button size="sm" disabled={starting} onClick={start}>{starting ? "启动中…" : "启动"}</Button>
-            </div>
-          ) : (
-            <div className="space-y-2">
-              {bots.map((b) => (
-                <div key={b.id} className="rounded-md border px-3 py-2 text-sm">
-                  <span className="font-medium">{b.botName ?? "（连接中）"}</span>
-                  <span className="text-muted-foreground"> · pid {b.pid} · 运行 {uptime(b.uptimeMs)} · v{b.version}</span>
-                </div>
-              ))}
-            </div>
-          )}
-        </CardContent>
+      <Grid columns={{ minWidth: 220, max: 3, repeat: "fit" }} gap={3}>
+        <StatusCard
+          label="运行状态"
+          value={running ? "Healthy" : "Stopped"}
+          description={running ? "Supervisor 正在托管" : "等待手动启动"}
+          icon={BoltIcon}
+          status={running ? "success" : "neutral"}
+        />
+        <StatusCard
+          label="Bot 进程"
+          value={bots.length}
+          description={bots.length ? "已连接的运行实例" : "暂无活动进程"}
+          icon={CpuChipIcon}
+          status={bots.length ? "success" : "neutral"}
+        />
+        <StatusCard
+          label="最长运行"
+          value={longestUptime ? uptime(longestUptime) : "—"}
+          description="每 5 秒更新一次"
+          icon={ClockIcon}
+          status={running ? "success" : "neutral"}
+        />
+      </Grid>
+
+      <Card padding={0}>
+        <Layout
+          header={
+            <LayoutHeader padding={4} hasDivider>
+              <HStack hAlign="between" vAlign="center" gap={3}>
+                <VStack gap={0.5}>
+                  <Heading level={2}>运行实例</Heading>
+                  <Text type="supporting" color="secondary">来自 supervisor 的实时进程快照</Text>
+                </VStack>
+                <StatusDot
+                  variant={running ? "success" : "neutral"}
+                  label={running ? "Profile 在线" : "Profile 未运行"}
+                  isPulsing={running}
+                />
+              </HStack>
+            </LayoutHeader>
+          }
+          content={
+            <LayoutContent padding={bots.length ? 0 : 4}>
+              {bots.length === 0 ? (
+                <EmptyState
+                  title="没有运行中的 Bot"
+                  description="启动后，进程、版本与运行时长会显示在这里。"
+                  icon={<Icon icon={CommandLineIcon} size="lg" color="secondary" />}
+                  actions={
+                    <Button
+                      label="启动 Profile"
+                      variant="primary"
+                      isLoading={starting}
+                      isDisabled={starting}
+                      onClick={() => void start()}
+                    />
+                  }
+                  isCompact
+                />
+              ) : (
+                <List density="spacious" hasDividers>
+                  {bots.map((bot) => (
+                    <ListItem
+                      key={bot.id}
+                      label={bot.botName ?? "正在连接"}
+                      description={`${bot.agentKind} · ${bot.profileName}`}
+                      startContent={<StatusDot variant="success" label="进程在线" isPulsing />}
+                      endContent={
+                        <MetadataList orientation="horizontal">
+                          <MetadataListItem label="PID">{bot.pid}</MetadataListItem>
+                          <MetadataListItem label="运行">{uptime(bot.uptimeMs)}</MetadataListItem>
+                          <MetadataListItem label="版本">v{bot.version}</MetadataListItem>
+                        </MetadataList>
+                      }
+                    />
+                  ))}
+                </List>
+              )}
+            </LayoutContent>
+          }
+        />
       </Card>
+
+      <VStack gap={1}>
+        <Heading level={2}>Profile 配置</Heading>
+        <Text color="secondary">按设置面板分组管理回复、身份、访问控制和会议能力。</Text>
+      </VStack>
 
       <ConfigView profile={profile} />
 
-      <Dialog open={confirm} onOpenChange={(o) => !o && setConfirm(false)}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>停止 {profile}？</DialogTitle>
-            <DialogDescription>
-              将停止该 profile 正在运行的 bot。若它是后台服务，会一并禁用自动重启（不会被 KeepAlive 拉起）；
-              下次可用 <code>aria start</code> 重新启动。
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setConfirm(false)} disabled={stopping}>取消</Button>
-            <Button variant="destructive" onClick={confirmStop} disabled={stopping}>
-              {stopping ? "停止中…" : "确认停止"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </div>
+      <AlertDialog
+        isOpen={confirm}
+        onOpenChange={setConfirm}
+        title={`停止 ${profile}？`}
+        description="将停止该 profile 正在运行的 bot；若它是后台服务，也会禁用自动重启。之后可随时重新启动。"
+        cancelLabel="取消"
+        actionLabel="确认停止"
+        isActionLoading={stopping}
+        onAction={() => void confirmStop()}
+      />
+    </VStack>
+  );
+}
+
+function StatusCard({
+  label,
+  value,
+  description,
+  icon,
+  status,
+}: {
+  label: string;
+  value: string | number;
+  description: string;
+  icon: typeof BoltIcon;
+  status: "success" | "neutral";
+}) {
+  return (
+    <Card padding={4}>
+      <VStack gap={3}>
+        <HStack hAlign="between" vAlign="center">
+          <Text type="label" color="secondary">{label}</Text>
+          <Icon icon={icon} size="sm" color={status === "success" ? "success" : "secondary"} />
+        </HStack>
+        <HStack gap={2} vAlign="center">
+          <StatusDot variant={status} label={String(value)} />
+          <Heading level={2}>{value}</Heading>
+        </HStack>
+        <Text type="supporting" color="secondary">{description}</Text>
+      </VStack>
+    </Card>
   );
 }

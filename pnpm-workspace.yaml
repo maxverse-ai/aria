@@ -1,3 +1,4 @@
 allowBuilds:
+  '@astryxdesign/core': false
   esbuild: true
   protobufjs: true
