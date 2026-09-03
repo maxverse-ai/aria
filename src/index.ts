@@ -76,6 +76,19 @@ export {
   triggerOccurrenceIdempotencyKey,
   triggerRetryDelay,
 } from './trigger/state';
+
+export {
+  TriggerManager,
+  createTriggerRunIntent,
+} from './trigger/runtime';
+export type {
+  TriggerExecutionGateway,
+  TriggerExecutionResult,
+  TriggerExecutionSubmission,
+  TriggerExecutionTerminal,
+  TriggerManagerOptions,
+  TriggerManagerSnapshot,
+} from './trigger/runtime';
 export type {
   RunIntentTemplate,
   TriggerAuthorizationCeiling,
@@ -249,6 +262,7 @@ export type {
   ConversationRuntimeDeps,
   RecordConversationEventInput,
   StartConversationInput,
+  StartIntentInput,
 } from './conversation/runtime';
 export type { ProfileConversationRuntimeOwnerOptions } from './conversation/profile-runtime-owner';
 export { createProfileConversationHost } from './conversation/profile-host';

@@ -244,7 +244,7 @@ export function triggerCapabilities(): TriggerCapabilitySnapshot {
   return {
     schema: 'aria.trigger.capabilities.v1',
     apiVersion: TRIGGER_CONTROL_API_VERSION,
-    implementationStage: 'durable-trigger-state',
+    implementationStage: 'single-run-data-path',
     runtimeEnabled: false,
     capabilities: [
       {

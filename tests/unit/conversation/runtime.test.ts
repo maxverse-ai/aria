@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { AgentAdapter } from '../../../src/agent/types';
 import type { StartRunFlowInput, StartRunFlowResult } from '../../../src/bot/run-flow';
+import type { StartRunIntentFlowInput } from '../../../src/bot/run-flow';
 import {
   ConversationRuntime,
   type StartConversationInput,
@@ -83,5 +84,52 @@ describe('ConversationRuntime', () => {
     resume();
     resume();
     expect(runtime.activitySnapshot().quiescing).toBe(false);
+  });
+
+  it('submits non-channel work through the same owned executor and stores', async () => {
+    const sessions = { getRaw: () => undefined } as unknown as SessionStore;
+    const workspaces = {} as WorkspaceStore;
+    const rejected: StartRunFlowResult = {
+      ok: false,
+      rejectReason: { code: 'access-denied', userVisible: 'denied' },
+    };
+    const startRunIntent = vi.fn(async (_input: StartRunIntentFlowInput) => rejected);
+    const runtime = new ConversationRuntime({
+      agent,
+      sessions,
+      workspaces,
+      maxConcurrentRuns: () => 1,
+      now: () => 4321,
+      startRunIntent,
+    });
+    const intent = {
+      contractVersion: 1,
+      intentId: 'intent-a', profileId: 'profile-a', sourceKind: 'schedule',
+      sourceIdentity: { providerId: 'schedule' }, idempotencyKey: 'key-a',
+      actor: { kind: 'system', actorRef: 'schedule' }, authorizationRef: 'grant-a',
+      scopeRef: 'scope-a', sessionPolicy: { kind: 'fresh' },
+      input: { prompt: 'run', attachments: [] }, workspaceRef: { kind: 'profile-default' },
+      engineRequirements: { inputs: ['text'], capabilities: [] },
+      resultRoutes: [{ kind: 'history', routeId: 'history' }],
+      correlation: { requestId: 'request-a' },
+    } as const;
+
+    await expect(runtime.startIntent({
+      intent,
+      scopeId: 'scope-a',
+      scope: { source: 'channel:trigger.schedule', actorId: 'schedule' },
+      access: { ok: true, reason: 'owner' },
+      capability: { agentId: 'test-agent' } as never,
+      profileConfig: {} as never,
+    })).resolves.toBe(rejected);
+
+    expect(startRunIntent).toHaveBeenCalledWith(expect.objectContaining({
+      intent,
+      resolvedAttachments: [],
+      sessions,
+      workspaces,
+      executor: runtime.executor,
+      now: 4321,
+    }));
   });
 });

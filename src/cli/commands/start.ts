@@ -141,6 +141,7 @@ async function runClassic(opts: StartOptions): Promise<void> {
   const supervisor = new Supervisor({
     configPath,
     rootDir: appPaths.rootDir,
+    triggerRuntimeEnabled: process.env.ARIA_TRIGGER_RUNTIME === 'enabled',
     ...(createNativeReadRuntime ? { createNativeReadRuntime } : {}),
   });
 
@@ -207,6 +208,7 @@ async function runSupervisorConsole(opts: StartOptions): Promise<void> {
   const supervisor = new Supervisor({
     configPath,
     rootDir: appPaths.rootDir,
+    triggerRuntimeEnabled: process.env.ARIA_TRIGGER_RUNTIME === 'enabled',
     ...(createNativeReadRuntime ? { createNativeReadRuntime } : {}),
   });
 
