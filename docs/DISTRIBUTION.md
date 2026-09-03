@@ -57,7 +57,7 @@ aria update status <operation-id>
 aria update rollback
 ```
 
-- `aria update plan --version <x.y.z>` selects an exact complete immutable
+- `aria update plan --target-version <x.y.z>` selects an exact complete immutable
   release. The command prints the plan id, digest, expiry, and exact apply
   command.
 - `apply` and `rollback` use a detached OS executor by default so a service

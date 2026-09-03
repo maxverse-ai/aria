@@ -491,11 +491,11 @@ update
 update
   .command('plan')
   .description('Download, verify, and persist an expiring update plan')
-  .option('--version <version>', 'select an exact stable version')
+  .option('--target-version <version>', 'select an exact stable version')
   .option('--force', 'allow an older target version')
   .option('--json', 'print machine-readable JSON')
-  .action(async (opts: { version?: string; force?: boolean; json?: boolean }) => {
-    await runUpdatePlan(opts);
+  .action(async (opts: { targetVersion?: string; force?: boolean; json?: boolean }) => {
+    await runUpdatePlan({ version: opts.targetVersion, force: opts.force, json: opts.json });
   });
 
 update
