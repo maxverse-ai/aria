@@ -37,4 +37,13 @@ describe('CLI command registration', () => {
     expect(source).toContain(".command('confirm <plan-id>')");
     expect(source).toContain(".command('apply <plan-id>')");
   });
+
+  it('registers versioned trigger contract discovery without mutation commands', async () => {
+    const source = await readFile(join(process.cwd(), 'src', 'cli', 'index.ts'), 'utf8');
+
+    expect(source).toContain(".command('trigger')");
+    expect(source).toContain(".command('schema <name>')");
+    expect(source).toContain('List shipped trigger-platform capabilities');
+    expect(source).not.toContain(".command('create-schedule')");
+  });
 });

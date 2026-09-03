@@ -33,6 +33,8 @@ describe('ReadOnlyControlPlane', () => {
         expect.objectContaining({ id: 'config.plan.show', access: 'read' }),
         expect.objectContaining({ id: 'config.plan.confirm', access: 'write' }),
         expect.objectContaining({ id: 'config.plan.apply', access: 'write' }),
+        expect.objectContaining({ id: 'trigger.capabilities', access: 'read' }),
+        expect.objectContaining({ id: 'trigger.schema', access: 'read' }),
         expect.objectContaining({ id: 'runtime.status', access: 'read' }),
       ],
     });

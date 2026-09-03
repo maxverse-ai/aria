@@ -46,6 +46,10 @@ import {
   runUpdateRollback,
   runUpdateStatus,
 } from './commands/update';
+import {
+  runTriggerCapabilities,
+  runTriggerSchema,
+} from './commands/trigger';
 
 const program = new Command();
 
@@ -192,6 +196,26 @@ control
   .option('--json', 'print stable machine-readable JSON')
   .action(async (opts: { json?: boolean }) => {
     await runControlCapabilities(opts);
+  });
+
+const trigger = program
+  .command('trigger')
+  .description('Discover trigger-platform contracts and capabilities');
+
+trigger
+  .command('capabilities')
+  .description('List shipped trigger-platform capabilities (read-only)')
+  .option('--json', 'print stable machine-readable JSON')
+  .action(async (opts: { json?: boolean }) => {
+    await runTriggerCapabilities(opts);
+  });
+
+trigger
+  .command('schema <name>')
+  .description('Show a versioned trigger contract schema (read-only)')
+  .option('--json', 'print stable machine-readable JSON')
+  .action(async (name: string, opts: { json?: boolean }) => {
+    await runTriggerSchema(name, opts);
   });
 
 const config = program

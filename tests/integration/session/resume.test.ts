@@ -6,9 +6,11 @@ import { ActiveRuns } from '../../../src/bot/active-runs.js';
 import { ProcessPool } from '../../../src/bot/process-pool.js';
 import {
   recordRunSessionEvent,
+  startRunIntentFlow,
   startRunFlow,
   type StartRunFlowInput,
 } from '../../../src/bot/run-flow.js';
+import { createConversationRunIntent } from '../../../src/application/execution-intent/index.js';
 import { createDefaultProfileConfig, type ProfileConfig } from '../../../src/config/profile-schema.js';
 import { RunExecutor } from '../../../src/runtime/run-executor.js';
 import { SessionCatalog } from '../../../src/session/catalog.js';
@@ -119,6 +121,103 @@ describe('agent-aware run-flow resume', () => {
       sessionId: undefined,
       threadId: undefined,
     });
+  });
+
+  it('honors a fresh RunIntent even when a compatible session exists', async () => {
+    const h = await createHarness('codex');
+    const probe = await start(h);
+    expect(probe.ok).toBe(true);
+    if (!probe.ok) throw new Error('expected probe run');
+    await collect(probe.execution.subscribe());
+    h.catalog.upsertActive({
+      scopeId: 'chat-1',
+      agentId: 'codex',
+      cwdRealpath: probe.cwdRealpath,
+      policyFingerprint: probe.policy.policyFingerprint,
+      threadId: 'thread-existing',
+      now: 1000,
+    });
+    const capability = codexCapability(h.profileConfig);
+    const intent = createConversationRunIntent({
+      intentId: 'intent-fresh',
+      profileId: 'profile-a',
+      scopeId: 'chat-1',
+      scope: { source: 'im', chatId: 'chat-1', actorId: 'ou_user' },
+      prompt: 'hello fresh',
+      attachments: [],
+      access: { ok: true, reason: 'allowed-user' },
+      capability,
+    });
+    intent.sessionPolicy = { kind: 'fresh' };
+
+    const fresh = await startRunIntentFlow({
+      intent,
+      resolvedAttachments: [],
+      scopeId: 'chat-1',
+      scope: { source: 'im', chatId: 'chat-1', actorId: 'ou_user' },
+      access: { ok: true, reason: 'allowed-user' },
+      capability,
+      profileConfig: h.profileConfig,
+      sessions: h.sessions,
+      sessionCatalog: h.catalog,
+      workspaces: h.workspaces,
+      executor: h.executor,
+      now: 1000,
+    });
+
+    expect(fresh.ok).toBe(true);
+    if (!fresh.ok) throw new Error('expected fresh intent run');
+    expect(fresh.resumeFrom).toBeUndefined();
+    expect(h.agent.runOptions[1]).toMatchObject({
+      prompt: 'hello fresh',
+      sessionId: undefined,
+      threadId: undefined,
+    });
+  });
+
+  it('rejects a RunIntent that does not match its execution context', async () => {
+    const h = await createHarness('codex');
+    const capability = codexCapability(h.profileConfig);
+    const intent = createConversationRunIntent({
+      intentId: 'intent-mismatch',
+      profileId: 'wrong-profile',
+      scopeId: 'chat-1',
+      scope: { source: 'im', actorId: 'ou_user' },
+      prompt: 'hello',
+      attachments: [],
+      access: { ok: true, reason: 'allowed-user' },
+      capability,
+    });
+
+    const result = await startRunIntentFlow({
+      intent,
+      resolvedAttachments: [],
+      scopeId: 'chat-1',
+      scope: { source: 'im', actorId: 'ou_user' },
+      access: { ok: true, reason: 'allowed-user' },
+      capability,
+      profileConfig: h.profileConfig,
+      sessions: h.sessions,
+      sessionCatalog: h.catalog,
+      workspaces: h.workspaces,
+      executor: h.executor,
+      now: 1000,
+      observability: {
+        profile: 'profile-a',
+        agent: 'codex',
+        source: 'schedule',
+        stage: 'submit',
+      },
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      rejectReason: {
+        code: 'intent-context-mismatch',
+        userVisible: '运行请求与当前 profile、会话、工作区或附件上下文不一致。',
+      },
+    });
+    expect(h.agent.runOptions).toHaveLength(0);
   });
 
   it('records system session identifiers into the agent-aware catalog', async () => {

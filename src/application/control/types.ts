@@ -15,6 +15,8 @@ export interface ControlCapability {
     | 'config.plan.show'
     | 'config.plan.confirm'
     | 'config.plan.apply'
+    | 'trigger.capabilities'
+    | 'trigger.schema'
     | 'runtime.status';
   cli: string;
   access: ControlAccess;

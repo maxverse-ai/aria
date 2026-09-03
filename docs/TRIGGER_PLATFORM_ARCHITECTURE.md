@@ -4,6 +4,13 @@ Status: proposed direction. This document defines the target architecture and
 progressive delivery plan; no scheduled execution behavior is shipped by this
 document.
 
+Implementation status: Stage 0 is accepted. The Stage 1 execution-intent
+foundation is shipped: existing conversation starts pass through the
+runtime-validated `RunIntent` boundary, and read-only contract discovery is
+available through `aria trigger capabilities` and `aria trigger schema`.
+Those commands deliberately report that scheduled runtime behavior remains
+disabled.
+
 ## Decision
 
 Aria should support scheduled work, but scheduling is one trigger source rather
@@ -518,7 +525,9 @@ default ownership merely to prove scheduling.
    and current-state tests. Ship no runtime behavior.
 1. **Execution intent contract.** Add runtime validation for `RunIntent`,
    `ResultRoute`, source identity, authorization reference, and session policy.
-   Adapt existing conversation starts without changing behavior.
+   Adapt existing conversation starts without changing behavior. Publish
+   versioned, read-only capability and schema discovery for CLI and agent
+   consumers without implying that scheduled execution is enabled.
 2. **Trigger ABI.** Add provider manifest, capabilities, lifecycle, normalized
    envelope, typed errors, fake provider, and reusable contract test kit.
 3. **Schedule domain.** Implement pure definition, recurrence, occurrence, and

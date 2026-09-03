@@ -24,6 +24,35 @@ export type {
 } from './core/telemetry';
 export { reportMetric, reportError } from './core/logger';
 
+// Versioned execution-intent boundary shared by channels and future triggers.
+export {
+  RUN_INTENT_CONTRACT_VERSION,
+  TRIGGER_CONTROL_API_VERSION,
+  ExecutionIntentContractError,
+  assertResultRoute,
+  assertRunIntent,
+  assertSessionPolicy,
+  createConversationRunIntent,
+  triggerCapabilities,
+  triggerContractSchema,
+} from './application/execution-intent';
+export type {
+  EngineCapabilityRequirements,
+  EngineInputRequirement,
+  ResultRoute,
+  RunIntent,
+  RunIntentActor,
+  RunIntentCorrelation,
+  RunIntentSourceIdentity,
+  RunIntentSourceKind,
+  SessionPolicy,
+  TriggerCapabilitySnapshot,
+  TriggerContractSchemaName,
+  TriggerContractSchemaSnapshot,
+  ValidatedAttachmentReference,
+  WorkspaceReference,
+} from './application/execution-intent';
+
 // Stable, transport-neutral read-model contracts for control-plane consumers.
 // Implementations remain internal and must not mutate agent-native stores.
 export {
