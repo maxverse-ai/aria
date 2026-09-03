@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { dirname, join } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import pkg from '../../package.json';
 import {
@@ -11,6 +12,7 @@ import type { AppPaths } from '../config/app-paths';
 import { getMaxConcurrentRuns, isComplete, type AppConfig } from '../config/schema';
 import type { AgentKind, ProfileConfig, RootConfig } from '../config/profile-schema';
 import { loadExternalEnginePlugins } from '../agent/plugin/registry';
+import { capabilityFor } from '../agent/plugin/registry';
 import type { EngineRuntime } from '../agent/runtime/types';
 import { log } from '../core/logger';
 import { refreshOwnerControls } from '../policy/owner';
@@ -46,6 +48,17 @@ import {
 import { ProfileRuntimeSlot } from './profile-runtime-slot';
 import { modelCatalog } from '../agent/model-catalog/service';
 import { ProfileConversationRuntimeOwner } from '../conversation/profile-runtime-owner';
+import type { RunIntent } from '../application/execution-intent';
+import {
+  FileTriggerStateStore,
+  type TriggerStateStore,
+} from '../trigger/state';
+import {
+  TriggerManager,
+  type TriggerExecutionResult,
+  type TriggerExecutionSubmission,
+  type TriggerManagerSnapshot,
+} from '../trigger/runtime';
 import {
   projectProfileChannelInstances,
   requirePrimaryLarkChannelInstance,
@@ -98,6 +111,11 @@ export interface SupervisorOptions {
   createNativeReadRuntime?: NativeReadRuntimeFactory;
   /** Temporary Lark lifecycle rollout override; defaults to the process environment. */
   larkChannelRolloutMode?: LarkChannelRolloutMode;
+  /** Bounded rollout switch. Undefined/false keeps trigger execution off. */
+  triggerRuntimeEnabled?: boolean;
+  /** Injectable durable port for tests or alternate deployments. */
+  triggerStateStore?: TriggerStateStore;
+  triggerPollIntervalMs?: number;
 }
 
 export interface ManagedStatus {
@@ -314,6 +332,62 @@ class ManagedProfile {
       larkChannelRolloutMode: this.larkChannelPolicy.mode,
       larkChannelOwner: this.larkChannelPolicy.owner,
     };
+  }
+
+  async submitTrigger(intent: RunIntent): Promise<TriggerExecutionSubmission> {
+    const owner = this.conversationRuntime;
+    if (!owner || owner.isClosed()) {
+      throw Object.assign(new Error(`profile runtime is unavailable: ${this.profile}`), {
+        code: 'profile-runtime-unavailable',
+      });
+    }
+    const capability = capabilityFor(this.profileConfig.agentKind, this.profileConfig);
+    const started = await owner.runtime.startIntent({
+      intent,
+      scopeId: intent.scopeRef,
+      scope: {
+        source: 'channel:trigger.schedule',
+        actorId: intent.actor.actorRef,
+      },
+      access: { ok: true, reason: 'owner' },
+      capability,
+      profileConfig: this.profileConfig,
+      resolvedAttachments: [],
+      observability: {
+        profile: this.profile,
+        agent: capability.agentId,
+        source: intent.sourceKind,
+        stage: 'trigger-dispatch',
+      },
+    });
+    if (!started.ok) {
+      throw Object.assign(new Error(started.rejectReason.userVisible), {
+        code: started.rejectReason.code,
+      });
+    }
+    const completion = (async (): Promise<TriggerExecutionResult> => {
+      let terminal: TriggerExecutionResult | undefined;
+      for await (const event of started.execution.subscribe()) {
+        owner.runtime.recordEvent({
+          scopeId: intent.scopeRef,
+          capability,
+          policy: started.policy,
+          event,
+        });
+        if (event.type === 'done') {
+          terminal = {
+            status: event.terminationReason === 'normal' ? 'succeeded' : event.terminationReason,
+          };
+        } else if (event.type === 'error') {
+          terminal = {
+            status: event.terminationReason === 'failed' ? 'failed' : event.terminationReason,
+            errorCode: `agent-${event.terminationReason}`,
+          };
+        }
+      }
+      return terminal ?? { status: 'failed', errorCode: 'agent-stream-ended' };
+    })();
+    return { runId: started.execution.runId, completion };
   }
 
   private startLarkChannelRuntime(input: {
@@ -795,11 +869,30 @@ class ManagedProfile {
 export class Supervisor {
   private managed = new Map<string, ManagedProfile>();
   private readonly larkChannelPolicy: Readonly<LarkChannelOwnershipPolicy>;
+  private readonly triggerManager: TriggerManager;
 
   constructor(private opts: SupervisorOptions) {
     this.larkChannelPolicy = resolveLarkChannelOwnership(
       opts.larkChannelRolloutMode ?? process.env[LARK_CHANNEL_ROLLOUT_ENV],
     );
+    const triggerStateFile = join(opts.rootDir ?? dirname(opts.configPath), 'triggers', 'state.v1.json');
+    this.triggerManager = new TriggerManager({
+      enabled: opts.triggerRuntimeEnabled === true,
+      store: opts.triggerStateStore ?? new FileTriggerStateStore(triggerStateFile),
+      execution: {
+        isProfileOnline: (profileId) => this.isOnline(profileId),
+        submit: (profileId, intent) => {
+          const profile = this.managed.get(profileId);
+          if (!profile) {
+            throw Object.assign(new Error(`profile is offline: ${profileId}`), {
+              code: 'profile-offline',
+            });
+          }
+          return profile.submitTrigger(intent);
+        },
+      },
+      ...(opts.triggerPollIntervalMs ? { pollIntervalMs: opts.triggerPollIntervalMs } : {}),
+    });
   }
 
   private get startChannelFn(): StartChannelFn {
@@ -825,6 +918,14 @@ export class Supervisor {
 
   list(): ManagedStatus[] {
     return [...this.managed.values()].map((m) => m.status(process.pid));
+  }
+
+  triggerStatus(): TriggerManagerSnapshot {
+    return this.triggerManager.snapshot();
+  }
+
+  reconcileTriggers(): Promise<void> {
+    return this.triggerManager.reconcile();
   }
 
   /** Bring a profile online inside this process. Throws on lock/app conflict. */
@@ -893,6 +994,7 @@ export class Supervisor {
       );
       await managed.bringUp(new Date().toISOString());
       this.managed.set(appPaths.profile, managed);
+      this.triggerManager.start();
     } catch (err) {
       await engineRuntime.dispose().catch(() => undefined);
       throw err;
@@ -917,6 +1019,7 @@ export class Supervisor {
 
   /** Stop every profile — for process shutdown. */
   async shutdown(): Promise<void> {
+    await this.triggerManager.close();
     const all = [...this.managed.values()];
     this.managed.clear();
     await Promise.allSettled(all.map((m) => m.stop()));

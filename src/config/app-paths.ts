@@ -45,6 +45,8 @@ export interface AppPaths {
   hostLogsDir: string;
   /** Machine-wide lock ensuring only one supervisor runs. */
   hostLockFile: string;
+  /** Host-owned trigger queue, logically partitioned by profile. */
+  triggerStateFile: string;
   registryDir: string;
   userRegistryFile: string;
   userLockDir: string;
@@ -111,6 +113,7 @@ export function resolveAppPaths(opts: ResolveAppPathsOptions = {}): AppPaths {
     hostUiFile: join(rootDir, 'ui.json'),
     hostLogsDir: join(rootDir, 'logs'),
     hostLockFile: join(userLockDir, 'supervisor.lock'),
+    triggerStateFile: join(rootDir, 'triggers', 'state.v1.json'),
     registryDir,
     userRegistryFile: join(registryDir, 'processes.json'),
     userLockDir,

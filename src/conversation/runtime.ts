@@ -4,11 +4,15 @@ import { ActiveRuns, type RunHandle } from '../bot/active-runs';
 import { ProcessPool } from '../bot/process-pool';
 import {
   recordRunSessionEvent,
+  startRunIntentFlow,
   startRunFlow,
   type RecordRunSessionEventInput,
+  type StartRunIntentFlowInput,
   type StartRunFlowInput,
   type StartRunFlowResult,
 } from '../bot/run-flow';
+import type { RunIntent } from '../application/execution-intent';
+import type { AgentAttachment } from '../policy/run-policy';
 import type { RunPolicyAllow } from '../policy/run-policy';
 import {
   RunExecutor,
@@ -37,6 +41,8 @@ export interface ConversationRuntimeDeps {
   now?: () => number;
   /** Deterministic seam for tests and alternate orchestration implementations. */
   startRun?: (input: StartRunFlowInput) => Promise<StartRunFlowResult>;
+  /** Common intent boundary used by non-channel trigger adapters. */
+  startRunIntent?: (input: StartRunIntentFlowInput) => Promise<StartRunFlowResult>;
 }
 
 export type StartConversationInput = Omit<
@@ -48,6 +54,22 @@ export type StartConversationInput = Omit<
   | 'governanceAudit'
   | 'now'
 > & {
+  now?: number;
+};
+
+export type StartIntentInput = Omit<
+  StartRunIntentFlowInput,
+  | 'sessions'
+  | 'sessionCatalog'
+  | 'workspaces'
+  | 'executor'
+  | 'governanceAudit'
+  | 'now'
+  | 'intent'
+  | 'resolvedAttachments'
+> & {
+  intent: RunIntent;
+  resolvedAttachments?: AgentAttachment[];
   now?: number;
 };
 
@@ -78,6 +100,7 @@ export class ConversationRuntime {
   private readonly governanceAudit?: GovernanceAuditSink;
   private readonly now: () => number;
   private readonly startRun: (input: StartRunFlowInput) => Promise<StartRunFlowResult>;
+  private readonly startRunIntent: (input: StartRunIntentFlowInput) => Promise<StartRunFlowResult>;
 
   constructor(deps: ConversationRuntimeDeps) {
     this.sessions = deps.sessions;
@@ -86,6 +109,7 @@ export class ConversationRuntime {
     this.governanceAudit = deps.governanceAudit;
     this.now = deps.now ?? Date.now;
     this.startRun = deps.startRun ?? startRunFlow;
+    this.startRunIntent = deps.startRunIntent ?? startRunIntentFlow;
     this.activeRuns = new ActiveRuns();
     this.processPool = new ProcessPool(deps.maxConcurrentRuns);
     this.executor = new RunExecutor({
@@ -101,6 +125,20 @@ export class ConversationRuntime {
   start(input: StartConversationInput): Promise<StartRunFlowResult> {
     return this.startRun({
       ...input,
+      sessions: this.sessions,
+      ...(this.sessionCatalog ? { sessionCatalog: this.sessionCatalog } : {}),
+      workspaces: this.workspaces,
+      executor: this.executor,
+      ...(this.governanceAudit ? { governanceAudit: this.governanceAudit } : {}),
+      now: input.now ?? this.now(),
+    });
+  }
+
+  /** Submit a previously validated channel-neutral execution intent. */
+  startIntent(input: StartIntentInput): Promise<StartRunFlowResult> {
+    return this.startRunIntent({
+      ...input,
+      resolvedAttachments: input.resolvedAttachments ?? [],
       sessions: this.sessions,
       ...(this.sessionCatalog ? { sessionCatalog: this.sessionCatalog } : {}),
       workspaces: this.workspaces,
