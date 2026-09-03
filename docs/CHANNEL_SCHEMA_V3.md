@@ -7,8 +7,9 @@ cutover.
 ## Purpose and ownership
 
 Schema v3 gives Aria core one stored, versioned source for channel packages and
-configured channel instances. It does not load external code, log in to a
-provider, or move provider message, cursor, delivery, or session state.
+configured channel instances. The stored document does not grant package trust,
+load external code by itself, log in to a provider, or move provider message,
+cursor, delivery, or session state.
 
 The stable runtime key remains `(profileId, pluginId, instanceId)`. Engine
 packages continue to use the existing profile `plugins` field. Channel packages
@@ -79,9 +80,11 @@ version, including the projected secret reference, or startup fails closed.
 Later Management API work can remove this
 temporary dual representation through another reviewed migration.
 
-Other schema-v3 channel instances are resolved and validated but are not loaded
-as external packages in this stage. External package trust and lifecycle begin
-only in Stage 9.
+Stage 9 provides an external loader that can consume the exact package pins, but
+only when deployment composition supplies a separate allowlist with the same
+package, exact version, and expected plugin id. Desired state never creates its
+own trust. Supervisor does not compose that loader yet, so stored external
+instances remain inactive on the production default path.
 
 ## Migration transaction
 
