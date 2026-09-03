@@ -107,6 +107,12 @@ import {
   type ProfileLarkChannelRuntime,
 } from './lark-channel-runtime';
 import {
+  startProfileExternalChannelRuntime,
+  type ExternalChannelPluginComposition,
+  type ProfileExternalChannelRuntime,
+  type ProfileExternalChannelRuntimeSnapshot,
+} from './external-channel-runtime';
+import {
   ConfigChangeService,
   MANAGEMENT_API_VERSION,
   ManagementApi,
@@ -138,6 +144,8 @@ export interface SupervisorOptions {
   /** Injectable durable port for tests or alternate deployments. */
   triggerStateStore?: TriggerStateStore;
   triggerPollIntervalMs?: number;
+  /** Explicit opt-in. Undefined keeps every stored external channel inactive. */
+  externalChannelPlugins?: ExternalChannelPluginComposition;
 }
 
 export interface ManagedStatus {
@@ -150,6 +158,8 @@ export interface ManagedStatus {
   appId?: string;
   larkChannelRolloutMode: LarkChannelRolloutMode;
   larkChannelOwner: LarkChannelOwnershipPolicy['owner'];
+  externalChannelPluginCount?: number;
+  externalChannelInstanceCount?: number;
 }
 
 /**
@@ -173,6 +183,7 @@ class ManagedProfile {
   private nativeReadRuntime?: NativeReadProfileRuntime;
   private conversationRuntime?: ProfileConversationRuntimeOwner;
   private larkChannelRuntime?: ProfileLarkChannelRuntime;
+  private externalChannelRuntime?: ProfileExternalChannelRuntime;
   private resolvedChannelInstances: readonly ResolvedChannelInstance[] = [];
 
   constructor(
@@ -190,6 +201,7 @@ class ManagedProfile {
     private onExitCommand: (profile: string) => void,
     private triggerReminders?: ConversationReminderControl,
     private createNativeReadRuntime?: SupervisorOptions['createNativeReadRuntime'],
+    private externalChannelPlugins?: SupervisorOptions['externalChannelPlugins'],
   ) {
     this.runtimeSlot = new ProfileRuntimeSlot(engineRuntime);
   }
@@ -266,6 +278,9 @@ class ManagedProfile {
         instance: larkInstance,
       });
       this.bridge = this.larkChannelRuntime.bridge;
+      this.externalChannelRuntime = await this.startExternalChannelRuntime(
+        resolvedChannelInstances,
+      );
       const channelManagerSnapshot = this.larkChannelRuntime.snapshot();
       log.info('channel-manager', 'rollout-ready', {
         profile: this.profile,
@@ -290,6 +305,8 @@ class ManagedProfile {
       // Roll back partial bring-up so a failed start doesn't leak locks/entries.
       await this.runtimeControl?.close().catch(() => undefined);
       this.runtimeControl = undefined;
+      await this.externalChannelRuntime?.close().catch(() => undefined);
+      this.externalChannelRuntime = undefined;
       await this.larkChannelRuntime?.close().catch(() => undefined);
       this.larkChannelRuntime = undefined;
       this.resolvedChannelInstances = [];
@@ -305,6 +322,13 @@ class ManagedProfile {
   }
 
   async stop(): Promise<void> {
+    await this.externalChannelRuntime?.close().catch((err) =>
+      log.warn('channel-manager', 'external-stop-failed', {
+        profile: this.profile,
+        err: String(err),
+      }),
+    );
+    this.externalChannelRuntime = undefined;
     await this.larkChannelRuntime?.close().catch((err) =>
       log.warn('channel-manager', 'rollout-stop-failed', {
         profile: this.profile,
@@ -344,6 +368,7 @@ class ManagedProfile {
   }
 
   status(pid: number): ManagedStatus {
+    const external = this.externalChannelRuntime?.snapshot();
     return {
       profile: this.profile,
       agentKind: this.profileConfig.agentKind,
@@ -354,7 +379,13 @@ class ManagedProfile {
       appId: this.appId,
       larkChannelRolloutMode: this.larkChannelPolicy.mode,
       larkChannelOwner: this.larkChannelPolicy.owner,
+      externalChannelPluginCount: external?.loadedPlugins.length ?? 0,
+      externalChannelInstanceCount: external?.manager.instanceCount ?? 0,
     };
+  }
+
+  externalChannelSnapshot(): ProfileExternalChannelRuntimeSnapshot | undefined {
+    return this.externalChannelRuntime?.snapshot();
   }
 
   async submitTrigger(intent: RunIntent): Promise<TriggerExecutionSubmission> {
@@ -451,6 +482,20 @@ class ManagedProfile {
       policy: this.larkChannelPolicy,
       instance: input.instance,
       startBridge: () => this.startChannelFn(deps),
+    });
+  }
+
+  private startExternalChannelRuntime(
+    instances: readonly ResolvedChannelInstance[],
+  ): Promise<ProfileExternalChannelRuntime | undefined> {
+    const composition = this.externalChannelPlugins;
+    const requests = this.profileConfig.channels?.plugins ?? [];
+    if (!composition || requests.length === 0) return Promise.resolve(undefined);
+    return startProfileExternalChannelRuntime({
+      profileId: this.profile,
+      requests,
+      instances,
+      composition,
     });
   }
 
@@ -817,6 +862,10 @@ class ManagedProfile {
         nextResolvedChannelInstances,
         next.accounts.app,
       );
+      assertExternalChannelDesiredStateUnchanged(
+        this.profileConfig,
+        nextRuntime.profileConfig,
+      );
       nextEngineRuntime = createProfileEngineRuntime(nextRuntime.profileConfig, {
         ...nextRuntime.appPaths,
         configPath: nextRuntime.configPath,
@@ -894,6 +943,26 @@ class ManagedProfile {
       resumeRuns?.();
       this.restarting = false;
     }
+  }
+}
+
+function assertExternalChannelDesiredStateUnchanged(
+  current: ProfileConfig,
+  next: ProfileConfig,
+): void {
+  const desired = (profile: ProfileConfig) => ({
+    plugins: profile.channels?.plugins ?? [],
+    instances: Object.fromEntries(
+      Object.entries(profile.channels?.instances ?? {})
+        .filter(([, instance]) => instance.plugin !== BUILT_IN_LARK_PLUGIN_ID)
+        .sort(([left], [right]) => left.localeCompare(right)),
+    ),
+  });
+  if (!isDeepStrictEqual(desired(current), desired(next))) {
+    throw Object.assign(
+      new Error('external channel desired state changed; use the channel lifecycle operation'),
+      { code: 'external-channel-reconcile-required' },
+    );
   }
 }
 
@@ -977,6 +1046,10 @@ export class Supervisor {
   runtimeReconcilerFor(profile: string): ProfileRuntimeReconciler | undefined {
     const controls = this.controlsFor(profile);
     return controls ? new ProfileRuntimeReconciler(controls) : undefined;
+  }
+
+  externalChannelsFor(profile: string): ProfileExternalChannelRuntimeSnapshot | undefined {
+    return this.managed.get(profile)?.externalChannelSnapshot();
   }
 
   channelFor(profile: string) {
@@ -1101,6 +1174,7 @@ export class Supervisor {
         (p) => void this.stopProfile(p).catch(() => undefined),
         this.reminderControlFor(appPaths.profile),
         this.opts.createNativeReadRuntime,
+        this.opts.externalChannelPlugins,
       );
       await managed.bringUp(new Date().toISOString());
       this.managed.set(appPaths.profile, managed);

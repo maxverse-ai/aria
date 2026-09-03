@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createDefaultProfileConfig } from '../../../src/config/profile-schema';
 import {
   createRootConfig,
@@ -18,6 +18,14 @@ import { readRuntimeLockMeta } from '../../../src/runtime/locks';
 import { readAndPrune } from '../../../src/runtime/registry';
 import type { ControlActorContext } from '../../../src/application/control';
 import type { ProfileConversationRuntimeOwner } from '../../../src/conversation/profile-runtime-owner';
+import type { ExternalChannelPluginPackageSource } from '../../../src/channel/plugin/loader';
+import type { ChannelPlugin } from '../../../src/channel/plugin/types';
+import {
+  channelPluginPackage,
+  NOOP_EXTERNAL_CHANNEL_PACKAGE,
+  NOOP_EXTERNAL_CHANNEL_PLUGIN_ID,
+  NOOP_EXTERNAL_CHANNEL_VERSION,
+} from '../../fixtures/channel/noop-external-channel-plugin';
 
 const roots: string[] = [];
 const started: string[] = [];
@@ -33,6 +41,14 @@ let failedAgent: string | undefined;
 let blockedAgent: string | undefined;
 let releaseBlockedAgent: (() => void) | undefined;
 const actor: ControlActorContext = { source: 'agent', principal: 'ou-engine-admin' };
+const externalRequest = Object.freeze({
+  package: NOOP_EXTERNAL_CHANNEL_PACKAGE,
+  version: NOOP_EXTERNAL_CHANNEL_VERSION,
+});
+const externalTrust = Object.freeze({
+  ...externalRequest,
+  pluginId: NOOP_EXTERNAL_CHANNEL_PLUGIN_ID,
+});
 
 function app(id: string) {
   return { id, secret: '${APP_SECRET}', tenant: 'feishu' as const };
@@ -94,6 +110,39 @@ const stubStartChannel: any = async (deps: any) => {
     },
   };
 };
+
+function externalSource(
+  plugin: ChannelPlugin = channelPluginPackage.channelPlugin,
+): ExternalChannelPluginPackageSource {
+  return {
+    resolve: vi.fn(async () => ({
+      specifier: 'fixture:noop-channel',
+      metadata: { name: externalRequest.package, version: externalRequest.version },
+    })),
+    importModule: vi.fn(async () => ({ channelPluginPackage: { channelPlugin: plugin } })),
+  };
+}
+
+async function storeExternalChannel(): Promise<void> {
+  const configPath = join(root, 'config.json');
+  const current = (await loadRootConfig(configPath))!;
+  const migrated = migrateRootConfigToSchemaV3(current);
+  const profile = migrated.profiles.claude!;
+  profile.channels = {
+    plugins: [externalRequest],
+    instances: {
+      ...profile.channels!.instances,
+      'fixture-primary': {
+        plugin: NOOP_EXTERNAL_CHANNEL_PLUGIN_ID,
+        enabled: true,
+        configVersion: 1,
+        config: { label: 'Supervisor fixture' },
+        secretRefs: {},
+      },
+    },
+  };
+  await saveRootConfig(migrated, configPath);
+}
 
 beforeEach(async () => {
   started.length = 0;
@@ -177,6 +226,135 @@ describe('Supervisor', () => {
     expect(disconnected).toEqual(['claude', 'claude']);
     expect(await readFile(configPath, 'utf8')).toBe(before);
     expect((await loadRootConfig(configPath))?.schemaVersion).toBe(3);
+  });
+
+  it('keeps stored external channels inactive without explicit deployment composition', async () => {
+    await storeExternalChannel();
+    const configPath = join(root, 'config.json');
+    const before = await readFile(configPath, 'utf8');
+
+    await sup.startProfile('claude');
+
+    expect(sup.externalChannelsFor('claude')).toBeUndefined();
+    expect(sup.list()[0]).toMatchObject({
+      externalChannelPluginCount: 0,
+      externalChannelInstanceCount: 0,
+    });
+    expect(await readFile(configPath, 'utf8')).toBe(before);
+  });
+
+  it('owns an explicitly trusted external plugin across start, Lark reconnect, and stop', async () => {
+    registerFakeEngine('external-lifecycle-test');
+    const configPath = join(root, 'config.json');
+    const config = (await loadRootConfig(configPath))!;
+    config.profiles.claude!.agentKind = 'external-lifecycle-test';
+    await saveRootConfig(config, configPath);
+    await storeExternalChannel();
+    const lifecycle: string[] = [];
+    const base = channelPluginPackage.channelPlugin;
+    const plugin: ChannelPlugin = {
+      ...base,
+      async start(context) {
+        lifecycle.push(`start:${context.instance.instanceId}`);
+        const runtime = await base.start(context);
+        return {
+          ...runtime,
+          close: async () => {
+            lifecycle.push(`close:${context.instance.instanceId}`);
+            await runtime.close();
+          },
+        };
+      },
+    };
+    sup = new Supervisor({
+      configPath,
+      rootDir: root,
+      runPreflight: false,
+      startChannelFn: stubStartChannel,
+      externalChannelPlugins: {
+        trustedPackages: [externalTrust],
+        source: externalSource(plugin),
+        createIngress: () => ({
+          accept: async () => ({ status: 'accepted', receiptId: 'supervisor-fixture' }),
+        }),
+      },
+    });
+
+    await sup.startProfile('claude');
+    expect(sup.externalChannelsFor('claude')).toMatchObject({
+      loadedPlugins: [externalTrust],
+      manager: { state: 'ready', instanceCount: 1, readyCount: 1 },
+    });
+    expect(sup.list()[0]).toMatchObject({
+      externalChannelPluginCount: 1,
+      externalChannelInstanceCount: 1,
+    });
+
+    await sup.restartProfile('claude');
+    expect(lifecycle).toEqual(['start:fixture-primary']);
+    await sup.stopProfile('claude');
+    expect(lifecycle).toEqual(['start:fixture-primary', 'close:fixture-primary']);
+    expect(sup.externalChannelsFor('claude')).toBeUndefined();
+  });
+
+  it('rolls back the profile when external desired state is not deployment-trusted', async () => {
+    await storeExternalChannel();
+    sup = new Supervisor({
+      configPath: join(root, 'config.json'),
+      rootDir: root,
+      runPreflight: false,
+      startChannelFn: stubStartChannel,
+      externalChannelPlugins: {
+        trustedPackages: [],
+        source: externalSource(),
+        createIngress: () => ({
+          accept: async () => ({ status: 'accepted', receiptId: 'supervisor-fixture' }),
+        }),
+      },
+    });
+
+    await sup.startProfile('work');
+    await expect(sup.startProfile('claude')).rejects.toMatchObject({
+      code: 'untrusted-channel-plugin-package',
+    });
+    expect(sup.isOnline('claude')).toBe(false);
+    expect(sup.isOnline('work')).toBe(true);
+    expect(started).toEqual(['work', 'claude']);
+    expect(disconnected).toEqual(['claude']);
+  });
+
+  it('rejects Lark reconnect when external desired state changed behind the live owner', async () => {
+    await storeExternalChannel();
+    const configPath = join(root, 'config.json');
+    sup = new Supervisor({
+      configPath,
+      rootDir: root,
+      runPreflight: false,
+      startChannelFn: stubStartChannel,
+      externalChannelPlugins: {
+        trustedPackages: [externalTrust],
+        source: externalSource(),
+        createIngress: () => ({
+          accept: async () => ({ status: 'accepted', receiptId: 'supervisor-fixture' }),
+        }),
+      },
+    });
+    await sup.startProfile('claude');
+    const changed = structuredClone((await loadRootConfig(configPath))!);
+    const stored = changed.profiles.claude!.channels!.instances['fixture-primary']!;
+    changed.profiles.claude!.channels!.instances = {
+      ...changed.profiles.claude!.channels!.instances,
+      'fixture-primary': { ...stored, config: { label: 'Changed while live' } },
+    };
+    await saveRootConfig(changed, configPath);
+
+    await expect(sup.restartProfile('claude')).rejects.toMatchObject({
+      code: 'external-channel-reconcile-required',
+    });
+    expect(disconnected).toEqual([]);
+    expect(sup.externalChannelsFor('claude')).toMatchObject({
+      manager: { state: 'ready', instanceCount: 1 },
+    });
   });
 
   it.each([

@@ -377,6 +377,13 @@ export type {
   ResolvedExternalChannelPluginPackage,
   TrustedExternalChannelPlugin,
 } from './channel/plugin/loader';
+export { startProfileExternalChannelRuntime } from './runtime/external-channel-runtime';
+export type {
+  ExternalChannelPluginComposition,
+  ProfileExternalChannelRuntime,
+  ProfileExternalChannelRuntimeSnapshot,
+  StartProfileExternalChannelRuntimeOptions,
+} from './runtime/external-channel-runtime';
 export {
   CHANNEL_MANAGER_SNAPSHOT_VERSION,
   ChannelManager,

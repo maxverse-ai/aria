@@ -74,19 +74,24 @@ describe('channel architecture boundary', () => {
     expect(reliability).not.toContain("pluginId: 'weixin-ilink'");
   });
 
-  it('keeps the Stage 9 loader provider-neutral and outside production composition', async () => {
+  it('keeps the external loader provider-neutral behind explicit Supervisor composition', async () => {
     const supervisor = await readFile('src/runtime/supervisor.ts', 'utf8');
     const loader = await readFile('src/channel/plugin/loader.ts', 'utf8');
+    const composition = await readFile('src/runtime/external-channel-runtime.ts', 'utf8');
     const fixture = await readFile(
       'tests/fixtures/channel/noop-external-channel-plugin.ts',
       'utf8',
     );
 
-    expect(supervisor).not.toContain('ExternalChannelPluginLoader');
-    expect(supervisor).not.toContain('channel/plugin/loader');
+    expect(supervisor).toContain('externalChannelPlugins?: ExternalChannelPluginComposition');
+    expect(supervisor).toContain('startProfileExternalChannelRuntime({');
+    expect(composition).toContain('new ExternalChannelPluginLoader({');
+    expect(composition).toContain('new ChannelManager({');
     expect(loader).not.toContain('@larksuite/channel');
     expect(loader).not.toContain('wechat-kf');
     expect(loader).not.toContain('weixin-ilink');
+    expect(composition).not.toContain('wechat-kf');
+    expect(composition).not.toContain('weixin-ilink');
     expect(fixture).not.toMatch(/node:(?:http|https|net|tls)|\bfetch\s*\(|setInterval\s*\(/);
   });
 });

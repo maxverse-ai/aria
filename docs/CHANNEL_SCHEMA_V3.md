@@ -83,8 +83,9 @@ temporary dual representation through another reviewed migration.
 Stage 9 provides an external loader that can consume the exact package pins, but
 only when deployment composition supplies a separate allowlist with the same
 package, exact version, and expected plugin id. Desired state never creates its
-own trust. Supervisor does not compose that loader yet, so stored external
-instances remain inactive on the production default path.
+own trust. Supervisor composes that loader only when its embedder supplies the
+explicit external-channel composition input; stored external instances remain
+inactive on the production default path.
 
 ## Migration transaction
 

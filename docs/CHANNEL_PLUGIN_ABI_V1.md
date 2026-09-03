@@ -5,9 +5,10 @@ protocol code and core-owned ingress, lifecycle, and delivery orchestration. It
 is available from the package root; plugins do not import Supervisor, agent, or
 session internals.
 
-ABI v1 is an integration contract, not a production cutover. The Stage 1
-registry is not composed by Supervisor, and existing Lark and `wechat-kf`
-startup paths remain unchanged until their later migration stages.
+ABI v1 is an integration contract, not a production cutover. Supervisor can
+compose installed external packages only when an embedder explicitly supplies
+deployment trust and an ingress port. The ordinary CLI path supplies neither,
+so existing Lark and `wechat-kf` startup remains unchanged.
 
 ## Package contract
 
@@ -81,6 +82,19 @@ loader, and fail while any matching runtime is starting or active. After a
 ChannelManager start failure has rolled back runtimes, the caller can unload the
 package registrations cleanly and retry or return to the previous composition.
 
+`startProfileExternalChannelRuntime()` owns the loaded registrations and their
+`ChannelManager` as one lifecycle. It starts only enabled instances whose
+plugin ids were loaded from the desired exact pins, drains and closes them
+before unloading registrations, and rolls back both runtime and registry state
+when any start fails. Supervisor exposes this only through the optional
+`externalChannelPlugins` composition input. Stored desired state without that
+independent deployment input remains inert.
+
+Ordinary Lark reconnect keeps the live external runtime in place. If external
+desired state changed behind that live owner, reconnect fails before transport
+handoff and requires the dedicated channel lifecycle operation instead of
+silently running stale configuration.
+
 The Stage 9 fixture creates no network connection, timer, file, or credential
 access. It proves the loader boundary only; no external provider is enabled by
 this stage.
@@ -113,6 +127,6 @@ close. Plugin repositories can call it from Vitest, Jest, Node test, or another
 runner and add provider-specific failure/restart fixtures around it.
 
 Process isolation, package installation, shared reliability stores, and
-production ChannelManager composition are deliberately outside ABI v1 and ship
-in later stages of the channel platform plan. Installed package discovery and
-trust-gated registry ownership are provided by the Stage 9 loader.
+operator mutation commands remain outside ABI v1. Installed package discovery
+and trust-gated registry ownership are provided by the Stage 9 loader; the
+bounded Stage 10 composition keeps the production default disabled.

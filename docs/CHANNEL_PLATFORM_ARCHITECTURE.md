@@ -73,10 +73,11 @@ The repository already contains the correct starting seams:
 - Management API and Native Read already separate writes from redacted reads.
 
 They are not yet one platform. Lark and Customer Service now have bounded
-ChannelManager ownership adapters, but their normalized ingress and external
-deployment composition are still compatibility seams. Stored channel instances,
-the external plugin loader, and the unified operations surface remain later
-stages. These seams are not contracts to reproduce for a new channel.
+ChannelManager ownership adapters, but their normalized ingress remains a
+compatibility seam. Stored external instances and exact package pins can now be
+composed only through a deployment-trusted Supervisor opt-in; the ordinary CLI
+path remains disabled. The unified mutation surface remains later work. These
+seams are not contracts to reproduce for a new channel.
 
 ## Ownership boundaries
 
@@ -310,6 +311,14 @@ Implementation status:
   proves load, lifecycle failure cleanup, unload, and reload without credentials
   or production configuration changes. See
   [Channel Plugin ABI v1](./CHANNEL_PLUGIN_ABI_V1.md#external-package-loading).
+- Stage 10 begins the unified operations path with a bounded lifecycle and read
+  model. An embedder must explicitly provide deployment trust and a core-owned
+  ingress port before Supervisor loads stored exact pins. Enabled external
+  instances start under their own profile-owned ChannelManager, startup failure
+  rolls back runtimes and registrations, stop drains before unload, and the
+  Supervisor read model reports loaded plugin and instance counts. The ordinary
+  CLI provides no composition input, package installation remains forbidden,
+  and configure/login/logout/start/stop/restart mutations remain follow-up work.
 
 0. **Baseline and decision.** Land this architecture decision, record the
    current seams, and prove unchanged production behavior with repository checks.
@@ -345,7 +354,9 @@ Implementation status:
    and every real third-party protocol remain later stages.
 10. **Unified operations.** Expose list/status/configure/login/logout/start/stop/
     restart/doctor through Management API and the runtime read model, then add
-    CLI/Web adapters.
+    CLI/Web adapters. **In progress:** explicit external lifecycle composition
+    and its Supervisor read model are implemented; mutation commands remain
+    disabled and deferred.
 11. **`weixin-ilink` text MVP.** Ship the external plugin disabled by default:
     QR login, secret reference, long polling, durable cursor/inbox, text and
     quote normalization, reply context, typing, local help/new/stop, reauth
