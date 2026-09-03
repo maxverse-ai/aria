@@ -244,7 +244,7 @@ export function triggerCapabilities(): TriggerCapabilitySnapshot {
   return {
     schema: 'aria.trigger.capabilities.v1',
     apiVersion: TRIGGER_CONTROL_API_VERSION,
-    implementationStage: 'conversation-reminders',
+    implementationStage: 'agent-created-reminders',
     runtimeEnabled: false,
     capabilities: [
       {
@@ -274,6 +274,12 @@ export function triggerCapabilities(): TriggerCapabilitySnapshot {
       {
         id: 'trigger.reminder',
         cli: '/remind at|list|snooze|update|cancel|history',
+        access: 'write',
+        outputs: ['text', 'json'],
+      },
+      {
+        id: 'trigger.agent-reminder',
+        cli: 'aria trigger grant issue|revoke; aria trigger agent create|list|history|snooze|update|cancel',
         access: 'write',
         outputs: ['text', 'json'],
       },

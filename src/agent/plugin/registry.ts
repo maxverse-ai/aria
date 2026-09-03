@@ -7,7 +7,13 @@ import {
   defineEngineRuntimeDescriptor,
   type EngineRuntime,
 } from '../runtime/types';
-import type { EnginePlugin, EnginePluginContext, EnginePluginPackage, EngineProbe } from './types';
+import type {
+  EngineAutomationCapability,
+  EnginePlugin,
+  EnginePluginContext,
+  EnginePluginPackage,
+  EngineProbe,
+} from './types';
 
 const plugins = new Map<string, EnginePlugin>();
 const externalIds = new Set<string>();
@@ -26,6 +32,9 @@ function ensureBuiltins(): void {
 export function registerEnginePlugin(plugin: EnginePlugin): void {
   if (!plugin?.id || !plugin.createRuntime || !plugin.capability) {
     throw new Error(`invalid engine plugin: ${plugin?.id ?? '<missing id>'}`);
+  }
+  if (plugin.automationCapabilities?.some((capability) => capability !== 'scheduled-triggers')) {
+    throw new Error(`invalid engine plugin automation capability: ${plugin.id}`);
   }
   const existing = plugins.get(plugin.id);
   if (existing === plugin) return;
@@ -77,6 +86,10 @@ export function listEnginePlugins(): EnginePlugin[] {
 
 export function capabilityFor(id: string, profile: ProfileConfig): AgentCapability {
   return requireEnginePlugin(id).capability(profile);
+}
+
+export function engineSupportsAutomation(id: string, capability: EngineAutomationCapability): boolean {
+  return requireEnginePlugin(id).automationCapabilities?.includes(capability) === true;
 }
 
 export function createEngineRuntime(id: string, ctx: EnginePluginContext): EngineRuntime {

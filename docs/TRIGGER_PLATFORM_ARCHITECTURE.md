@@ -587,7 +587,21 @@ default ownership merely to prove scheduling.
    opaque anchor id. Ownership is bound to the authenticated channel actor and
    every mutation rechecks both profile and owner.
 10. **Agent-created reminders.** Add explicit engine capability, ownership,
-    quotas, and abuse tests before allowing autonomous creation.
+    quotas, and abuse tests before allowing autonomous creation. Implemented
+    through a separate capability-token governance API and the
+    `aria trigger agent` CLI adapter. An operator-issued bearer grant fixes the
+    profile, engine, principal, expiry, allowed schedule kinds, active-task
+    count, daily run count, runtime, and prompt-size ceilings. The token is
+    displayed once and only its digest is persisted. Agent input cannot replace
+    the owner, profile, authorization reference, result route, or ceilings;
+    generic Management API calls from an Agent fail closed. Codex explicitly
+    advertises `scheduled-triggers`; other engines remain ineligible until their
+    plugins opt in. Revocation and expiry are checked on every operation.
+
+    This is an application capability boundary, not an OS sandbox claim. A
+    process with unrestricted access to another process's environment or memory
+    can steal bearer credentials; deployments that treat Agents as hostile must
+    also isolate Unix users/containers and inject only the selected grant.
 11. **Extension proof.** Implement a harmless webhook or synthetic event
     provider to prove that Trigger ABI is not a schedule-only abstraction.
 12. **Distributed scheduling, if required.** Only after a multi-host product

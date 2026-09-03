@@ -10,6 +10,7 @@ import type { EnginePlugin } from '../../../src/agent/plugin/types.js';
 import {
   capabilityFor,
   createEngineRuntime,
+  engineSupportsAutomation,
   engineProbes,
   getEnginePlugin,
   listEnginePlugins,
@@ -32,6 +33,11 @@ describe('engine plugin registry', () => {
     expect(ids).toContain('dsh');
     expect(ids).toContain('kimi');
     expect(ids).toContain('pi');
+  });
+
+  it('requires each engine plugin to opt in to scheduled-trigger automation', () => {
+    expect(engineSupportsAutomation('codex', 'scheduled-triggers')).toBe(true);
+    expect(engineSupportsAutomation('claude', 'scheduled-triggers')).toBe(false);
   });
 
   it('resolves capability and managed runtime through a plugin', async () => {
@@ -110,6 +116,19 @@ describe('engine plugin registry', () => {
 
   it('throws for unknown engine ids', () => {
     expect(() => requireEnginePlugin('missing-engine')).toThrow(/unsupported agent engine/);
+  });
+
+  it('rejects unknown automation capabilities at the dynamic plugin boundary', () => {
+    expect(() => registerEnginePlugin({
+      id: 'unsafe-automation',
+      displayName: 'Unsafe',
+      sessionKind: 'unsafe',
+      supportsNativeHistory: false,
+      automationCapabilities: ['shell-root' as 'scheduled-triggers'],
+      probes: [],
+      capability: () => { throw new Error('unused'); },
+      createRuntime: () => { throw new Error('unused'); },
+    })).toThrow(/invalid engine plugin automation capability/);
   });
 
   it('rejects a runtime descriptor owned by another engine', () => {

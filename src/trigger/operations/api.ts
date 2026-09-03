@@ -36,6 +36,8 @@ export interface TriggerManagementApiOptions {
   now?: () => number;
   createId?: () => string;
   onApplied?: () => Promise<void>;
+  /** Internal governance adapters only. Direct agent writes fail closed by default. */
+  allowAgentActor?: boolean;
 }
 
 /** Versioned application boundary shared by CLI, agent, Web and card adapters. */
@@ -54,6 +56,9 @@ export class TriggerManagementApi {
 
   async plan(request: TriggerPlanRequest): Promise<TriggerPlanResult> {
     validatePlanRequest(request);
+    if (request.actor.source === 'agent' && this.options.allowAgentActor !== true) {
+      throw new TriggerManagementError('agent-not-authorized', 'agent trigger mutations require a capability grant');
+    }
     validatePrivateInput(request.input);
     const now = this.now();
     const stored: StoredTriggerPlan = {

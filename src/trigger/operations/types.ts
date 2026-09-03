@@ -111,6 +111,7 @@ export class TriggerManagementError extends Error {
       | 'plan-expired'
       | 'actor-mismatch'
       | 'not-confirmed'
+      | 'agent-not-authorized'
       | 'definition-not-found'
       | 'occurrence-not-found',
     message: string,

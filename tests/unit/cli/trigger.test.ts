@@ -5,6 +5,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   formatTriggerCapabilities,
   runTriggerCapabilities,
+  runAgentTrigger,
+  runTriggerGrantIssue,
   runTriggerExecute,
   runTriggerList,
   runTriggerSchema,
@@ -28,7 +30,7 @@ describe('trigger contract CLI', () => {
     expect(JSON.parse(String(output.mock.calls[0]?.[0]))).toMatchObject({
       schema: 'aria.trigger.capabilities.v1',
       apiVersion: 1,
-      implementationStage: 'conversation-reminders',
+      implementationStage: 'agent-created-reminders',
       runtimeEnabled: false,
     });
   });
@@ -77,6 +79,46 @@ describe('trigger contract CLI', () => {
     await expect(runTriggerExecute('create', { rootDir, input: '{}' })).rejects.toThrow(
       'mutation requires --yes',
     );
+  });
+
+  it('issues a bounded grant and lets an Agent manage only through its environment token', async () => {
+    const rootDir = await mkdtemp(join(tmpdir(), 'aria-trigger-agent-cli-'));
+    roots.push(rootDir);
+    const output = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60_000).toISOString();
+    const at = new Date(Date.now() + 60 * 60_000).toISOString();
+    await runTriggerGrantIssue({
+      rootDir,
+      json: true,
+      yes: true,
+      input: JSON.stringify({
+        profileId: 'profile-a',
+        engineId: 'codex',
+        principal: 'codex-agent-a',
+        expiresAt,
+      }),
+    });
+    const issued = JSON.parse(String(output.mock.calls.at(-1)?.[0])) as { token: string };
+    process.env.ARIA_TRIGGER_GRANT_TOKEN = issued.token;
+    try {
+      await runAgentTrigger('create', {
+        rootDir,
+        engine: 'codex',
+        yes: true,
+        json: true,
+        input: JSON.stringify({
+          schedule: { kind: 'once', at },
+          prompt: 'Prepare report',
+        }),
+      });
+      expect(JSON.parse(String(output.mock.calls.at(-1)?.[0]))).toMatchObject({
+        command: 'create', definition: { profileId: 'profile-a', createdBy: { kind: 'agent' } },
+      });
+      await runAgentTrigger('list', { rootDir, engine: 'codex', json: true });
+      expect(JSON.parse(String(output.mock.calls.at(-1)?.[0])).snapshot.definitions).toHaveLength(1);
+    } finally {
+      delete process.env.ARIA_TRIGGER_GRANT_TOKEN;
+    }
   });
 
   it('creates and reads definitions through the management API adapter', async () => {

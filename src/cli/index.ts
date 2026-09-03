@@ -48,9 +48,12 @@ import {
 } from './commands/update';
 import {
   runTriggerApply,
+  runAgentTrigger,
   runTriggerCapabilities,
   runTriggerConfirm,
   runTriggerExecute,
+  runTriggerGrantIssue,
+  runTriggerGrantRevoke,
   runTriggerGet,
   runTriggerList,
   runTriggerPlan,
@@ -278,6 +281,34 @@ trigger
   .requiredOption('--yes', 'confirm mutation')
   .option('--json', 'print machine-readable JSON')
   .action((command: string, opts: { input?: string; yes?: boolean; json?: boolean }) => runTriggerExecute(command, opts));
+
+const triggerGrant = trigger
+  .command('grant')
+  .description('Issue and revoke bounded Agent trigger capabilities');
+
+triggerGrant
+  .command('issue')
+  .description('Issue a bearer grant; the token is shown once')
+  .requiredOption('--input <json>', 'profile, engine, principal, expiry and limits')
+  .requiredOption('--yes', 'confirm grant issuance')
+  .option('--json', 'print machine-readable JSON')
+  .action((opts: { input?: string; yes?: boolean; json?: boolean }) => runTriggerGrantIssue(opts));
+
+triggerGrant
+  .command('revoke <id>')
+  .description('Revoke an Agent trigger grant')
+  .requiredOption('--yes', 'confirm grant revocation')
+  .option('--json', 'print machine-readable JSON')
+  .action((id: string, opts: { yes?: boolean; json?: boolean }) => runTriggerGrantRevoke(id, opts));
+
+trigger
+  .command('agent <command>')
+  .description('Execute a grant-scoped create/list/history/snooze/update/cancel operation')
+  .requiredOption('--engine <id>', 'calling engine id')
+  .option('--input <json>', 'command input', '{}')
+  .option('--yes', 'confirm a mutation')
+  .option('--json', 'print machine-readable JSON')
+  .action((command: string, opts: { engine?: string; input?: string; yes?: boolean; json?: boolean }) => runAgentTrigger(command, opts));
 
 trigger
   .command('schema <name>')

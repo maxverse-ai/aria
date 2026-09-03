@@ -11,6 +11,7 @@ export const codexEnginePlugin: EnginePlugin = {
   displayName: 'Codex CLI',
   sessionKind: 'codex-thread',
   supportsNativeHistory: false,
+  automationCapabilities: ['scheduled-triggers'],
   probes: [{ command: 'codex', envKey: 'LARK_CHANNEL_CODEX_BIN' }],
   configField: 'codex',
   defaultBinary: 'codex',

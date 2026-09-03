@@ -20,6 +20,8 @@ export interface EngineHistoryEntry {
   detail: string;
 }
 
+export type EngineAutomationCapability = 'scheduled-triggers';
+
 /** Everything an engine plugin needs to build its managed runtime. */
 export interface EnginePluginContext {
   profileConfig: ProfileConfig;
@@ -37,6 +39,8 @@ export interface EnginePlugin {
   readonly displayName: string;
   readonly sessionKind: string;
   readonly supportsNativeHistory: boolean;
+  /** Privileged Aria automations this engine may receive an explicit grant for. */
+  readonly automationCapabilities?: readonly EngineAutomationCapability[];
   /** Commands probed during first-run agent detection. */
   readonly probes: readonly EngineProbe[];
   /** ProfileConfig field holding engine-specific config (e.g. `codex`). */

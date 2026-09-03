@@ -7,6 +7,11 @@ import {
 import { randomUUID } from 'node:crypto';
 import { resolveAppPaths } from '../../config/app-paths';
 import {
+  AgentTriggerGovernanceApi,
+  type AgentTriggerCommand,
+  type AgentTriggerGrantIssueInput,
+} from '../../trigger/agent';
+import {
   TriggerManagementApi,
   type TriggerManagementCommand,
   type TriggerPlanSnapshot,
@@ -19,6 +24,7 @@ export interface TriggerContractCliOptions {
 }
 
 const cliActor = { source: 'local-cli' as const, principal: 'aria-trigger-cli' };
+export const AGENT_TRIGGER_TOKEN_ENV = 'ARIA_TRIGGER_GRANT_TOKEN';
 
 export async function runTriggerCapabilities(
   opts: TriggerContractCliOptions = {},
@@ -89,6 +95,51 @@ export async function runTriggerExecute(
   console.log(opts.json ? JSON.stringify(result, null, 2) : `${result.command} applied · ${result.definition?.id ?? result.occurrence?.id ?? result.planId}`);
 }
 
+export async function runTriggerGrantIssue(
+  opts: TriggerContractCliOptions & { input?: string; yes?: boolean } = {},
+): Promise<void> {
+  if (!opts.yes) throw new Error('grant issuance requires --yes');
+  const created = await governance(opts).issue(parseInput(opts.input) as unknown as AgentTriggerGrantIssueInput, cliActor);
+  console.log(opts.json
+    ? JSON.stringify(created, null, 2)
+    : [`Agent trigger grant ${created.grant.id} issued.`, 'Token (shown once):', created.token].join('\n'));
+}
+
+export async function runTriggerGrantRevoke(
+  id: string,
+  opts: TriggerContractCliOptions & { yes?: boolean } = {},
+): Promise<void> {
+  if (!opts.yes) throw new Error('grant revocation requires --yes');
+  const revoked = await governance(opts).revoke(id, cliActor);
+  console.log(opts.json ? JSON.stringify(revoked, null, 2) : `Agent trigger grant ${revoked.id} revoked.`);
+}
+
+export async function runAgentTrigger(
+  command: string,
+  opts: TriggerContractCliOptions & { engine?: string; input?: string; yes?: boolean } = {},
+): Promise<void> {
+  const parsed = parseAgentCommand(command);
+  if (!['list', 'history'].includes(parsed) && !opts.yes) {
+    throw new Error('agent trigger mutation requires --yes');
+  }
+  const grantToken = process.env[AGENT_TRIGGER_TOKEN_ENV];
+  if (!grantToken) throw new Error(`${AGENT_TRIGGER_TOKEN_ENV} is required`);
+  const result = await governance(opts).execute({
+    schema: 'aria.agent-trigger.execute.request.v1',
+    apiVersion: 1,
+    requestId: randomUUID(),
+    grantToken,
+    engineId: opts.engine ?? '',
+    command: parsed,
+    input: parseInput(opts.input),
+  });
+  console.log(opts.json
+    ? JSON.stringify(result, null, 2)
+    : result.definition
+      ? `${result.command} applied · ${result.definition.id}`
+      : formatTriggerRead(result.snapshot!));
+}
+
 function printSnapshot<T>(snapshot: T, json: boolean | undefined, format: (value: T) => string): void {
   console.log(json ? JSON.stringify(snapshot, null, 2) : format(snapshot));
 }
@@ -131,6 +182,14 @@ function api(opts: Pick<TriggerContractCliOptions, 'rootDir'>): TriggerManagemen
   });
 }
 
+function governance(opts: Pick<TriggerContractCliOptions, 'rootDir'>): AgentTriggerGovernanceApi {
+  return new AgentTriggerGovernanceApi({ rootDir: rootDir(opts) });
+}
+
+function rootDir(opts: Pick<TriggerContractCliOptions, 'rootDir'>): string {
+  return opts.rootDir ?? process.env.LARK_CHANNEL_HOME ?? resolveAppPaths().rootDir;
+}
+
 function actionRequest(planId: string) {
   return {
     schema: 'aria.trigger-management.plan-action.request.v1' as const,
@@ -150,4 +209,11 @@ function parseCommand(value: string): TriggerManagementCommand {
     return value as TriggerManagementCommand;
   }
   throw new Error(`unknown trigger command: ${value}`);
+}
+
+function parseAgentCommand(value: string): AgentTriggerCommand {
+  if (['create', 'list', 'history', 'snooze', 'update', 'cancel'].includes(value)) {
+    return value as AgentTriggerCommand;
+  }
+  throw new Error(`unknown agent trigger command: ${value}`);
 }

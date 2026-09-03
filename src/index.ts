@@ -119,6 +119,25 @@ export {
   ConversationReminderService,
   FileConversationAnchorStore,
 } from './trigger/reminder';
+export {
+  AGENT_TRIGGER_GRANT_CAPABILITY,
+  AgentTriggerGovernanceApi,
+  FileAgentTriggerGrantStore,
+  tokenDigest as agentTriggerGrantTokenDigest,
+} from './trigger/agent';
+export type {
+  AgentTriggerCommand,
+  AgentTriggerGovernanceApiOptions,
+  AgentTriggerGrantAdmin,
+  AgentTriggerGrantIssueInput,
+  AgentTriggerGrantIssueResult,
+  AgentTriggerGrantLimits,
+  AgentTriggerGrantRecord,
+  AgentTriggerGrantStore,
+  AgentTriggerGrantView,
+  AgentTriggerRequest,
+  AgentTriggerResult,
+} from './trigger/agent';
 export type {
   ConversationAnchorRecord,
   ConversationAnchorStore,
@@ -290,6 +309,7 @@ export {
   defineEngineRuntimeDescriptor,
 } from './agent/runtime/types';
 export type {
+  EngineAutomationCapability,
   EnginePlugin,
   EnginePluginContext,
   EnginePluginPackage,
