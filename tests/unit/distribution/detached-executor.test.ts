@@ -43,12 +43,29 @@ describe('OsDetachedUpdateExecutor', () => {
       force: false,
     });
     const run = vi.fn<CommandRunner['run']>(async () => ({ stdout: '', stderr: '' }));
-    const executor = new OsDetachedUpdateExecutor(store, updater, { run }, 'linux', '/usr/bin/node', now);
+    const executor = new OsDetachedUpdateExecutor(
+      store,
+      updater,
+      { run },
+      'linux',
+      '/usr/bin/node',
+      now,
+      {
+        GH_CONFIG_DIR: '/home/test/.config/isolated-gh',
+        GH_TOKEN: 'must-not-be-forwarded',
+      },
+    );
     const result = await executor.execute(planId);
 
     expect((await store.readOperation(result.operationId)).status).toBe('planned');
     expect(run).toHaveBeenCalledWith('systemd-run', expect.arrayContaining([
-      '--user', '/usr/bin/node', updater, '--plan-id', planId,
+      '--user',
+      '--setenv=GH_CONFIG_DIR=/home/test/.config/isolated-gh',
+      '/usr/bin/node',
+      updater,
+      '--plan-id',
+      planId,
     ]));
+    expect(run.mock.calls[0]?.[1].join(' ')).not.toContain('must-not-be-forwarded');
   });
 });

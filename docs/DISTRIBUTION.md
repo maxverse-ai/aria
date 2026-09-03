@@ -63,6 +63,10 @@ aria update rollback
 - `apply` and `rollback` use a detached OS executor by default so a service
   restart cannot terminate its own updater. `--foreground` is a recovery-only
   escape hatch.
+- On Linux, the detached transient unit explicitly inherits `GH_CONFIG_DIR`
+  when present so private-release revalidation uses the invoking CLI's isolated
+  GitHub identity. Token environment variables are deliberately not copied into
+  systemd unit metadata or process arguments.
 - `status` without an id reads the latest journaled operation. Every command
   also supports `--json` for automation.
 - `rollback` switches to the recorded previous version; it does not query a
