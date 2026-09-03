@@ -4,12 +4,13 @@ Status: proposed direction. This document defines the target architecture and
 progressive delivery plan; no scheduled execution behavior is shipped by this
 document.
 
-Implementation status: Stage 0 is accepted. The Stage 1 execution-intent
-foundation is shipped: existing conversation starts pass through the
-runtime-validated `RunIntent` boundary, and read-only contract discovery is
-available through `aria trigger capabilities` and `aria trigger schema`.
-Those commands deliberately report that scheduled runtime behavior remains
-disabled.
+Implementation status: Stages 0 through 2 are accepted. Existing conversation
+starts pass through the runtime-validated `RunIntent` boundary. The Trigger
+Provider ABI now defines provider manifests, capabilities, serializable source
+envelopes, lifecycle ownership, runtime validation, a registry, and a reusable
+contract test kit. Read-only discovery is available through
+`aria trigger capabilities` and `aria trigger schema`. Those commands
+deliberately report that scheduled runtime behavior remains disabled.
 
 ## Decision
 

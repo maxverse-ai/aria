@@ -109,7 +109,9 @@ export interface RunIntent {
 export type TriggerContractSchemaName =
   | 'run-intent'
   | 'result-route'
-  | 'session-policy';
+  | 'session-policy'
+  | 'trigger-provider-manifest'
+  | 'trigger-envelope';
 
 export interface TriggerCapabilitySnapshot {
   schema: 'aria.trigger.capabilities.v1';
