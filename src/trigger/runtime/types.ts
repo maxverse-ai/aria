@@ -29,4 +29,7 @@ export interface TriggerManagerSnapshot {
   succeeded: number;
   failed: number;
   deferred: number;
+  skipped: number;
+  coalesced: number;
+  clockJumps: number;
 }

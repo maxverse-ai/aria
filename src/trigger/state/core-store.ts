@@ -12,6 +12,7 @@ import {
   type TriggerOccurrence,
   type TriggerOccurrenceFilter,
   type TriggerRetryInput,
+  type TriggerScheduleAdvanceInput,
 } from './types';
 import type { TriggerStateStore } from './store';
 import { triggerRetryDelay } from './retry';
@@ -102,6 +103,26 @@ export abstract class AbstractTriggerStateStore implements TriggerStateStore {
     });
   }
 
+  async advanceSchedule(input: TriggerScheduleAdvanceInput): Promise<TriggerDefinition> {
+    timestamp(input.advancedAt, 'schedule advancement time');
+    timestampOptional(input.nextFireAt, 'next fire time');
+    return this.mutate((state) => {
+      const definition = requiredDefinition(state, input.definitionId);
+      if (definition.state !== 'active') conflict('only active trigger definitions may advance schedules');
+      if (definition.revision !== input.expectedRevision) revisionConflict();
+      if (definition.nextFireAt !== input.expectedNextFireAt) revisionConflict('schedule cursor changed');
+      const advanced = {
+        ...definition,
+        nextFireAt: input.nextFireAt,
+        scheduleAdvancedAt: input.advancedAt,
+        updatedAt: Math.max(definition.updatedAt, input.advancedAt),
+      };
+      assertTriggerDefinition(advanced);
+      state.definitions[definition.id] = clone(advanced);
+      return clone(advanced);
+    });
+  }
+
   async getOccurrence(id: string): Promise<TriggerOccurrence | undefined> {
     return this.read((state) => cloneOptional(state.occurrences[id]));
   }
@@ -183,6 +204,21 @@ export abstract class AbstractTriggerStateStore implements TriggerStateStore {
     });
   }
 
+  async markSkipped(id: string, lease: TriggerLeaseRef, code: string, at: number): Promise<TriggerOccurrence> {
+    stableCode(code); timestamp(at, 'skip time');
+    return this.withLease(id, lease, at, (record) => {
+      if (record.state !== 'leased' && record.state !== 'dispatching') transition(record.state, 'skipped');
+      return clearLease({
+        ...record,
+        state: 'skipped',
+        blockedCode: code,
+        failure: undefined,
+        completedAt: at,
+        updatedAt: at,
+      });
+    });
+  }
+
   async scheduleRetry(input: TriggerRetryInput): Promise<TriggerOccurrence> {
     timestamp(input.now, 'retry time'); assertTriggerFailure(input.failure);
     return this.withLease(input.occurrenceId, input.lease, input.now, (record, definition) => {
@@ -257,7 +293,8 @@ export abstract class AbstractTriggerStateStore implements TriggerStateStore {
     return this.mutate((state) => {
       const removed = Object.values(state.occurrences)
         .filter((item) => item.completedAt !== undefined && item.completedAt < input.completedBefore
-          && (item.state === 'succeeded' || (item.state === 'dead' && item.deadAcknowledgedAt !== undefined)))
+          && (item.state === 'succeeded' || item.state === 'skipped'
+            || (item.state === 'dead' && item.deadAcknowledgedAt !== undefined)))
         .sort((a, b) => a.completedAt! - b.completedAt! || a.id.localeCompare(b.id)).slice(0, input.limit);
       for (const item of removed) { delete state.occurrences[item.id]; delete state.occurrenceKeys[item.idempotencyKey] }
       return removed.map((item) => item.id);

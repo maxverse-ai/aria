@@ -84,6 +84,7 @@ export type TriggerOccurrenceState =
   | 'retry-wait'
   | 'deferred'
   | 'succeeded'
+  | 'skipped'
   | 'dead';
 
 export interface TriggerOccurrenceLease {
@@ -168,6 +169,14 @@ export interface TriggerMaterializationResult {
   status: 'created' | 'duplicate';
   definition: TriggerDefinition;
   occurrence: TriggerOccurrence;
+}
+
+export interface TriggerScheduleAdvanceInput {
+  definitionId: string;
+  expectedRevision: number;
+  expectedNextFireAt?: number;
+  nextFireAt?: number;
+  advancedAt: number;
 }
 
 export interface TriggerClaimInput {

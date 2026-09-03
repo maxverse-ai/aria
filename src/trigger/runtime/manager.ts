@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { log } from '../../core/logger';
-import { materializeDueTimes, type ScheduleSpec } from '../schedule';
+import { decideOverlap, materializeDueTimes, type ScheduleSpec } from '../schedule';
 import {
+  TriggerStateError,
   createPendingOccurrence,
   type TriggerDefinition,
   type TriggerFailureKind,
@@ -10,7 +11,7 @@ import {
   type TriggerStateStore,
 } from '../state';
 import { createTriggerRunIntent } from './intent';
-import type { TriggerExecutionGateway, TriggerManagerSnapshot } from './types';
+import type { TriggerExecutionGateway, TriggerExecutionResult, TriggerManagerSnapshot } from './types';
 
 export interface TriggerManagerOptions {
   enabled?: boolean;
@@ -25,8 +26,9 @@ export interface TriggerManagerOptions {
 
 const DEFAULT_POLL_MS = 30_000;
 const DEFAULT_LEASE_MS = 30 * 60_000;
+const DEFAULT_DRAIN_MS = 30_000;
 
-/** Host-owned single-process coordinator. Durable state remains authoritative. */
+/** Host-owned clock and dispatcher. Durable state, not process timers, is authoritative. */
 export class TriggerManager {
   private readonly enabled: boolean;
   private readonly store: TriggerStateStore;
@@ -36,8 +38,10 @@ export class TriggerManager {
   private readonly pollIntervalMs: number;
   private readonly leaseDurationMs: number;
   private readonly leaseOwner: string;
+  private readonly inFlight = new Set<Promise<void>>();
   private timer?: ReturnType<typeof setInterval>;
   private reconcilePromise?: Promise<void>;
+  private lastObservedNow?: number;
   private state: TriggerManagerSnapshot;
 
   constructor(options: TriggerManagerOptions) {
@@ -58,6 +62,9 @@ export class TriggerManager {
       succeeded: 0,
       failed: 0,
       deferred: 0,
+      skipped: 0,
+      coalesced: 0,
+      clockJumps: 0,
     };
   }
 
@@ -74,6 +81,19 @@ export class TriggerManager {
     this.timer = undefined;
     this.state = { ...this.state, running: false };
     await this.reconcilePromise?.catch(() => undefined);
+    await this.drain(DEFAULT_DRAIN_MS);
+  }
+
+  /** Wait for already submitted agent runs without stopping future reconciliation. */
+  async drain(timeoutMs = DEFAULT_DRAIN_MS): Promise<void> {
+    positive(timeoutMs, 'drain timeout');
+    const deadline = Date.now() + timeoutMs;
+    while (this.inFlight.size > 0) {
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) return;
+      await Promise.race([Promise.allSettled([...this.inFlight]), delay(remaining)]);
+      if (Date.now() >= deadline) return;
+    }
   }
 
   snapshot(): TriggerManagerSnapshot {
@@ -91,11 +111,30 @@ export class TriggerManager {
     return this.reconcilePromise;
   }
 
+  /** Reconsider work that was durably deferred while one profile was stopped. */
+  async resumeProfile(profileId: string): Promise<number> {
+    if (!this.enabled) return 0;
+    const deferred = await this.store.listOccurrences({ profileId, state: 'deferred' });
+    let resumed = 0;
+    for (const occurrence of deferred) {
+      if (occurrence.blockedCode !== 'profile-offline') continue;
+      await this.store.resumeDeferred(occurrence.id, this.now());
+      resumed += 1;
+    }
+    if (resumed > 0) await this.reconcile();
+    return resumed;
+  }
+
   private async performReconcile(): Promise<void> {
     const now = this.now();
+    if (this.lastObservedNow !== undefined
+      && (now < this.lastObservedNow || now - this.lastObservedNow > this.pollIntervalMs * 2)) {
+      this.bump('clockJumps');
+    }
+    this.lastObservedNow = now;
     this.state = { ...this.state, lastScanAt: now, lastErrorCode: undefined };
     try {
-      await this.materializeOneTimeDue(now);
+      await this.materializeDueSchedules(now);
       await this.dispatchClaimable();
     } catch (error) {
       const code = stableErrorCode(error);
@@ -105,12 +144,12 @@ export class TriggerManager {
     }
   }
 
-  private async materializeOneTimeDue(now: number): Promise<void> {
+  private async materializeDueSchedules(now: number): Promise<void> {
     const definitions = await this.store.listDefinitions({ state: 'active' });
     for (const definition of definitions) {
-      if (definition.sourceKind !== 'schedule' || definition.nextFireAt === undefined) continue;
+      if (definition.sourceKind !== 'schedule' || definition.nextFireAt === undefined
+        || definition.nextFireAt > now) continue;
       const spec = scheduleContract(definition);
-      if (spec.schedule.kind !== 'once' || definition.nextFireAt > now) continue;
       const due = materializeDueTimes({
         spec: spec.schedule,
         timeZone: spec.timeZone,
@@ -118,44 +157,48 @@ export class TriggerManager {
         now,
         misfirePolicy: definition.misfirePolicy,
       });
-      if (due.due.length === 0) {
-        await this.advanceWithoutOccurrence(definition, due.nextFireAt, now);
-        continue;
+      this.recordMisfires(definition, due.skipped, due.truncated);
+      try {
+        if (due.due.length === 0) {
+          await this.store.advanceSchedule({
+            definitionId: definition.id,
+            expectedRevision: definition.revision,
+            expectedNextFireAt: definition.nextFireAt,
+            nextFireAt: due.nextFireAt,
+            advancedAt: now,
+          });
+          continue;
+        }
+        const scheduledFor = due.due[0]!;
+        const occurrence = createPendingOccurrence({
+          id: this.createId(),
+          profileId: definition.profileId,
+          definitionId: definition.id,
+          definitionRevision: definition.revision,
+          scheduledFor,
+          createdAt: now,
+          metadata: { providerId: definition.providerId },
+        });
+        const result = await this.store.materialize({
+          definitionId: definition.id,
+          expectedRevision: definition.revision,
+          expectedNextFireAt: definition.nextFireAt,
+          occurrence,
+          nextFireAt: due.nextFireAt,
+          advancedAt: now,
+        });
+        if (result.status === 'created') this.bump('materialized');
+      } catch (error) {
+        // Multiple hosts may race; the durable cursor CAS chooses one winner.
+        if (!(error instanceof TriggerStateError) || error.code !== 'revision-conflict') throw error;
       }
-      const scheduledFor = due.due[0]!;
-      const occurrence = createPendingOccurrence({
-        id: this.createId(),
-        profileId: definition.profileId,
-        definitionId: definition.id,
-        definitionRevision: definition.revision,
-        scheduledFor,
-        createdAt: now,
-        metadata: { providerId: definition.providerId },
-      });
-      const result = await this.store.materialize({
-        definitionId: definition.id,
-        expectedRevision: definition.revision,
-        expectedNextFireAt: definition.nextFireAt,
-        occurrence,
-        nextFireAt: due.nextFireAt,
-        advancedAt: now,
-      });
-      if (result.status === 'created') this.bump('materialized');
     }
   }
 
-  private async advanceWithoutOccurrence(
-    definition: TriggerDefinition,
-    nextFireAt: number | undefined,
-    now: number,
-  ): Promise<void> {
-    await this.store.replaceDefinition({
-      ...definition,
-      revision: definition.revision + 1,
-      nextFireAt,
-      scheduleAdvancedAt: now,
-      updatedAt: now,
-    }, definition.revision);
+  private recordMisfires(definition: TriggerDefinition, count: number, truncated: boolean): void {
+    if (count === 0) return;
+    if (definition.misfirePolicy === 'coalesce' && !truncated) this.add('coalesced', count);
+    else this.add('skipped', count);
   }
 
   private async dispatchClaimable(): Promise<void> {
@@ -192,6 +235,35 @@ export class TriggerManager {
       return;
     }
 
+    const siblings = await this.store.listOccurrences({ definitionId: definition.id });
+    const activeCount = siblings.filter((item) => item.id !== occurrence.id
+      && ['leased', 'dispatching', 'running'].includes(item.state)).length;
+    const queuedCount = siblings.filter((item) => item.state === 'deferred'
+      && item.blockedCode === 'overlap-active').length;
+    const quotaReached = activeCount >= definition.quota.maxActiveOccurrences;
+    const decision = quotaReached ? 'skip' : decideOverlap({
+      policy: definition.overlapPolicy,
+      activeCount,
+      queuedCount,
+    });
+    if (decision === 'queue') {
+      await this.store.markDeferred(occurrence.id, lease, 'overlap-active', this.now());
+      this.bump('deferred');
+      return;
+    }
+    if (decision === 'skip') {
+      await this.store.markSkipped(
+        occurrence.id,
+        lease,
+        quotaReached ? 'active-quota-exceeded' : 'overlap-skipped',
+        this.now(),
+      );
+      this.bump('skipped');
+      return;
+    }
+
+    const extendedExpiry = this.now() + definition.authorizationCeiling.maxRuntimeMs + this.leaseDurationMs;
+    await this.store.renewLease(occurrence.id, lease, this.now(), extendedExpiry);
     const intentId = occurrence.dispatch?.intentId ?? this.createId();
     const intent = createTriggerRunIntent(definition, occurrence, intentId);
     await this.store.beginDispatch(occurrence.id, lease, intentId, this.now());
@@ -200,12 +272,21 @@ export class TriggerManager {
       submission = await this.execution.submit(occurrence.profileId, intent);
     } catch (error) {
       await this.fail(occurrence, lease, error, 'trigger-submit-failed');
+      await this.resumeOverlap(definition.id);
       return;
     }
     await this.store.markRunning(occurrence.id, lease, submission.runId, this.now());
     this.bump('dispatched');
+    this.track(this.observeCompletion(occurrence, lease, submission.completion));
+  }
+
+  private async observeCompletion(
+    occurrence: TriggerOccurrence,
+    lease: TriggerLeaseRef,
+    completion: Promise<TriggerExecutionResult>,
+  ): Promise<void> {
     try {
-      const result = await submission.completion;
+      const result = await completion;
       if (result.status === 'succeeded') {
         await this.store.markSucceeded(occurrence.id, lease, this.now());
         this.bump('succeeded');
@@ -218,8 +299,34 @@ export class TriggerManager {
         );
       }
     } catch (error) {
-      await this.fail(occurrence, lease, error, 'run-observation-failed');
+      try {
+        await this.fail(occurrence, lease, error, 'run-observation-failed');
+      } catch (stateError) {
+        log.warn('trigger-manager', 'completion-persist-failed', {
+          occurrenceId: occurrence.id,
+          code: stableErrorCode(stateError),
+        });
+      }
+    } finally {
+      await this.resumeOverlap(occurrence.definitionId).catch((error) =>
+        log.warn('trigger-manager', 'overlap-resume-failed', {
+          occurrenceId: occurrence.id,
+          code: stableErrorCode(error),
+        }));
+      await this.reconcile().catch(() => undefined);
     }
+  }
+
+  private async resumeOverlap(definitionId: string): Promise<void> {
+    const occurrences = await this.store.listOccurrences({ definitionId });
+    if (occurrences.some((item) => ['leased', 'dispatching', 'running'].includes(item.state))) return;
+    const queued = occurrences.find((item) => item.state === 'deferred' && item.blockedCode === 'overlap-active');
+    if (queued) await this.store.resumeDeferred(queued.id, this.now());
+  }
+
+  private track(task: Promise<void>): void {
+    this.inFlight.add(task);
+    void task.finally(() => this.inFlight.delete(task));
   }
 
   private async fail(
@@ -255,10 +362,16 @@ export class TriggerManager {
     this.bump('failed');
   }
 
-  private bump(field: 'materialized' | 'dispatched' | 'succeeded' | 'failed' | 'deferred'): void {
-    this.state = { ...this.state, [field]: this.state[field] + 1 };
+  private bump(field: Counter): void {
+    this.add(field, 1);
+  }
+
+  private add(field: Counter, count: number): void {
+    this.state = { ...this.state, [field]: this.state[field] + count };
   }
 }
+
+type Counter = 'materialized' | 'dispatched' | 'succeeded' | 'failed' | 'deferred' | 'skipped' | 'coalesced' | 'clockJumps';
 
 function scheduleContract(definition: TriggerDefinition): { schedule: ScheduleSpec; timeZone: string } {
   return definition.triggerSpec as unknown as { schedule: ScheduleSpec; timeZone: string };
@@ -291,4 +404,8 @@ function normalizeCode(error: unknown, fallback: string): string {
     : fallback;
   const normalized = candidate.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 128);
   return /^[a-z]/.test(normalized) ? normalized : fallback;
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }

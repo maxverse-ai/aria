@@ -4,7 +4,7 @@ Status: proposed direction. This document defines the target architecture and
 progressive delivery plan; no scheduled execution behavior is shipped by this
 document.
 
-Implementation status: Stages 0 through 4 are accepted; Stage 5 is implemented
+Implementation status: Stages 0 through 5 are accepted; Stage 6 is implemented
 on its integration branch. Existing conversation
 starts pass through the runtime-validated `RunIntent` boundary. The Trigger
 Provider ABI now defines provider manifests, capabilities, serializable source
@@ -19,11 +19,14 @@ The storage-neutral Trigger State port now has detached in-memory and
 process-safe atomic-file adapters, revision-checked definition updates, atomic
 occurrence materialization plus schedule advancement, fenced leases, restart
 recovery, persisted deterministic retries, deferred/dead handling, and bounded
-cleanup. The host-owned TriggerManager now composes one-time history-only work
-with the existing profile execution path. Production activation remains behind
+cleanup. The host-owned TriggerManager now composes one-time and recurring
+history-only work with the existing profile execution path. It reconciles
+missed daily, weekly, and constrained-cron fires from durable cursors, detects
+wall-clock jumps, restores work when a stopped profile returns, and enforces
+overlap ceilings without blocking future clock scans on long agent runs.
+Production activation remains behind
 the explicit `ARIA_TRIGGER_RUNTIME=enabled` rollout switch and is off by
-default; recurring reconciliation and proactive result delivery remain later
-stages.
+default; proactive result delivery remains a later stage.
 
 ## Decision
 

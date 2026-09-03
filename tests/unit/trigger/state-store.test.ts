@@ -41,6 +41,18 @@ describe('TriggerStateStore', () => {
       .rejects.toMatchObject({ code: 'invalid-definition-transition' });
   });
 
+  it('advances the schedule cursor without changing its semantic revision', async () => {
+    const store = await activeStore();
+    await expect(store.advanceSchedule({
+      definitionId: 'definition-a', expectedRevision: 1, expectedNextFireAt: 100,
+      nextFireAt: 200, advancedAt: 150,
+    })).resolves.toMatchObject({ revision: 1, nextFireAt: 200, scheduleAdvancedAt: 150 });
+    await expect(store.advanceSchedule({
+      definitionId: 'definition-a', expectedRevision: 1, expectedNextFireAt: 100,
+      nextFireAt: 300, advancedAt: 151,
+    })).rejects.toMatchObject({ code: 'revision-conflict' });
+  });
+
   it('fences expired workers and recovers an ambiguous dispatch checkpoint', async () => {
     const store = await materializedStore();
     const first = await claim(store, 100, 'lease-a', 'worker-a');
@@ -89,6 +101,16 @@ describe('TriggerStateStore', () => {
     await store.resumeDeferred(claimed.id, 1_001);
     await expect(store.claimNext({ now: 1_001, leaseId: 'lease-c', leaseOwner: 'worker', leaseDurationMs: 10 }))
       .resolves.toMatchObject({ state: 'leased', attempt: 2 });
+  });
+
+  it('records an overlap skip as an explicit terminal occurrence', async () => {
+    const store = await materializedStore();
+    const claimed = await claim(store, 100, 'lease-a', 'worker');
+    await expect(store.markSkipped(claimed.id, lease(claimed), 'overlap-skipped', 101))
+      .resolves.toMatchObject({
+        state: 'skipped', blockedCode: 'overlap-skipped', completedAt: 101,
+      });
+    await expect(store.cleanup({ completedBefore: 102, limit: 10 })).resolves.toEqual([claimed.id]);
   });
 
   it('derives restart-stable idempotency and retry values', () => {

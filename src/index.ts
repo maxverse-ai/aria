@@ -110,6 +110,7 @@ export type {
   TriggerQuotaPolicy,
   TriggerRetryInput,
   TriggerRetryPolicy,
+  TriggerScheduleAdvanceInput,
   TriggerStateSnapshot,
   TriggerStateStore,
 } from './trigger/state';
