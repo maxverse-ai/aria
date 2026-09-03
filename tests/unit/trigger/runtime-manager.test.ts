@@ -22,6 +22,7 @@ describe('TriggerManager single-run data path', () => {
     const manager = managerFor(store, { isProfileOnline: () => true, submit });
 
     await manager.reconcile();
+    await manager.drain();
 
     const occurrences = await store.listOccurrences();
     expect(occurrences).toHaveLength(1);
@@ -42,6 +43,121 @@ describe('TriggerManager single-run data path', () => {
     });
   });
 
+  it('coalesces a sleeping host into one current daily occurrence', async () => {
+    const first = Date.parse('2026-09-01T09:00:00Z');
+    const now = Date.parse('2026-09-03T12:00:00Z');
+    const store = new InMemoryTriggerStateStore();
+    await store.createDefinition(definition({
+      triggerSpec: { schedule: { kind: 'daily', at: { hour: 9, minute: 0 } }, timeZone: 'UTC' },
+      nextFireAt: first,
+    }));
+    const manager = managerFor(store, {
+      isProfileOnline: () => true,
+      submit: async () => ({ runId: 'daily-run', completion: Promise.resolve({ status: 'succeeded' }) }),
+    }, () => now);
+
+    await manager.reconcile();
+    await manager.drain();
+
+    expect(await store.listOccurrences()).toEqual([
+      expect.objectContaining({ scheduledFor: Date.parse('2026-09-03T09:00:00Z'), state: 'succeeded' }),
+    ]);
+    expect(await store.getDefinition('definition-a')).toMatchObject({
+      revision: 1,
+      nextFireAt: Date.parse('2026-09-04T09:00:00Z'),
+    });
+    expect(manager.snapshot()).toMatchObject({ materialized: 1, coalesced: 2 });
+  });
+
+  it('advances skipped recurring work without manufacturing a semantic edit', async () => {
+    const first = Date.parse('2026-09-01T09:00:00Z');
+    const now = Date.parse('2026-09-03T12:00:00Z');
+    const store = new InMemoryTriggerStateStore();
+    await store.createDefinition(definition({
+      triggerSpec: { schedule: { kind: 'daily', at: { hour: 9, minute: 0 } }, timeZone: 'UTC' },
+      nextFireAt: first,
+      misfirePolicy: 'skip',
+    }));
+    const submit = vi.fn<TriggerExecutionGateway['submit']>();
+    const manager = managerFor(store, { isProfileOnline: () => true, submit }, () => now);
+
+    await manager.reconcile();
+
+    expect(await store.listOccurrences()).toEqual([]);
+    expect(await store.getDefinition('definition-a')).toMatchObject({
+      revision: 1,
+      nextFireAt: Date.parse('2026-09-04T09:00:00Z'),
+    });
+    expect(manager.snapshot()).toMatchObject({ skipped: 3 });
+  });
+
+  it('resumes an offline profile occurrence when that profile comes back', async () => {
+    let online = false;
+    const store = new InMemoryTriggerStateStore();
+    await store.createDefinition(definition());
+    const submit = vi.fn<TriggerExecutionGateway['submit']>(async () => ({
+      runId: 'resumed-run', completion: Promise.resolve({ status: 'succeeded' }),
+    }));
+    const manager = managerFor(store, { isProfileOnline: () => online, submit });
+    await manager.reconcile();
+    expect((await store.listOccurrences())[0]).toMatchObject({ state: 'deferred', blockedCode: 'profile-offline' });
+
+    online = true;
+    await expect(manager.resumeProfile('profile-a')).resolves.toBe(1);
+    await manager.drain();
+
+    expect((await store.listOccurrences())[0]).toMatchObject({ state: 'succeeded', attempt: 2 });
+    expect(submit).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not duplicate work when the wall clock moves backward', async () => {
+    let now = FIRE_AT;
+    const store = new InMemoryTriggerStateStore();
+    await store.createDefinition(definition());
+    const manager = managerFor(store, {
+      isProfileOnline: () => true,
+      submit: async () => ({ runId: 'run-a', completion: Promise.resolve({ status: 'succeeded' }) }),
+    }, () => now);
+
+    await manager.reconcile();
+    await manager.drain();
+    now -= 60_000;
+    await manager.reconcile();
+
+    expect(await store.listOccurrences()).toHaveLength(1);
+    expect(manager.snapshot().clockJumps).toBe(1);
+  });
+
+  it('queues one overlapping occurrence and dispatches it after the active run', async () => {
+    let now = Date.parse('2026-09-01T09:00:00Z');
+    let resolveFirst!: (result: { status: 'succeeded' }) => void;
+    const firstCompletion = new Promise<{ status: 'succeeded' }>((resolve) => { resolveFirst = resolve });
+    const store = new InMemoryTriggerStateStore();
+    await store.createDefinition(definition({
+      triggerSpec: { schedule: { kind: 'cron', expression: '* * * * *' }, timeZone: 'UTC' },
+      nextFireAt: now,
+      quota: { maxActiveOccurrences: 2, maxRunsPerDay: 24 },
+    }));
+    const submit = vi.fn<TriggerExecutionGateway['submit']>()
+      .mockResolvedValueOnce({ runId: 'run-1', completion: firstCompletion })
+      .mockResolvedValueOnce({ runId: 'run-2', completion: Promise.resolve({ status: 'succeeded' }) });
+    const manager = managerFor(store, { isProfileOnline: () => true, submit }, () => now);
+
+    await manager.reconcile();
+    now += 60_000;
+    await manager.reconcile();
+    expect(await store.listOccurrences()).toEqual([
+      expect.objectContaining({ state: 'running' }),
+      expect.objectContaining({ state: 'deferred', blockedCode: 'overlap-active' }),
+    ]);
+
+    resolveFirst({ status: 'succeeded' });
+    await manager.drain();
+
+    expect((await store.listOccurrences()).map((item) => item.state)).toEqual(['succeeded', 'succeeded']);
+    expect(submit).toHaveBeenCalledTimes(2);
+  });
+
   it('is inert unless the rollout switch is explicitly enabled', async () => {
     const store = new InMemoryTriggerStateStore();
     await store.createDefinition(definition());
@@ -54,6 +170,7 @@ describe('TriggerManager single-run data path', () => {
 
     manager.start();
     await manager.reconcile();
+    await manager.drain();
 
     expect(await store.listOccurrences()).toEqual([]);
     expect(submit).not.toHaveBeenCalled();
@@ -67,6 +184,7 @@ describe('TriggerManager single-run data path', () => {
     const manager = managerFor(store, { isProfileOnline: () => false, submit });
 
     await manager.reconcile();
+    await manager.drain();
 
     expect(await store.listOccurrences()).toEqual([
       expect.objectContaining({ state: 'deferred', blockedCode: 'profile-offline' }),
@@ -83,6 +201,7 @@ describe('TriggerManager single-run data path', () => {
     });
 
     await manager.reconcile();
+    await manager.drain();
 
     expect(await store.listOccurrences()).toEqual([
       expect.objectContaining({
@@ -108,6 +227,7 @@ describe('TriggerManager single-run data path', () => {
     const manager = managerFor(store, { isProfileOnline: () => true, submit });
 
     await manager.reconcile();
+    await manager.drain();
 
     expect(await store.listOccurrences()).toEqual([
       expect.objectContaining({
@@ -119,13 +239,17 @@ describe('TriggerManager single-run data path', () => {
   });
 });
 
-function managerFor(store: InMemoryTriggerStateStore, execution: TriggerExecutionGateway) {
+function managerFor(
+  store: InMemoryTriggerStateStore,
+  execution: TriggerExecutionGateway,
+  now: () => number = () => FIRE_AT,
+) {
   let id = 0;
   return new TriggerManager({
     enabled: true,
     store,
     execution,
-    now: () => FIRE_AT,
+    now,
     createId: () => `id-${++id}`,
     pollIntervalMs: 60_000,
   });

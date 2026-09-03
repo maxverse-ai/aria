@@ -39,7 +39,7 @@ const schemas: Record<TriggerContractSchemaName, Readonly<Record<string, unknown
       schemaVersion: { const: 1 }, id: identifier, idempotencyKey: identifier,
       profileId: identifier, definitionId: identifier,
       definitionRevision: { type: 'integer', minimum: 1 }, scheduledFor: { type: 'integer', minimum: 0 },
-      state: { enum: ['pending', 'leased', 'dispatching', 'running', 'retry-wait', 'deferred', 'succeeded', 'dead'] },
+      state: { enum: ['pending', 'leased', 'dispatching', 'running', 'retry-wait', 'deferred', 'succeeded', 'skipped', 'dead'] },
       attempt: { type: 'integer', minimum: 0 }, fence: { type: 'integer', minimum: 0 },
       nextAttemptAt: { type: 'integer', minimum: 0 },
       lease: {
@@ -244,7 +244,7 @@ export function triggerCapabilities(): TriggerCapabilitySnapshot {
   return {
     schema: 'aria.trigger.capabilities.v1',
     apiVersion: TRIGGER_CONTROL_API_VERSION,
-    implementationStage: 'single-run-data-path',
+    implementationStage: 'recurring-semantics',
     runtimeEnabled: false,
     capabilities: [
       {

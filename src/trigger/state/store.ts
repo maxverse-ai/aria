@@ -10,6 +10,7 @@ import type {
   TriggerOccurrence,
   TriggerOccurrenceFilter,
   TriggerRetryInput,
+  TriggerScheduleAdvanceInput,
 } from './types';
 
 export interface TriggerStateStore {
@@ -19,6 +20,7 @@ export interface TriggerStateStore {
   replaceDefinition(definition: TriggerDefinition, expectedRevision: number): Promise<TriggerDefinition>;
 
   materialize(input: TriggerMaterializationInput): Promise<TriggerMaterializationResult>;
+  advanceSchedule(input: TriggerScheduleAdvanceInput): Promise<TriggerDefinition>;
   getOccurrence(id: string): Promise<TriggerOccurrence | undefined>;
   getOccurrenceByIdempotencyKey(key: string): Promise<TriggerOccurrence | undefined>;
   listOccurrences(filter?: TriggerOccurrenceFilter): Promise<readonly TriggerOccurrence[]>;
@@ -27,6 +29,7 @@ export interface TriggerStateStore {
   beginDispatch(id: string, lease: TriggerLeaseRef, intentId: string, at: number): Promise<TriggerOccurrence>;
   markRunning(id: string, lease: TriggerLeaseRef, runId: string, at: number): Promise<TriggerOccurrence>;
   markSucceeded(id: string, lease: TriggerLeaseRef, at: number): Promise<TriggerOccurrence>;
+  markSkipped(id: string, lease: TriggerLeaseRef, code: string, at: number): Promise<TriggerOccurrence>;
   scheduleRetry(input: TriggerRetryInput): Promise<TriggerOccurrence>;
   markDeferred(id: string, lease: TriggerLeaseRef, blockedCode: string, at: number): Promise<TriggerOccurrence>;
   resumeDeferred(id: string, at: number): Promise<TriggerOccurrence>;

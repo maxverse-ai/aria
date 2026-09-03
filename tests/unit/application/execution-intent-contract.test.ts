@@ -96,7 +96,7 @@ describe('execution intent contract', () => {
     expect(triggerCapabilities()).toMatchObject({
       schema: 'aria.trigger.capabilities.v1',
       apiVersion: 1,
-      implementationStage: 'single-run-data-path',
+      implementationStage: 'recurring-semantics',
       runtimeEnabled: false,
     });
     expect(triggerContractSchema('run-intent')).toMatchObject({

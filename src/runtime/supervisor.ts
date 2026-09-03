@@ -995,6 +995,7 @@ export class Supervisor {
       await managed.bringUp(new Date().toISOString());
       this.managed.set(appPaths.profile, managed);
       this.triggerManager.start();
+      await this.triggerManager.resumeProfile(appPaths.profile);
     } catch (err) {
       await engineRuntime.dispose().catch(() => undefined);
       throw err;

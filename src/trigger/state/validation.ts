@@ -15,7 +15,7 @@ import {
 
 const STATES = new Set<TriggerDefinitionState>(['draft', 'active', 'paused', 'canceled']);
 const OCCURRENCE_STATES = new Set<TriggerOccurrenceState>([
-  'pending', 'leased', 'dispatching', 'running', 'retry-wait', 'deferred', 'succeeded', 'dead',
+  'pending', 'leased', 'dispatching', 'running', 'retry-wait', 'deferred', 'succeeded', 'skipped', 'dead',
 ]);
 const FAILURE_KINDS = new Set(['transient', 'authorization', 'configuration', 'unsupported-capability', 'canceled', 'permanent']);
 const SOURCE_KINDS = new Set(['schedule', 'webhook', 'internal-event']);
@@ -160,6 +160,7 @@ export function assertTriggerOccurrence(value: unknown): asserts value is Trigge
   if (occurrence.state === 'retry-wait' && occurrence.nextAttemptAt === undefined) invalid('retry-wait requires nextAttemptAt');
   if (occurrence.state === 'deferred' && occurrence.blockedCode === undefined) invalid('deferred occurrence requires blockedCode');
   if (occurrence.state === 'succeeded' && occurrence.completedAt === undefined) invalid('succeeded occurrence requires completedAt');
+  if (occurrence.state === 'skipped' && (occurrence.completedAt === undefined || occurrence.blockedCode === undefined)) invalid('skipped occurrence requires blockedCode and completedAt');
   if (occurrence.state === 'dead' && (occurrence.completedAt === undefined || occurrence.failure === undefined)) invalid('dead occurrence requires failure and completedAt');
   if (occurrence.deadAcknowledgedAt !== undefined && occurrence.state !== 'dead') invalid('only dead occurrences may be acknowledged');
 }
