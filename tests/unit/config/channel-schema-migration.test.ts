@@ -73,7 +73,9 @@ describe('channel schema v3 migration', () => {
 
     expect(applied.backupReused).toBe(false);
     expect(await readFile(backupPath, 'utf8')).toBe(before);
-    expect((await stat(backupPath)).mode & 0o777).toBe(0o600);
+    if (process.platform !== 'win32') {
+      expect((await stat(backupPath)).mode & 0o777).toBe(0o600);
+    }
     const migrated = await loadRootConfig(configPath);
     expect(migrated?.schemaVersion).toBe(3);
     expect(migrated?.profiles.primary?.schemaVersion).toBe(3);
@@ -122,7 +124,9 @@ describe('channel schema v3 migration', () => {
 
     const result = await applyChannelSchemaV3Migration(plan);
     expect(result.backupReused).toBe(true);
-    expect((await stat(backupPath)).mode & 0o777).toBe(0o600);
+    if (process.platform !== 'win32') {
+      expect((await stat(backupPath)).mode & 0o777).toBe(0o600);
+    }
     expect((await loadRootConfig(configPath))?.schemaVersion).toBe(3);
   });
 

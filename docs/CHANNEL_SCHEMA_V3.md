@@ -90,7 +90,7 @@ The public migration API is deliberately separate from ordinary config reads:
 1. `planChannelSchemaV3Migration()` reads and validates schema v2, computes a
    source revision, and returns a secret-free plan without writing anything.
 2. `applyChannelSchemaV3Migration()` locks the config, rejects source drift,
-   writes an exact mode-`0600` backup, atomically writes schema v3, then reloads
+   writes an exact private backup (`0600` on POSIX), atomically writes schema v3, then reloads
    and validates the result.
 3. If write verification fails, apply restores the exact source bytes. An
    identical backup left by interruption is safely reused; a different backup
