@@ -36,6 +36,53 @@ export {
   triggerCapabilities,
   triggerContractSchema,
 } from './application/execution-intent';
+
+// Trigger providers observe external/time events and submit serializable
+// envelopes. Core alone resolves definitions, permissions and agent execution.
+export {
+  TRIGGER_PROVIDER_ABI_VERSION,
+  TriggerProviderError,
+  TriggerProviderRegistry,
+  assertCanonicalTriggerProviderId,
+  assertResolvedTriggerInstance,
+  assertTriggerDrainOptions,
+  assertTriggerDrainResult,
+  assertTriggerEnvelope,
+  assertTriggerHealthSnapshot,
+  assertTriggerIngressAcceptance,
+  assertTriggerInstanceRef,
+  assertTriggerProvider,
+  assertTriggerProviderManifest,
+  assertTriggerRuntime,
+  assertTriggerRuntimeSnapshot,
+  runTriggerProviderContract,
+  triggerRuntimeKey,
+} from './trigger/plugin';
+export type {
+  ResolvedTriggerInstance,
+  TriggerActorEvidence,
+  TriggerDrainOptions,
+  TriggerDrainResult,
+  TriggerEnvelope,
+  TriggerHealthSnapshot,
+  TriggerIngressAcceptance,
+  TriggerIngressMode,
+  TriggerIngressPort,
+  TriggerInstanceRef,
+  TriggerProvider,
+  TriggerProviderCapabilities,
+  TriggerProviderConfig,
+  TriggerProviderContext,
+  TriggerProviderErrorKind,
+  TriggerProviderErrorOptions,
+  TriggerProviderManifest,
+  TriggerProviderPackage,
+  TriggerReplayMode,
+  TriggerRuntime,
+  TriggerRuntimeSnapshot,
+  TriggerRuntimeState,
+  TriggerSourceKind,
+} from './trigger/plugin';
 export type {
   EngineCapabilityRequirements,
   EngineInputRequirement,

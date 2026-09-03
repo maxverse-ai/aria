@@ -28,6 +28,49 @@ const leafResultRouteSchema = {
 } as const;
 
 const schemas: Record<TriggerContractSchemaName, Readonly<Record<string, unknown>>> = {
+  'trigger-provider-manifest': {
+    $id: 'aria.trigger.provider-manifest.v1',
+    type: 'object', additionalProperties: false,
+    required: ['abiVersion', 'id', 'displayName', 'package', 'configVersion', 'configSchema', 'capabilities'],
+    properties: {
+      abiVersion: { const: 1 },
+      id: { type: 'string', pattern: '^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$', maxLength: 64 },
+      displayName: { type: 'string', minLength: 1, maxLength: 128 },
+      package: {
+        type: 'object', additionalProperties: false, required: ['name', 'version'],
+        properties: { name: { type: 'string' }, version: { type: 'string' } },
+      },
+      configVersion: { type: 'integer', minimum: 1 },
+      configSchema: { type: 'object' },
+      capabilities: {
+        type: 'object', additionalProperties: false,
+        required: ['ingress', 'sources', 'replay', 'acknowledgements'],
+        properties: {
+          ingress: { enum: ['clock', 'push', 'poll'] },
+          sources: { type: 'array', minItems: 1, uniqueItems: true, items: { enum: ['schedule', 'webhook', 'internal-event'] } },
+          replay: { enum: ['source-event-id', 'cursor', 'none'] },
+          acknowledgements: { type: 'boolean' },
+        },
+      },
+    },
+  },
+  'trigger-envelope': {
+    $id: 'aria.trigger.envelope.v1',
+    type: 'object', additionalProperties: false,
+    required: ['abiVersion', 'profileId', 'providerId', 'instanceId', 'sourceKind', 'sourceEventId', 'occurredAt', 'observedAt', 'scopeRef', 'actor', 'data'],
+    properties: {
+      abiVersion: { const: 1 }, profileId: identifier, providerId: identifier,
+      instanceId: identifier, sourceKind: { enum: ['schedule', 'webhook', 'internal-event'] },
+      sourceEventId: identifier, triggerDefinitionId: identifier,
+      occurredAt: { type: 'integer', minimum: 0 }, observedAt: { type: 'integer', minimum: 0 },
+      scopeRef: identifier,
+      actor: {
+        type: 'object', additionalProperties: false, required: ['kind', 'actorRef'],
+        properties: { kind: { enum: ['user', 'system', 'agent'] }, actorRef: identifier },
+      },
+      data: {}, cursor: { type: 'string', minLength: 1, maxLength: 2048 },
+    },
+  },
   'session-policy': {
     $id: 'aria.trigger.session-policy.v1',
     oneOf: [
@@ -140,7 +183,7 @@ export function triggerCapabilities(): TriggerCapabilitySnapshot {
   return {
     schema: 'aria.trigger.capabilities.v1',
     apiVersion: TRIGGER_CONTROL_API_VERSION,
-    implementationStage: 'execution-intent',
+    implementationStage: 'trigger-provider-abi',
     runtimeEnabled: false,
     capabilities: [
       {
@@ -151,7 +194,7 @@ export function triggerCapabilities(): TriggerCapabilitySnapshot {
       },
       {
         id: 'trigger.schema',
-        cli: 'aria trigger schema <run-intent|result-route|session-policy>',
+        cli: 'aria trigger schema <run-intent|result-route|session-policy|trigger-provider-manifest|trigger-envelope>',
         access: 'read',
         outputs: ['text', 'json'],
       },
@@ -173,5 +216,6 @@ export function triggerContractSchema(name: string): TriggerContractSchemaSnapsh
 }
 
 export function isTriggerContractSchemaName(value: string): value is TriggerContractSchemaName {
-  return value === 'run-intent' || value === 'result-route' || value === 'session-policy';
+  return value === 'run-intent' || value === 'result-route' || value === 'session-policy'
+    || value === 'trigger-provider-manifest' || value === 'trigger-envelope';
 }
