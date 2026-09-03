@@ -71,7 +71,9 @@ describe('AgentTriggerGovernanceApi', () => {
       state: 'active',
     });
     expect(JSON.stringify(issued.grant)).not.toContain('codex-agent-a');
-    expect((await stat(grantPath)).mode & 0o777).toBe(0o600);
+    if (process.platform !== 'win32') {
+      expect((await stat(grantPath)).mode & 0o777).toBe(0o600);
+    }
     const persisted = await readFile(grantPath, 'utf8');
     expect(persisted).not.toContain('unforgeable-secret');
     expect(persisted).toContain('tokenDigest');

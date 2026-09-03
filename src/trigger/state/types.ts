@@ -160,6 +160,8 @@ export interface TriggerMaterializationInput {
   definitionId: string;
   expectedRevision: number;
   expectedNextFireAt?: number;
+  /** Stable provider event identity for non-schedule materialization. */
+  sourceEventId?: string;
   occurrence: TriggerOccurrence;
   nextFireAt?: number;
   advancedAt: number;

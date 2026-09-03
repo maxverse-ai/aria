@@ -604,6 +604,21 @@ default ownership merely to prove scheduling.
     also isolate Unix users/containers and inject only the selected grant.
 11. **Extension proof.** Implement a harmless webhook or synthetic event
     provider to prove that Trigger ABI is not a schedule-only abstraction.
+    Implemented with an in-process synthetic push source that declares
+    `internal-event`, emits through the same validated Provider ABI, receives
+    acknowledgement only after durable occurrence materialization, and then
+    dispatches through the existing TriggerManager and RunIntent path. Source
+    event identity is persisted for restart-stable duplicate suppression; the
+    provider's actor and payload remain evidence and cannot replace the durable
+    definition's actor, prompt, workspace, grant, scope, or result routes.
+
+    The synthetic source is an embeddable contract fixture, not a network
+    endpoint and not registered by the production Supervisor. It therefore
+    proves push-provider lifecycle, drain, acknowledgement, binding checks,
+    and end-to-end execution without creating an unauthenticated trigger
+    backdoor. A future webhook adapter can reuse the same ingress coordinator
+    after adding its own authentication, request-size, replay, and rate-limit
+    policy.
 12. **Distributed scheduling, if required.** Only after a multi-host product
     decision, replace storage ports and add leader/partition ownership. Do not
     add consensus or distributed leases to the single-host design preemptively.

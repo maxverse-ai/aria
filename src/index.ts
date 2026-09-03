@@ -73,14 +73,33 @@ export {
   assertTriggerOccurrence,
   assertTriggerRetryPolicy,
   createPendingOccurrence,
+  createPendingSourceOccurrence,
   triggerOccurrenceIdempotencyKey,
+  triggerSourceOccurrenceIdempotencyKey,
   triggerRetryDelay,
 } from './trigger/state';
 
 export {
   TriggerManager,
+  TriggerIngressCoordinator,
+  TriggerIngressError,
   createTriggerRunIntent,
 } from './trigger/runtime';
+export type {
+  TriggerIngressCoordinatorOptions,
+  TriggerIngressErrorCode,
+} from './trigger/runtime';
+
+export {
+  InMemorySyntheticEventSource,
+  createSyntheticTriggerProvider,
+} from './trigger/providers';
+export type {
+  SyntheticEvent,
+  SyntheticEventListener,
+  SyntheticEventSource,
+  SyntheticTriggerConfig,
+} from './trigger/providers';
 
 export {
   FileTriggerResultDeliveryStore,

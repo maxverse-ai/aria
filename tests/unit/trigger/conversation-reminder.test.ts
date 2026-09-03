@@ -72,7 +72,9 @@ describe('ConversationReminderService', () => {
       scopeId: 'chat-secret',
       sourceMessageId: 'message-secret',
     });
-    expect((await stat(anchorPath)).mode & 0o777).toBe(0o600);
+    if (process.platform !== 'win32') {
+      expect((await stat(anchorPath)).mode & 0o777).toBe(0o600);
+    }
     expect(await readFile(anchorPath, 'utf8')).toContain('chat-secret');
   });
 

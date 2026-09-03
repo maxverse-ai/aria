@@ -5,6 +5,7 @@ import type {
   TriggerHealthSnapshot,
   TriggerProvider,
   TriggerProviderConfig,
+  TriggerRuntime,
   TriggerRuntimeSnapshot,
 } from './types';
 
@@ -13,6 +14,8 @@ export interface TriggerProviderContractOptions<TConfig extends TriggerProviderC
   instance: ResolvedTriggerInstance<TConfig>;
   acceptance?: { status: 'accepted' | 'duplicate'; receiptId: string };
   drainDeadlineAt?: number;
+  /** Provider-specific stimulus applied only after the validated runtime starts. */
+  exercise?: (runtime: TriggerRuntime) => Promise<void>;
 }
 
 export interface TriggerProviderContractResult {
@@ -39,6 +42,7 @@ export async function runTriggerProviderContract<TConfig extends TriggerProvider
     },
   });
   try {
+    await options.exercise?.(runtime);
     return {
       accepted,
       initialSnapshot: runtime.snapshot(),

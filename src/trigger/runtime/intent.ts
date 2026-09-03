@@ -18,7 +18,7 @@ export function createTriggerRunIntent(
     sourceKind: definition.sourceKind,
     sourceIdentity: {
       providerId: definition.providerId,
-      sourceEventId: occurrence.id,
+      sourceEventId: occurrence.metadata.sourceEventId ?? occurrence.id,
     },
     idempotencyKey: occurrence.idempotencyKey,
     actor: structuredClone(definition.intentTemplate.actor),
@@ -35,6 +35,9 @@ export function createTriggerRunIntent(
         triggerDefinitionId: definition.id,
         triggerOccurrenceId: occurrence.id,
         scheduledFor: String(occurrence.scheduledFor),
+        ...(occurrence.metadata.sourceEventId
+          ? { sourceEventId: occurrence.metadata.sourceEventId }
+          : {}),
       },
     },
   };

@@ -75,6 +75,7 @@ export abstract class AbstractTriggerStateStore implements TriggerStateStore {
     assertTriggerOccurrence(input.occurrence);
     timestamp(input.advancedAt, 'schedule advancement time');
     timestampOptional(input.nextFireAt, 'next fire time');
+    if (input.sourceEventId !== undefined) nonEmpty(input.sourceEventId, 'source event id');
     return this.mutate((state) => {
       const existingId = state.occurrenceKeys[input.occurrence.idempotencyKey];
       if (existingId) {
@@ -90,11 +91,24 @@ export abstract class AbstractTriggerStateStore implements TriggerStateStore {
       if (occurrence.definitionId !== definition.id
         || occurrence.profileId !== definition.profileId
         || occurrence.definitionRevision !== definition.revision) conflict('occurrence does not match its trigger definition');
-      if (occurrence.idempotencyKey !== triggerOccurrenceIdempotencyKey(
-        occurrence.profileId, occurrence.definitionId, occurrence.scheduledFor,
-      )) conflict('occurrence idempotency key does not match its logical schedule identity');
+      const expectedKey = input.sourceEventId === undefined
+        ? triggerOccurrenceIdempotencyKey(occurrence.profileId, occurrence.definitionId, occurrence.scheduledFor)
+        : triggerSourceOccurrenceIdempotencyKey(
+          occurrence.profileId,
+          definition.providerId,
+          definition.instanceId,
+          occurrence.definitionId,
+          input.sourceEventId,
+        );
+      if (occurrence.idempotencyKey !== expectedKey) {
+        conflict(input.sourceEventId === undefined
+          ? 'occurrence idempotency key does not match its logical schedule identity'
+          : 'occurrence idempotency key does not match its source event identity');
+      }
       if (state.occurrences[occurrence.id]) conflict(`trigger occurrence already exists: ${occurrence.id}`);
-      const advanced = { ...definition, nextFireAt: input.nextFireAt, scheduleAdvancedAt: input.advancedAt };
+      const advanced = input.sourceEventId === undefined
+        ? { ...definition, nextFireAt: input.nextFireAt, scheduleAdvancedAt: input.advancedAt }
+        : definition;
       assertTriggerDefinition(advanced);
       state.definitions[definition.id] = advanced;
       state.occurrences[occurrence.id] = clone(occurrence);
@@ -326,6 +340,21 @@ export function triggerOccurrenceIdempotencyKey(profileId: string, definitionId:
   return `${profileId}\u001f${definitionId}\u001f${scheduledFor}`;
 }
 
+export function triggerSourceOccurrenceIdempotencyKey(
+  profileId: string,
+  providerId: string,
+  instanceId: string,
+  definitionId: string,
+  sourceEventId: string,
+): string {
+  nonEmpty(profileId, 'profile id');
+  nonEmpty(providerId, 'provider id');
+  nonEmpty(instanceId, 'instance id');
+  nonEmpty(definitionId, 'definition id');
+  nonEmpty(sourceEventId, 'source event id');
+  return `source:${JSON.stringify([profileId, providerId, instanceId, definitionId, sourceEventId])}`;
+}
+
 export function createPendingOccurrence(input: {
   id: string; profileId: string; definitionId: string; definitionRevision: number;
   scheduledFor: number; createdAt: number; metadata?: Readonly<Record<string, string>>;
@@ -341,6 +370,45 @@ export function createPendingOccurrence(input: {
     state: 'pending', attempt: 0, fence: 0,
     createdAt: input.createdAt, updatedAt: input.createdAt,
     metadata: input.metadata ?? {},
+  };
+  assertTriggerOccurrence(occurrence);
+  return occurrence;
+}
+
+export function createPendingSourceOccurrence(input: {
+  id: string;
+  profileId: string;
+  providerId: string;
+  instanceId: string;
+  definitionId: string;
+  definitionRevision: number;
+  sourceEventId: string;
+  acceptedAt: number;
+  occurredAt: number;
+}): TriggerOccurrence {
+  const occurrence: TriggerOccurrence = {
+    schemaVersion: TRIGGER_STATE_SCHEMA_VERSION,
+    id: input.id,
+    idempotencyKey: triggerSourceOccurrenceIdempotencyKey(
+      input.profileId,
+      input.providerId,
+      input.instanceId,
+      input.definitionId,
+      input.sourceEventId,
+    ),
+    profileId: input.profileId,
+    definitionId: input.definitionId,
+    definitionRevision: input.definitionRevision,
+    // External timestamps are evidence. Core acceptance time controls dispatch.
+    scheduledFor: input.acceptedAt,
+    state: 'pending', attempt: 0, fence: 0,
+    createdAt: input.acceptedAt, updatedAt: input.acceptedAt,
+    metadata: {
+      providerId: input.providerId,
+      instanceId: input.instanceId,
+      sourceEventId: input.sourceEventId,
+      occurredAt: String(input.occurredAt),
+    },
   };
   assertTriggerOccurrence(occurrence);
   return occurrence;

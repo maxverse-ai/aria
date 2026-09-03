@@ -244,7 +244,7 @@ export function triggerCapabilities(): TriggerCapabilitySnapshot {
   return {
     schema: 'aria.trigger.capabilities.v1',
     apiVersion: TRIGGER_CONTROL_API_VERSION,
-    implementationStage: 'agent-created-reminders',
+    implementationStage: 'extension-proof',
     runtimeEnabled: false,
     capabilities: [
       {

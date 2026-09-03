@@ -7,6 +7,7 @@ import {
   FileTriggerStateStore,
   TRIGGER_STATE_SCHEMA_VERSION,
   createPendingOccurrence,
+  createPendingSourceOccurrence,
 } from '../../../src/trigger/state';
 
 const roots: string[] = [];
@@ -57,6 +58,32 @@ describe('FileTriggerStateStore', () => {
       .resolves.toMatchObject({ state: 'dispatching' });
   });
 
+  it('keeps provider event deduplication stable across process adapters and restart', async () => {
+    const path = await statePath();
+    const first = new FileTriggerStateStore(path);
+    const second = new FileTriggerStateStore(path);
+    const external = definition({
+      providerId: 'synthetic-event', instanceId: 'primary', sourceKind: 'internal-event',
+      triggerSpec: { eventType: 'repository.changed' }, nextFireAt: undefined,
+    });
+    await first.createDefinition(external);
+    const occurrence = createPendingSourceOccurrence({
+      id: 'event-occurrence-a', profileId: 'profile-a', providerId: 'synthetic-event',
+      instanceId: 'primary', definitionId: 'definition-a', definitionRevision: 1,
+      sourceEventId: 'source-event-a', acceptedAt: 100, occurredAt: 90,
+    });
+    const input = {
+      definitionId: 'definition-a', expectedRevision: 1, sourceEventId: 'source-event-a',
+      occurrence, advancedAt: 100,
+    };
+
+    const results = await Promise.all([first.materialize(input), second.materialize(input)]);
+    expect(results.map((item) => item.status).sort()).toEqual(['created', 'duplicate']);
+    const restarted = new FileTriggerStateStore(path);
+    expect(await restarted.listOccurrences()).toEqual([occurrence]);
+    expect(await restarted.getDefinition('definition-a')).not.toHaveProperty('scheduleAdvancedAt');
+  });
+
   it('fails closed on a corrupt snapshot', async () => {
     const path = await statePath();
     await writeFile(path, '{"schema":"wrong"}\n', { mode: 0o600 });
@@ -70,7 +97,7 @@ async function statePath(): Promise<string> {
   return join(root, 'state.json');
 }
 
-function definition(): TriggerDefinition {
+function definition(overrides: Partial<TriggerDefinition> = {}): TriggerDefinition {
   return {
     schemaVersion: TRIGGER_STATE_SCHEMA_VERSION,
     id: 'definition-a', profileId: 'profile-a', providerId: 'schedule', instanceId: 'host-clock',
@@ -87,5 +114,6 @@ function definition(): TriggerDefinition {
     retryPolicy: { maxAttempts: 3, baseDelayMs: 1, maxDelayMs: 10, jitterRatio: 0 },
     quota: { maxActiveOccurrences: 1, maxRunsPerDay: 24 }, misfirePolicy: 'coalesce', overlapPolicy: { kind: 'queue-one' },
     nextFireAt: 100, createdAt: 1, updatedAt: 1, metadata: {},
+    ...overrides,
   };
 }
