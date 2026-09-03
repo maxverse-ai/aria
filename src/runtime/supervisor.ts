@@ -60,6 +60,11 @@ import {
   type TriggerManagerSnapshot,
 } from '../trigger/runtime';
 import {
+  FileTriggerResultDeliveryStore,
+  TriggerResultRouter,
+  type ResolvedConversationRoute,
+} from '../trigger/result';
+import {
   projectProfileChannelInstances,
   requirePrimaryLarkChannelInstance,
   type LarkChannelConfig,
@@ -70,7 +75,11 @@ import {
   type LarkChannelOwnershipPolicy,
   type LarkChannelRolloutMode,
 } from '../channel/lark-ownership';
-import type { ResolvedChannelInstance } from '../channel/plugin/types';
+import type {
+  ChannelDeliveryReceipt,
+  ChannelOutboundIntent,
+  ResolvedChannelInstance,
+} from '../channel/plugin/types';
 import {
   startRuntimeControlServer,
   type RuntimeControlServerHandle,
@@ -367,6 +376,7 @@ class ManagedProfile {
     }
     const completion = (async (): Promise<TriggerExecutionResult> => {
       let terminal: TriggerExecutionResult | undefined;
+      let finalText: string | undefined;
       for await (const event of started.execution.subscribe()) {
         owner.runtime.recordEvent({
           scopeId: intent.scopeRef,
@@ -374,9 +384,12 @@ class ManagedProfile {
           policy: started.policy,
           event,
         });
-        if (event.type === 'done') {
+        if (event.type === 'final_text') {
+          finalText = event.content;
+        } else if (event.type === 'done') {
           terminal = {
             status: event.terminationReason === 'normal' ? 'succeeded' : event.terminationReason,
+            ...(finalText ? { output: { text: finalText } } : {}),
           };
         } else if (event.type === 'error') {
           terminal = {
@@ -388,6 +401,28 @@ class ManagedProfile {
       return terminal ?? { status: 'failed', errorCode: 'agent-stream-ended' };
     })();
     return { runId: started.execution.runId, completion };
+  }
+
+  resolveTriggerConversation(conversationRef: string): ResolvedConversationRoute {
+    const instance = this.larkChannelRuntime?.manager?.snapshot().instances
+      .find((candidate) => candidate.state === 'ready');
+    if (!instance) throw Object.assign(new Error('no proactive channel instance is ready'), {
+      code: 'proactive-channel-unavailable',
+    });
+    return {
+      profileId: this.profile,
+      pluginId: instance.pluginId,
+      instanceId: instance.instanceId,
+      scopeId: conversationRef,
+    };
+  }
+
+  deliverTriggerResult(intent: ChannelOutboundIntent): Promise<ChannelDeliveryReceipt> {
+    const manager = this.larkChannelRuntime?.manager;
+    if (!manager) throw Object.assign(new Error('channel manager is unavailable'), {
+      code: 'proactive-channel-unavailable',
+    });
+    return manager.deliver(intent);
   }
 
   private startLarkChannelRuntime(input: {
@@ -876,6 +911,24 @@ export class Supervisor {
       opts.larkChannelRolloutMode ?? process.env[LARK_CHANNEL_ROLLOUT_ENV],
     );
     const triggerStateFile = join(opts.rootDir ?? dirname(opts.configPath), 'triggers', 'state.v1.json');
+    const triggerResultFile = join(opts.rootDir ?? dirname(opts.configPath), 'triggers', 'result-deliveries.v1.json');
+    const resultRouter = new TriggerResultRouter({
+      store: new FileTriggerResultDeliveryStore(triggerResultFile),
+      resolver: {
+        resolve: async (profileId, conversationRef) => {
+          const profile = this.managed.get(profileId);
+          if (!profile) throw Object.assign(new Error(`profile is offline: ${profileId}`), { code: 'profile-offline' });
+          return profile.resolveTriggerConversation(conversationRef);
+        },
+      },
+      channel: {
+        deliver: (intent) => {
+          const profile = this.managed.get(intent.profileId);
+          if (!profile) throw Object.assign(new Error(`profile is offline: ${intent.profileId}`), { code: 'profile-offline' });
+          return profile.deliverTriggerResult(intent);
+        },
+      },
+    });
     this.triggerManager = new TriggerManager({
       enabled: opts.triggerRuntimeEnabled === true,
       store: opts.triggerStateStore ?? new FileTriggerStateStore(triggerStateFile),
@@ -891,6 +944,7 @@ export class Supervisor {
           return profile.submitTrigger(intent);
         },
       },
+      results: resultRouter,
       ...(opts.triggerPollIntervalMs ? { pollIntervalMs: opts.triggerPollIntervalMs } : {}),
     });
   }

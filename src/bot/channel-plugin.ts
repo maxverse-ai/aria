@@ -65,7 +65,7 @@ export function createBuiltInLarkChannelPlugin(
         outbound: ['text'],
         streaming: 'none',
         conversations: ['p2p', 'group', 'thread'],
-        proactiveMessages: false,
+        proactiveMessages: true,
         humanHandoff: false,
       },
     },

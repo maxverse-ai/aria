@@ -81,6 +81,22 @@ export {
   TriggerManager,
   createTriggerRunIntent,
 } from './trigger/runtime';
+
+export {
+  FileTriggerResultDeliveryStore,
+  InMemoryTriggerResultDeliveryStore,
+  TriggerResultRouter,
+  triggerResultDeliveryId,
+} from './trigger/result';
+export type {
+  ResolvedConversationRoute,
+  TriggerConversationRouteResolver,
+  TriggerResultChannel,
+  TriggerResultDeliveryRecord,
+  TriggerResultDeliveryState,
+  TriggerResultDeliveryStore,
+  TriggerResultGateway,
+} from './trigger/result';
 export type {
   TriggerExecutionGateway,
   TriggerExecutionResult,

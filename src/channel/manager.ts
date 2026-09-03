@@ -5,6 +5,8 @@ import type {
   ChannelDrainOptions,
   ChannelIngressPort,
   ChannelInstanceRef,
+  ChannelDeliveryReceipt,
+  ChannelOutboundIntent,
   ChannelRuntime,
   ChannelRuntimeState,
   ResolvedChannelInstance,
@@ -149,6 +151,19 @@ export class ChannelManager {
     }
     this.startPromise = this.startInternal(plans);
     return this.startPromise;
+  }
+
+  /** Send through the exact started plugin instance; supports authorized proactive intents. */
+  async deliver(intent: ChannelOutboundIntent): Promise<ChannelDeliveryReceipt> {
+    const key = channelRuntimeKey(intent);
+    const entry = this.entries.find((candidate) => channelRuntimeKey(candidate) === key);
+    if (this.state !== 'ready' || !entry?.runtime || entry.runtime.snapshot().state !== 'ready') {
+      throw managerError('channel runtime is unavailable for delivery', {
+        kind: 'transient',
+        code: 'channel-runtime-unavailable',
+      });
+    }
+    return entry.runtime.deliver(intent);
   }
 
   drain(options: ChannelDrainOptions): Promise<ChannelManagerDrainResult> {
