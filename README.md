@@ -531,6 +531,7 @@ legacy global command as a rollback baseline; it does not delete it.
 | Built-in and external engine contracts | [Engine plugins](docs/PLUGINS.md) |
 | Multi-channel plugins, lifecycle, isolation, and progressive delivery | [Channel platform architecture](docs/CHANNEL_PLATFORM_ARCHITECTURE.md) |
 | Versioned channel package/runtime contract and test kit | [Channel Plugin ABI v1](docs/CHANNEL_PLUGIN_ABI_V1.md) |
+| Scheduled runs, reminders, future trigger sources, and result routing | [Trigger platform architecture](docs/TRIGGER_PLATFORM_ARCHITECTURE.md) |
 | Private Release installation, update transactions, stable launcher, and rollback | [CLI distribution architecture](docs/DISTRIBUTION.md) |
 | Profile state, managed workspaces, and engine-owned layout | [Workspace and state layout](docs/WORKSPACE_AND_STATE_LAYOUT.md) |
 | Control-plane commands and extension boundary | [Control plane](docs/CONTROL_PLANE.md) |
