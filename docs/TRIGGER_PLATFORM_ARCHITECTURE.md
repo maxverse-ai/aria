@@ -4,7 +4,8 @@ Status: proposed direction. This document defines the target architecture and
 progressive delivery plan; no scheduled execution behavior is shipped by this
 document.
 
-Implementation status: Stages 0 through 3 are accepted. Existing conversation
+Implementation status: Stages 0 through 3 are accepted; Stage 4 is implemented
+on its integration branch. Existing conversation
 starts pass through the runtime-validated `RunIntent` boundary. The Trigger
 Provider ABI now defines provider manifests, capabilities, serializable source
 envelopes, lifecycle ownership, runtime validation, a registry, and a reusable
@@ -14,6 +15,12 @@ deliberately report that scheduled runtime behavior remains disabled.
 The pure Schedule domain supports one-time, daily, weekly, and constrained
 five-field cron calculations with explicit IANA time zones, deterministic DST
 gap/fold behavior, previews, misfire materialization, and overlap decisions.
+The storage-neutral Trigger State port now has detached in-memory and
+process-safe atomic-file adapters, revision-checked definition updates, atomic
+occurrence materialization plus schedule advancement, fenced leases, restart
+recovery, persisted deterministic retries, deferred/dead handling, and bounded
+cleanup. Runtime dispatch remains disabled until Stage 5 composes this state
+with the existing profile execution path.
 
 ## Decision
 

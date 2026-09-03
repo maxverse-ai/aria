@@ -28,6 +28,57 @@ const leafResultRouteSchema = {
 } as const;
 
 const schemas: Record<TriggerContractSchemaName, Readonly<Record<string, unknown>>> = {
+  'trigger-occurrence': {
+    $id: 'aria.trigger.occurrence.v1',
+    type: 'object', additionalProperties: false,
+    required: [
+      'schemaVersion', 'id', 'idempotencyKey', 'profileId', 'definitionId', 'definitionRevision',
+      'scheduledFor', 'state', 'attempt', 'fence', 'createdAt', 'updatedAt', 'metadata',
+    ],
+    properties: {
+      schemaVersion: { const: 1 }, id: identifier, idempotencyKey: identifier,
+      profileId: identifier, definitionId: identifier,
+      definitionRevision: { type: 'integer', minimum: 1 }, scheduledFor: { type: 'integer', minimum: 0 },
+      state: { enum: ['pending', 'leased', 'dispatching', 'running', 'retry-wait', 'deferred', 'succeeded', 'dead'] },
+      attempt: { type: 'integer', minimum: 0 }, fence: { type: 'integer', minimum: 0 },
+      nextAttemptAt: { type: 'integer', minimum: 0 },
+      lease: {
+        type: 'object', additionalProperties: false,
+        required: ['leaseId', 'owner', 'token', 'acquiredAt', 'expiresAt'],
+        properties: {
+          leaseId: identifier, owner: identifier, token: { type: 'integer', minimum: 1 },
+          acquiredAt: { type: 'integer', minimum: 0 }, expiresAt: { type: 'integer', minimum: 0 },
+        },
+      },
+      dispatch: { type: 'object' }, failure: { type: 'object' }, blockedCode: { type: 'string' },
+      createdAt: { type: 'integer', minimum: 0 }, updatedAt: { type: 'integer', minimum: 0 },
+      completedAt: { type: 'integer', minimum: 0 }, deadAcknowledgedAt: { type: 'integer', minimum: 0 },
+      metadata: { type: 'object', maxProperties: 32, additionalProperties: { type: 'string', maxLength: 1024 } },
+    },
+  },
+  'trigger-definition': {
+    $id: 'aria.trigger.definition.v1',
+    type: 'object', additionalProperties: false,
+    required: [
+      'schemaVersion', 'id', 'profileId', 'providerId', 'instanceId', 'sourceKind', 'state',
+      'revision', 'ownerRef', 'createdBy', 'authorizationGrantRef', 'authorizationCeiling',
+      'triggerSpec', 'intentTemplate', 'retryPolicy', 'quota', 'misfirePolicy', 'overlapPolicy',
+      'createdAt', 'updatedAt', 'metadata',
+    ],
+    properties: {
+      schemaVersion: { const: 1 }, id: identifier, profileId: identifier, providerId: identifier,
+      instanceId: identifier, sourceKind: { enum: ['schedule', 'webhook', 'internal-event'] },
+      state: { enum: ['draft', 'active', 'paused', 'canceled'] }, revision: { type: 'integer', minimum: 1 },
+      ownerRef: identifier, createdBy: { type: 'object' }, authorizationGrantRef: identifier,
+      authorizationCeiling: { type: 'object' }, triggerSpec: {}, intentTemplate: { type: 'object' },
+      retryPolicy: { type: 'object' }, quota: { type: 'object' },
+      misfirePolicy: { enum: ['coalesce', 'skip', 'run-once'] }, overlapPolicy: { type: 'object' },
+      nextFireAt: { type: 'integer', minimum: 0 }, createdAt: { type: 'integer', minimum: 0 },
+      updatedAt: { type: 'integer', minimum: 0 }, scheduleAdvancedAt: { type: 'integer', minimum: 0 },
+      pausedAt: { type: 'integer', minimum: 0 }, canceledAt: { type: 'integer', minimum: 0 },
+      metadata: { type: 'object', maxProperties: 32, additionalProperties: { type: 'string', maxLength: 1024 } },
+    },
+  },
   'schedule-spec': {
     $id: 'aria.trigger.schedule-spec.v1',
     oneOf: [
@@ -193,7 +244,7 @@ export function triggerCapabilities(): TriggerCapabilitySnapshot {
   return {
     schema: 'aria.trigger.capabilities.v1',
     apiVersion: TRIGGER_CONTROL_API_VERSION,
-    implementationStage: 'schedule-domain',
+    implementationStage: 'durable-trigger-state',
     runtimeEnabled: false,
     capabilities: [
       {
@@ -204,7 +255,7 @@ export function triggerCapabilities(): TriggerCapabilitySnapshot {
       },
       {
         id: 'trigger.schema',
-        cli: 'aria trigger schema <run-intent|result-route|session-policy|trigger-provider-manifest|trigger-envelope|schedule-spec>',
+        cli: 'aria trigger schema <run-intent|result-route|session-policy|trigger-provider-manifest|trigger-envelope|schedule-spec|trigger-definition|trigger-occurrence>',
         access: 'read',
         outputs: ['text', 'json'],
       },
@@ -228,5 +279,6 @@ export function triggerContractSchema(name: string): TriggerContractSchemaSnapsh
 export function isTriggerContractSchemaName(value: string): value is TriggerContractSchemaName {
   return value === 'run-intent' || value === 'result-route' || value === 'session-policy'
     || value === 'trigger-provider-manifest' || value === 'trigger-envelope'
-    || value === 'schedule-spec';
+    || value === 'schedule-spec' || value === 'trigger-definition'
+    || value === 'trigger-occurrence';
 }

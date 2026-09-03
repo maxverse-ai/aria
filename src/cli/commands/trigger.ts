@@ -32,7 +32,7 @@ export function formatTriggerCapabilities(snapshot: TriggerCapabilitySnapshot): 
   return [
     `Aria trigger API v${snapshot.apiVersion}`,
     `implementation: ${snapshot.implementationStage}`,
-    'runtime: disabled (schedule domain only; no scheduled execution is shipped)',
+    'runtime: disabled (durable state only; no scheduled execution is shipped)',
     ...snapshot.capabilities.map((item) => `- ${item.id}: ${item.cli} [${item.access}]`),
   ].join('\n');
 }
