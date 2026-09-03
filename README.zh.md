@@ -519,6 +519,7 @@ grep '"event":"enter"' ~/.aria/profiles/<profile>/logs/bridge-$(date +%Y%m%d).js
 | 内置与外部引擎契约 | [Engine Plugin](docs/PLUGINS.md) |
 | 多通道插件、生命周期、隔离和渐进式交付 | [通道平台架构](docs/CHANNEL_PLATFORM_ARCHITECTURE.md) |
 | 版本化通道包/运行时契约和测试工具 | [Channel Plugin ABI v1](docs/CHANNEL_PLUGIN_ABI_V1.md) |
+| 定时运行、提醒、未来触发源和结果路由 | [触发平台架构](docs/TRIGGER_PLATFORM_ARCHITECTURE.md) |
 | 私有 Release 安装、更新事务、稳定 launcher 与回滚 | [CLI 分发架构](docs/DISTRIBUTION.md) |
 | Profile 状态、托管工作空间和引擎自有布局 | [工作空间与状态布局](docs/WORKSPACE_AND_STATE_LAYOUT.md) |
 | 控制面命令与扩展边界 | [控制平面](docs/CONTROL_PLANE.md) |
