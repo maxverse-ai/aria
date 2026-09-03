@@ -4,7 +4,10 @@ Status: proposed direction. This document defines the target architecture and
 progressive delivery plan; no scheduled execution behavior is shipped by this
 document.
 
-Implementation status: Stages 0 through 8 are implemented. Existing conversation
+Implementation status: Stages 0 through 11 are implemented and integrated into
+`origin/main`; live release deployment and host acceptance are tracked in the
+[Trigger Platform delivery handoff](TRIGGER_PLATFORM_DELIVERY_HANDOFF.md).
+Existing conversation
 starts pass through the runtime-validated `RunIntent` boundary. The Trigger
 Provider ABI now defines provider manifests, capabilities, serializable source
 envelopes, lifecycle ownership, runtime validation, a registry, and a reusable
