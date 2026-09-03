@@ -47,7 +47,15 @@ import {
   runUpdateStatus,
 } from './commands/update';
 import {
+  runTriggerApply,
   runTriggerCapabilities,
+  runTriggerConfirm,
+  runTriggerExecute,
+  runTriggerGet,
+  runTriggerList,
+  runTriggerPlan,
+  runTriggerPlanShow,
+  runTriggerPreview,
   runTriggerSchema,
 } from './commands/trigger';
 
@@ -209,6 +217,67 @@ trigger
   .action(async (opts: { json?: boolean }) => {
     await runTriggerCapabilities(opts);
   });
+
+trigger
+  .command('list')
+  .description('List trigger definitions and run counts')
+  .option('--profile <name>', 'filter by profile')
+  .option('--json', 'print machine-readable JSON')
+  .action((opts: { profile?: string; json?: boolean }) => runTriggerList(opts));
+
+trigger
+  .command('get <id>')
+  .description('Read one trigger and its history')
+  .option('--json', 'print machine-readable JSON')
+  .action((id: string, opts: { json?: boolean }) => runTriggerGet(id, opts));
+
+trigger
+  .command('history [id]')
+  .description('Read trigger occurrence history')
+  .option('--profile <name>', 'filter by profile')
+  .option('--json', 'print machine-readable JSON')
+  .action((id: string | undefined, opts: { profile?: string; json?: boolean }) =>
+    id ? runTriggerGet(id, opts) : runTriggerList(opts));
+
+trigger
+  .command('preview <id>')
+  .description('Preview future fire times')
+  .option('--count <number>', 'number of fire times', '5')
+  .option('--json', 'print machine-readable JSON')
+  .action((id: string, opts: { count?: string; json?: boolean }) => runTriggerPreview(id, opts));
+
+trigger
+  .command('plan <command>')
+  .description('Create a redacted trigger mutation plan')
+  .requiredOption('--input <json>', 'private JSON command input')
+  .option('--json', 'print machine-readable JSON')
+  .action((command: string, opts: { input?: string; json?: boolean }) => runTriggerPlan(command, opts));
+
+trigger
+  .command('plan-show <planId>')
+  .description('Show a redacted trigger mutation plan')
+  .option('--json', 'print machine-readable JSON')
+  .action((planId: string, opts: { json?: boolean }) => runTriggerPlanShow(planId, opts));
+
+trigger
+  .command('confirm <planId>')
+  .description('Confirm a trigger mutation plan')
+  .option('--json', 'print machine-readable JSON')
+  .action((planId: string, opts: { json?: boolean }) => runTriggerConfirm(planId, opts));
+
+trigger
+  .command('apply <planId>')
+  .description('Apply a confirmed trigger mutation plan')
+  .option('--json', 'print machine-readable JSON')
+  .action((planId: string, opts: { json?: boolean }) => runTriggerApply(planId, opts));
+
+trigger
+  .command('execute <command>')
+  .description('Plan, confirm and apply create/update/pause/resume/cancel/run-now/retry/ack')
+  .requiredOption('--input <json>', 'private JSON command input')
+  .requiredOption('--yes', 'confirm mutation')
+  .option('--json', 'print machine-readable JSON')
+  .action((command: string, opts: { input?: string; yes?: boolean; json?: boolean }) => runTriggerExecute(command, opts));
 
 trigger
   .command('schema <name>')

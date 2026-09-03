@@ -122,9 +122,9 @@ export interface TriggerCapabilitySnapshot {
   implementationStage: string;
   runtimeEnabled: boolean;
   capabilities: Array<{
-    id: 'trigger.capabilities' | 'trigger.schema';
+    id: string;
     cli: string;
-    access: 'read';
+    access: 'read' | 'write';
     outputs: readonly ['text', 'json'];
   }>;
 }

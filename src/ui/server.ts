@@ -247,6 +247,32 @@ async function route(
     return;
   }
 
+  // --- channel-neutral trigger management ---
+  if (path === '/api/triggers' && g) {
+    const profileId = url.searchParams.get('profile') ?? undefined;
+    const definitionId = url.searchParams.get('id') ?? undefined;
+    sendJson(res, 200, await sup.readTriggers({ ...(profileId ? { profileId } : {}), ...(definitionId ? { definitionId } : {}) }));
+    return;
+  }
+  if (path === '/api/triggers/preview' && g) {
+    const definitionId = url.searchParams.get('id');
+    if (!definitionId) throw new HttpError(400, 'id is required');
+    const count = Number(url.searchParams.get('count') ?? 5);
+    sendJson(res, 200, await sup.previewTrigger(definitionId, count));
+    return;
+  }
+  if (path === '/api/triggers/execute' && p) {
+    const body = (await readJsonBody(req)) as { command?: string; input?: unknown };
+    const commands = ['create', 'update', 'pause', 'resume', 'cancel', 'run-now', 'retry', 'ack'] as const;
+    if (!commands.includes(body.command as typeof commands[number])) throw new HttpError(400, 'invalid trigger command');
+    if (!body.input || typeof body.input !== 'object' || Array.isArray(body.input)) throw new HttpError(400, 'input must be an object');
+    sendJson(res, 200, await sup.manageTrigger(
+      body.command as typeof commands[number], body.input as Record<string, unknown>,
+      { source: 'web', principal: 'local-console' },
+    ));
+    return;
+  }
+
   // --- "我的群": owner's groups via user identity (lark-cli device-flow auth) ---
   if (path === '/api/auth/status' && g) {
     const profile = url.searchParams.get('profile') ?? (await readActiveProfile(deps.rootDir));

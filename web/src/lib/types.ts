@@ -156,3 +156,30 @@ export interface OnboardState {
   profiles: string[];
   detectedAgents: AgentKind[];
 }
+
+export interface TriggerDefinitionView {
+  id: string;
+  profileId: string;
+  state: "draft" | "active" | "paused" | "canceled";
+  revision: number;
+  nextFireAt?: number;
+  triggerSpec: { schedule: { kind: string; [key: string]: unknown }; timeZone: string };
+  metadata: Record<string, string>;
+}
+
+export interface TriggerOccurrenceView {
+  id: string;
+  definitionId: string;
+  profileId: string;
+  state: string;
+  scheduledFor: number;
+  attempt: number;
+  failure?: { code: string };
+}
+
+export interface TriggerReadView {
+  schema: "aria.trigger-read.snapshot.v1";
+  generatedAt: string;
+  definitions: TriggerDefinitionView[];
+  occurrences: TriggerOccurrenceView[];
+}

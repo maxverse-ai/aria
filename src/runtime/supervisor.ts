@@ -65,6 +65,13 @@ import {
   type ResolvedConversationRoute,
 } from '../trigger/result';
 import {
+  TriggerManagementApi,
+  type TriggerApplyResult,
+  type TriggerManagementCommand,
+  type TriggerPreviewSnapshot,
+  type TriggerReadSnapshot,
+} from '../trigger/operations';
+import {
   projectProfileChannelInstances,
   requirePrimaryLarkChannelInstance,
   type LarkChannelConfig,
@@ -905,6 +912,7 @@ export class Supervisor {
   private managed = new Map<string, ManagedProfile>();
   private readonly larkChannelPolicy: Readonly<LarkChannelOwnershipPolicy>;
   private readonly triggerManager: TriggerManager;
+  private readonly triggerApi: TriggerManagementApi;
 
   constructor(private opts: SupervisorOptions) {
     this.larkChannelPolicy = resolveLarkChannelOwnership(
@@ -929,9 +937,10 @@ export class Supervisor {
         },
       },
     });
+    const triggerStore = opts.triggerStateStore ?? new FileTriggerStateStore(triggerStateFile);
     this.triggerManager = new TriggerManager({
       enabled: opts.triggerRuntimeEnabled === true,
-      store: opts.triggerStateStore ?? new FileTriggerStateStore(triggerStateFile),
+      store: triggerStore,
       execution: {
         isProfileOnline: (profileId) => this.isOnline(profileId),
         submit: (profileId, intent) => {
@@ -946,6 +955,11 @@ export class Supervisor {
       },
       results: resultRouter,
       ...(opts.triggerPollIntervalMs ? { pollIntervalMs: opts.triggerPollIntervalMs } : {}),
+    });
+    this.triggerApi = new TriggerManagementApi({
+      rootDir: opts.rootDir ?? dirname(opts.configPath),
+      store: triggerStore,
+      onApplied: () => this.triggerManager.reconcile(),
     });
   }
 
@@ -980,6 +994,25 @@ export class Supervisor {
 
   reconcileTriggers(): Promise<void> {
     return this.triggerManager.reconcile();
+  }
+
+  readTriggers(input: { profileId?: string; definitionId?: string } = {}): Promise<TriggerReadSnapshot> {
+    return this.triggerApi.read(input);
+  }
+
+  previewTrigger(definitionId: string, count?: number): Promise<TriggerPreviewSnapshot> {
+    return this.triggerApi.preview(definitionId, count);
+  }
+
+  manageTrigger(
+    command: TriggerManagementCommand,
+    input: Record<string, unknown>,
+    actor: ControlActorContext,
+  ): Promise<TriggerApplyResult> {
+    return this.triggerApi.execute({
+      schema: 'aria.trigger-management.execute.request.v1', apiVersion: 1,
+      requestId: randomUUID(), actor, command, input,
+    });
   }
 
   /** Bring a profile online inside this process. Throws on lock/app conflict. */

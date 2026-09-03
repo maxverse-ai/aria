@@ -97,6 +97,23 @@ export type {
   TriggerResultDeliveryStore,
   TriggerResultGateway,
 } from './trigger/result';
+export {
+  FileTriggerPlanStore,
+  TriggerManagementApi,
+  TriggerManagementError,
+  TRIGGER_MANAGEMENT_API_VERSION,
+} from './trigger/operations';
+export type {
+  TriggerApplyResult,
+  TriggerExecuteRequest,
+  TriggerManagementCommand,
+  TriggerPlanActionRequest,
+  TriggerPlanRequest,
+  TriggerPlanResult,
+  TriggerPlanSnapshot,
+  TriggerPreviewSnapshot,
+  TriggerReadSnapshot,
+} from './trigger/operations';
 export type {
   TriggerExecutionGateway,
   TriggerExecutionResult,

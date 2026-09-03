@@ -4,10 +4,21 @@ import {
   type TriggerCapabilitySnapshot,
   type TriggerContractSchemaSnapshot,
 } from '../../application/execution-intent';
+import { randomUUID } from 'node:crypto';
+import { resolveAppPaths } from '../../config/app-paths';
+import {
+  TriggerManagementApi,
+  type TriggerManagementCommand,
+  type TriggerPlanSnapshot,
+  type TriggerReadSnapshot,
+} from '../../trigger/operations';
 
 export interface TriggerContractCliOptions {
   json?: boolean;
+  rootDir?: string;
 }
+
+const cliActor = { source: 'local-cli' as const, principal: 'aria-trigger-cli' };
 
 export async function runTriggerCapabilities(
   opts: TriggerContractCliOptions = {},
@@ -24,6 +35,60 @@ export async function runTriggerSchema(
   printSnapshot(snapshot, opts.json, formatTriggerSchema);
 }
 
+export async function runTriggerList(opts: TriggerContractCliOptions & { profile?: string } = {}): Promise<void> {
+  const snapshot = await api(opts).read(opts.profile ? { profileId: opts.profile } : {});
+  printSnapshot(snapshot, opts.json, formatTriggerRead);
+}
+
+export async function runTriggerGet(id: string, opts: TriggerContractCliOptions = {}): Promise<void> {
+  const snapshot = await api(opts).read({ definitionId: id });
+  printSnapshot(snapshot, opts.json, formatTriggerRead);
+}
+
+export async function runTriggerPreview(id: string, opts: TriggerContractCliOptions & { count?: string } = {}): Promise<void> {
+  const count = Number(opts.count ?? 5);
+  const snapshot = await api(opts).preview(id, count);
+  console.log(opts.json ? JSON.stringify(snapshot, null, 2) : snapshot.fireTimes.map((at) => new Date(at).toISOString()).join('\n'));
+}
+
+export async function runTriggerPlan(
+  command: string,
+  opts: TriggerContractCliOptions & { input?: string } = {},
+): Promise<void> {
+  const result = await api(opts).plan({
+    schema: 'aria.trigger-management.plan.request.v1', apiVersion: 1, requestId: randomUUID(),
+    actor: cliActor, command: parseCommand(command), input: parseInput(opts.input),
+  });
+  printSnapshot(result.plan, opts.json, formatTriggerPlan);
+}
+
+export async function runTriggerPlanShow(planId: string, opts: TriggerContractCliOptions = {}): Promise<void> {
+  const result = await api(opts).getPlan(actionRequest(planId));
+  printSnapshot(result.plan, opts.json, formatTriggerPlan);
+}
+
+export async function runTriggerConfirm(planId: string, opts: TriggerContractCliOptions = {}): Promise<void> {
+  const result = await api(opts).confirm(actionRequest(planId));
+  printSnapshot(result.plan, opts.json, formatTriggerPlan);
+}
+
+export async function runTriggerApply(planId: string, opts: TriggerContractCliOptions = {}): Promise<void> {
+  const result = await api(opts).apply(actionRequest(planId));
+  console.log(opts.json ? JSON.stringify(result, null, 2) : `${result.command} applied · ${result.definition?.id ?? result.occurrence?.id ?? result.planId}`);
+}
+
+export async function runTriggerExecute(
+  command: string,
+  opts: TriggerContractCliOptions & { input?: string; yes?: boolean } = {},
+): Promise<void> {
+  if (!opts.yes) throw new Error('mutation requires --yes; use `aria trigger plan` to review it first');
+  const result = await api(opts).execute({
+    schema: 'aria.trigger-management.execute.request.v1', apiVersion: 1, requestId: randomUUID(),
+    actor: cliActor, command: parseCommand(command), input: parseInput(opts.input),
+  });
+  console.log(opts.json ? JSON.stringify(result, null, 2) : `${result.command} applied · ${result.definition?.id ?? result.occurrence?.id ?? result.planId}`);
+}
+
 function printSnapshot<T>(snapshot: T, json: boolean | undefined, format: (value: T) => string): void {
   console.log(json ? JSON.stringify(snapshot, null, 2) : format(snapshot));
 }
@@ -32,7 +97,7 @@ export function formatTriggerCapabilities(snapshot: TriggerCapabilitySnapshot): 
   return [
     `Aria trigger API v${snapshot.apiVersion}`,
     `implementation: ${snapshot.implementationStage}`,
-    'runtime: disabled (durable state only; no scheduled execution is shipped)',
+    'runtime: disabled by default (enable with ARIA_TRIGGER_RUNTIME=enabled)',
     ...snapshot.capabilities.map((item) => `- ${item.id}: ${item.cli} [${item.access}]`),
   ].join('\n');
 }
@@ -42,4 +107,47 @@ export function formatTriggerSchema(snapshot: TriggerContractSchemaSnapshot): st
     `Aria trigger contract · ${snapshot.name} v${snapshot.contractVersion}`,
     JSON.stringify(snapshot.jsonSchema, null, 2),
   ].join('\n');
+}
+
+export function formatTriggerRead(snapshot: TriggerReadSnapshot): string {
+  if (snapshot.definitions.length === 0) return 'No trigger definitions.';
+  return snapshot.definitions.map((definition) => {
+    const runs = snapshot.occurrences.filter((item) => item.definitionId === definition.id);
+    return `${definition.id}\t${definition.profileId}\t${definition.state}\t${definition.metadata.label ?? ''}\truns=${runs.length}\tnext=${definition.nextFireAt ? new Date(definition.nextFireAt).toISOString() : '-'}`;
+  }).join('\n');
+}
+
+export function formatTriggerPlan(plan: TriggerPlanSnapshot): string {
+  return [
+    `Trigger plan ${plan.id} · ${plan.command} · ${plan.status}`,
+    ...plan.summary.map((item) => `- ${item.field}: ${String(item.before)} -> ${String(item.after)}`),
+    `expires: ${plan.expiresAt}`,
+  ].join('\n');
+}
+
+function api(opts: Pick<TriggerContractCliOptions, 'rootDir'>): TriggerManagementApi {
+  return new TriggerManagementApi({
+    rootDir: opts.rootDir ?? process.env.LARK_CHANNEL_HOME ?? resolveAppPaths().rootDir,
+  });
+}
+
+function actionRequest(planId: string) {
+  return {
+    schema: 'aria.trigger-management.plan-action.request.v1' as const,
+    apiVersion: 1 as const, requestId: randomUUID(), actor: cliActor, planId,
+  };
+}
+
+function parseInput(source: string | undefined): Record<string, unknown> {
+  if (!source) return {};
+  const value = JSON.parse(source) as unknown;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('--input must be a JSON object');
+  return value as Record<string, unknown>;
+}
+
+function parseCommand(value: string): TriggerManagementCommand {
+  if (['create', 'update', 'pause', 'resume', 'cancel', 'run-now', 'retry', 'ack'].includes(value)) {
+    return value as TriggerManagementCommand;
+  }
+  throw new Error(`unknown trigger command: ${value}`);
 }

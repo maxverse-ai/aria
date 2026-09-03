@@ -62,6 +62,19 @@ function stubSupervisor(): UiSupervisor {
       online.delete(p);
     },
     restartProfile: async () => {},
+    readTriggers: async () => ({
+      schema: 'aria.trigger-read.snapshot.v1', apiVersion: 1,
+      generatedAt: new Date().toISOString(), definitions: [], occurrences: [],
+    }),
+    previewTrigger: async (definitionId) => ({
+      schema: 'aria.trigger-read.preview.v1', apiVersion: 1, definitionId,
+      schedule: { kind: 'once', at: new Date(Date.now() + 60_000).toISOString() },
+      timeZone: 'UTC', fireTimes: [],
+    }),
+    manageTrigger: async (command) => ({
+      schema: 'aria.trigger-management.apply.v1', apiVersion: 1,
+      requestId: 'request', planId: 'plan', command,
+    }),
   };
 }
 
@@ -269,6 +282,25 @@ describe('ui server (supervisor-backed)', () => {
   it('lists online channels from the supervisor', async () => {
     const { bots } = await json(await get('/api/bots', handle.token));
     expect(bots.map((b: { profileName: string }) => b.profileName)).toEqual(['claude']);
+  });
+
+  it('exposes channel-neutral trigger read, preview and mutation endpoints', async () => {
+    const listed = await json(await get('/api/triggers?profile=claude', handle.token));
+    expect(listed).toMatchObject({ schema: 'aria.trigger-read.snapshot.v1', definitions: [] });
+
+    const preview = await json(await get('/api/triggers/preview?id=definition-a&count=3', handle.token));
+    expect(preview).toMatchObject({ schema: 'aria.trigger-read.preview.v1', definitionId: 'definition-a' });
+
+    const applied = await json(await post('/api/triggers/execute', handle.token, {
+      command: 'pause', input: { definitionId: 'definition-a' },
+    }));
+    expect(applied).toMatchObject({ schema: 'aria.trigger-management.apply.v1', command: 'pause' });
+  });
+
+  it('rejects malformed trigger mutation requests at the HTTP adapter', async () => {
+    expect((await post('/api/triggers/execute', handle.token, { command: 'delete', input: {} })).status).toBe(400);
+    expect((await post('/api/triggers/execute', handle.token, { command: 'pause', input: [] })).status).toBe(400);
+    expect((await get('/api/triggers/preview', handle.token)).status).toBe(400);
   });
 
   it('starts and stops a profile via the supervisor', async () => {

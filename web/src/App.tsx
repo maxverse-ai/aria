@@ -23,6 +23,7 @@ import { Heading, Text } from "@astryxdesign/core/Text";
 import { ToastViewport } from "@astryxdesign/core/Toast";
 import {
   CircleStackIcon,
+  CalendarDaysIcon,
   CommandLineIcon,
   CpuChipIcon,
   Squares2X2Icon,
@@ -32,6 +33,9 @@ import type { OnboardState, Status } from "@/lib/types";
 import { ProfilesView } from "@/views/ProfilesView";
 import { ProfileDetail } from "@/views/ProfileDetail";
 import { OnboardWizard } from "@/views/OnboardWizard";
+import { TriggersView } from "@/views/TriggersView";
+
+const TRIGGERS_ROUTE = "__triggers__";
 
 export function App() {
   const [onboard, setOnboard] = useState<OnboardState | null>(null);
@@ -106,7 +110,9 @@ export function App() {
   }
 
   return shell(
-    selected ? (
+    selected === TRIGGERS_ROUTE ? (
+      <TriggersView profiles={onboard.profiles} />
+    ) : selected ? (
       <ProfileDetail
         profile={selected}
         onBack={() => {
@@ -145,6 +151,12 @@ function ConsoleShell({
           icon={Squares2X2Icon}
           isSelected={selected === null}
           onClick={() => onSelect(null)}
+        />
+        <SideNavItem
+          label="定时任务"
+          icon={CalendarDaysIcon}
+          isSelected={selected === TRIGGERS_ROUTE}
+          onClick={() => onSelect(TRIGGERS_ROUTE)}
         />
       </SideNavSection>
       <SideNavSection title="Profiles">

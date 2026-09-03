@@ -3,6 +3,13 @@ import type { KnownChat } from '../bot/lark-info';
 import type { MutableProfileState } from '../config/config-ops';
 import type { Controls } from '../commands';
 import type { ManagedStatus } from '../runtime/supervisor';
+import type {
+  TriggerApplyResult,
+  TriggerManagementCommand,
+  TriggerPreviewSnapshot,
+  TriggerReadSnapshot,
+} from '../trigger/operations';
+import type { ControlActorContext } from '../application/control';
 
 /**
  * The live per-profile runtime the console edits. The supervisor's `Controls`
@@ -26,6 +33,9 @@ export interface UiSupervisor {
   startProfile(profile: string): Promise<void>;
   stopProfile(profile: string): Promise<void>;
   restartProfile(profile: string): Promise<void>;
+  readTriggers(input?: { profileId?: string; definitionId?: string }): Promise<TriggerReadSnapshot>;
+  previewTrigger(definitionId: string, count?: number): Promise<TriggerPreviewSnapshot>;
+  manageTrigger(command: TriggerManagementCommand, input: Record<string, unknown>, actor: ControlActorContext): Promise<TriggerApplyResult>;
 }
 
 /** Everything the console server needs from the supervisor host. */

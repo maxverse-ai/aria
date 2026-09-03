@@ -4,7 +4,7 @@ Status: proposed direction. This document defines the target architecture and
 progressive delivery plan; no scheduled execution behavior is shipped by this
 document.
 
-Implementation status: Stages 0 through 7 are implemented. Existing conversation
+Implementation status: Stages 0 through 8 are implemented. Existing conversation
 starts pass through the runtime-validated `RunIntent` boundary. The Trigger
 Provider ABI now defines provider manifests, capabilities, serializable source
 envelopes, lifecycle ownership, runtime validation, a registry, and a reusable
@@ -28,7 +28,13 @@ delivery ids and a private atomic ledger make proactive sends idempotent and
 restart-recoverable, while channel failure never reruns a successful agent.
 Conversation anchors stay opaque in trigger state and resolve through the
 profile-owned Channel Manager. The fake non-Lark provider proves the same
-result path is channel-neutral.
+result path is channel-neutral. One versioned `TriggerManagementApi` now owns
+definition and occurrence reads plus create, update, pause, resume, cancel,
+run-now, retry, and acknowledge mutations. CLI, Supervisor HTTP, and the Astryx
+console are adapters over that boundary. Mutations support durable
+plan/confirm/apply, the private plan ledger is mode `0600`, and public plans and
+read models redact task text, authorization references, owners, scopes, and
+conversation anchors.
 Production activation remains behind
 the explicit `ARIA_TRIGGER_RUNTIME=enabled` rollout switch and is off by
 default.

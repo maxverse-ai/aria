@@ -244,7 +244,7 @@ export function triggerCapabilities(): TriggerCapabilitySnapshot {
   return {
     schema: 'aria.trigger.capabilities.v1',
     apiVersion: TRIGGER_CONTROL_API_VERSION,
-    implementationStage: 'result-routing',
+    implementationStage: 'unified-operations',
     runtimeEnabled: false,
     capabilities: [
       {
@@ -257,6 +257,18 @@ export function triggerCapabilities(): TriggerCapabilitySnapshot {
         id: 'trigger.schema',
         cli: 'aria trigger schema <run-intent|result-route|session-policy|trigger-provider-manifest|trigger-envelope|schedule-spec|trigger-definition|trigger-occurrence>',
         access: 'read',
+        outputs: ['text', 'json'],
+      },
+      {
+        id: 'trigger.read',
+        cli: 'aria trigger list|get|history|preview',
+        access: 'read',
+        outputs: ['text', 'json'],
+      },
+      {
+        id: 'trigger.manage',
+        cli: 'aria trigger plan|confirm|apply|execute',
+        access: 'write',
         outputs: ['text', 'json'],
       },
     ],
