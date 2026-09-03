@@ -3,6 +3,10 @@
 Status: accepted direction. Delivery remains incremental and every stage must
 leave the currently supported channels runnable.
 
+For the current implementation boundary, PR-sized remaining increments, and
+handoff checklist, see
+[Channel platform delivery plan](./CHANNEL_PLATFORM_DELIVERY_PLAN.md).
+
 ## Goal
 
 Aria owns one channel platform per profile. A channel implementation translates
