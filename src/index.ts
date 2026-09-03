@@ -58,6 +58,33 @@ export {
   runTriggerProviderContract,
   triggerRuntimeKey,
 } from './trigger/plugin';
+
+export {
+  ScheduleContractError,
+  addLocalDays,
+  addLocalMinutes,
+  assertScheduleSpec,
+  assertTimeZone,
+  cronMatches,
+  decideOverlap,
+  localDateTimeToInstant,
+  materializeDueTimes,
+  nextScheduleFire,
+  parseConstrainedCron,
+  previewSchedule,
+  zonedDateTime,
+} from './trigger/schedule';
+export type {
+  DueMaterialization,
+  LocalDateTime,
+  MisfirePolicy,
+  OverlapDecision,
+  OverlapDecisionInput,
+  OverlapPolicy,
+  ParsedCron,
+  ScheduleSpec,
+  WallClockTime,
+} from './trigger/schedule';
 export type {
   ResolvedTriggerInstance,
   TriggerActorEvidence,

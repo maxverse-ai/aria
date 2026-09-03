@@ -20,7 +20,7 @@ describe('trigger contract CLI', () => {
     expect(JSON.parse(String(output.mock.calls[0]?.[0]))).toMatchObject({
       schema: 'aria.trigger.capabilities.v1',
       apiVersion: 1,
-      implementationStage: 'trigger-provider-abi',
+      implementationStage: 'schedule-domain',
       runtimeEnabled: false,
     });
   });
@@ -40,7 +40,7 @@ describe('trigger contract CLI', () => {
 
   it('makes the not-yet-shipped runtime explicit in text output', () => {
     expect(formatTriggerCapabilities(triggerCapabilities())).toContain(
-      'runtime: disabled (provider ABI only; no scheduled execution is shipped)',
+      'runtime: disabled (schedule domain only; no scheduled execution is shipped)',
     );
   });
 

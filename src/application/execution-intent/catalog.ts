@@ -28,6 +28,16 @@ const leafResultRouteSchema = {
 } as const;
 
 const schemas: Record<TriggerContractSchemaName, Readonly<Record<string, unknown>>> = {
+  'schedule-spec': {
+    $id: 'aria.trigger.schedule-spec.v1',
+    oneOf: [
+      { type: 'object', additionalProperties: false, required: ['kind', 'at'], properties: { kind: { const: 'once' }, at: { type: 'string', format: 'date-time' } } },
+      { type: 'object', additionalProperties: false, required: ['kind', 'at'], properties: { kind: { const: 'daily' }, at: { $ref: '#/$defs/wallClock' } } },
+      { type: 'object', additionalProperties: false, required: ['kind', 'daysOfWeek', 'at'], properties: { kind: { const: 'weekly' }, daysOfWeek: { type: 'array', minItems: 1, maxItems: 7, uniqueItems: true, items: { type: 'integer', minimum: 0, maximum: 6 } }, at: { $ref: '#/$defs/wallClock' } } },
+      { type: 'object', additionalProperties: false, required: ['kind', 'expression'], properties: { kind: { const: 'cron' }, expression: { type: 'string', minLength: 1, maxLength: 256 } } },
+    ],
+    $defs: { wallClock: { type: 'object', additionalProperties: false, required: ['hour', 'minute'], properties: { hour: { type: 'integer', minimum: 0, maximum: 23 }, minute: { type: 'integer', minimum: 0, maximum: 59 } } } },
+  },
   'trigger-provider-manifest': {
     $id: 'aria.trigger.provider-manifest.v1',
     type: 'object', additionalProperties: false,
@@ -183,7 +193,7 @@ export function triggerCapabilities(): TriggerCapabilitySnapshot {
   return {
     schema: 'aria.trigger.capabilities.v1',
     apiVersion: TRIGGER_CONTROL_API_VERSION,
-    implementationStage: 'trigger-provider-abi',
+    implementationStage: 'schedule-domain',
     runtimeEnabled: false,
     capabilities: [
       {
@@ -194,7 +204,7 @@ export function triggerCapabilities(): TriggerCapabilitySnapshot {
       },
       {
         id: 'trigger.schema',
-        cli: 'aria trigger schema <run-intent|result-route|session-policy|trigger-provider-manifest|trigger-envelope>',
+        cli: 'aria trigger schema <run-intent|result-route|session-policy|trigger-provider-manifest|trigger-envelope|schedule-spec>',
         access: 'read',
         outputs: ['text', 'json'],
       },
@@ -217,5 +227,6 @@ export function triggerContractSchema(name: string): TriggerContractSchemaSnapsh
 
 export function isTriggerContractSchemaName(value: string): value is TriggerContractSchemaName {
   return value === 'run-intent' || value === 'result-route' || value === 'session-policy'
-    || value === 'trigger-provider-manifest' || value === 'trigger-envelope';
+    || value === 'trigger-provider-manifest' || value === 'trigger-envelope'
+    || value === 'schedule-spec';
 }

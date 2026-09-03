@@ -111,7 +111,8 @@ export type TriggerContractSchemaName =
   | 'result-route'
   | 'session-policy'
   | 'trigger-provider-manifest'
-  | 'trigger-envelope';
+  | 'trigger-envelope'
+  | 'schedule-spec';
 
 export interface TriggerCapabilitySnapshot {
   schema: 'aria.trigger.capabilities.v1';
