@@ -69,6 +69,11 @@ request itself.
 - Making a channel plugin responsible for clocks or scheduled state.
 - Guaranteeing exactly-once external side effects.
 
+The initial platform deliberately schedules agent runs. A proposed follow-up
+for bounded, zero-LLM work is documented in
+[Deterministic scheduled actions](DETERMINISTIC_SCHEDULED_ACTIONS.md). That
+proposal preserves the prohibition on arbitrary callbacks and shell commands.
+
 ## Position in the architecture
 
 ```text
