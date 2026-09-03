@@ -12,6 +12,7 @@ import {
 } from '../state';
 import { createTriggerRunIntent } from './intent';
 import type { TriggerExecutionGateway, TriggerExecutionResult, TriggerManagerSnapshot } from './types';
+import type { TriggerResultGateway } from '../result';
 
 export interface TriggerManagerOptions {
   enabled?: boolean;
@@ -22,6 +23,7 @@ export interface TriggerManagerOptions {
   pollIntervalMs?: number;
   leaseDurationMs?: number;
   leaseOwner?: string;
+  results?: TriggerResultGateway;
 }
 
 const DEFAULT_POLL_MS = 30_000;
@@ -38,6 +40,7 @@ export class TriggerManager {
   private readonly pollIntervalMs: number;
   private readonly leaseDurationMs: number;
   private readonly leaseOwner: string;
+  private readonly results?: TriggerResultGateway;
   private readonly inFlight = new Set<Promise<void>>();
   private timer?: ReturnType<typeof setInterval>;
   private reconcilePromise?: Promise<void>;
@@ -53,6 +56,7 @@ export class TriggerManager {
     this.pollIntervalMs = positive(options.pollIntervalMs ?? DEFAULT_POLL_MS, 'poll interval');
     this.leaseDurationMs = positive(options.leaseDurationMs ?? DEFAULT_LEASE_MS, 'lease duration');
     this.leaseOwner = options.leaseOwner ?? `supervisor:${process.pid}`;
+    this.results = options.results;
     this.state = {
       enabled: this.enabled,
       running: false,
@@ -135,6 +139,10 @@ export class TriggerManager {
     this.state = { ...this.state, lastScanAt: now, lastErrorCode: undefined };
     try {
       await this.materializeDueSchedules(now);
+      await this.results?.reconcile().catch((error) =>
+        log.warn('trigger-manager', 'result-reconcile-failed', {
+          code: stableErrorCode(error),
+        }));
       await this.dispatchClaimable();
     } catch (error) {
       const code = stableErrorCode(error);
@@ -225,10 +233,6 @@ export class TriggerManager {
       await this.dead(occurrence, lease, 'configuration', 'definition-revision-changed');
       return;
     }
-    if (!historyOnly(definition)) {
-      await this.dead(occurrence, lease, 'unsupported-capability', 'result-route-unsupported');
-      return;
-    }
     if (!this.execution.isProfileOnline(occurrence.profileId)) {
       await this.store.markDeferred(occurrence.id, lease, 'profile-offline', this.now());
       this.bump('deferred');
@@ -290,6 +294,16 @@ export class TriggerManager {
       if (result.status === 'succeeded') {
         await this.store.markSucceeded(occurrence.id, lease, this.now());
         this.bump('succeeded');
+        // Result delivery is an independent durable workflow. A channel outage
+        // must never turn a successful agent occurrence back into agent work.
+        const definition = await this.store.getDefinition(occurrence.definitionId);
+        if (definition && this.results) {
+          await this.results.route(definition, occurrence, result).catch((error) =>
+            log.warn('trigger-manager', 'result-route-failed', {
+              occurrenceId: occurrence.id,
+              code: stableErrorCode(error),
+            }));
+        }
       } else {
         await this.fail(
           occurrence,
@@ -375,13 +389,6 @@ type Counter = 'materialized' | 'dispatched' | 'succeeded' | 'failed' | 'deferre
 
 function scheduleContract(definition: TriggerDefinition): { schedule: ScheduleSpec; timeZone: string } {
   return definition.triggerSpec as unknown as { schedule: ScheduleSpec; timeZone: string };
-}
-
-function historyOnly(definition: TriggerDefinition): boolean {
-  return definition.intentTemplate.resultRoutes.every((route) =>
-    route.kind === 'history' || route.kind === 'none'
-      || (route.kind === 'multi' && route.routes.every((leaf) => leaf.kind === 'history' || leaf.kind === 'none')),
-  );
 }
 
 function leaseRef(occurrence: TriggerOccurrence): TriggerLeaseRef {

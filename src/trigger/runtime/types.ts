@@ -5,6 +5,7 @@ export type TriggerExecutionTerminal = 'succeeded' | 'failed' | 'interrupted' | 
 export interface TriggerExecutionResult {
   status: TriggerExecutionTerminal;
   errorCode?: string;
+  output?: { text?: string };
 }
 
 export interface TriggerExecutionSubmission {

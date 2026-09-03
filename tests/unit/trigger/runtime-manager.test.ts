@@ -211,7 +211,7 @@ describe('TriggerManager single-run data path', () => {
     ]);
   });
 
-  it('fails closed when a Stage 5 definition asks for proactive delivery', async () => {
+  it('keeps a successful agent run terminal when result routing fails', async () => {
     const store = new InMemoryTriggerStateStore();
     await store.createDefinition(definition({
       authorizationCeiling: {
@@ -223,19 +223,35 @@ describe('TriggerManager single-run data path', () => {
         resultRoutes: [{ kind: 'conversation', routeId: 'conversation', conversationRef: 'opaque-scope' }],
       },
     }));
-    const submit = vi.fn<TriggerExecutionGateway['submit']>();
-    const manager = managerFor(store, { isProfileOnline: () => true, submit });
+    const submit = vi.fn<TriggerExecutionGateway['submit']>(async () => ({
+      runId: 'run-a',
+      completion: Promise.resolve({ status: 'succeeded', output: { text: 'done' } }),
+    }));
+    const route = vi.fn(async () => {
+      throw Object.assign(new Error('offline'), { code: 'channel-offline' });
+    });
+    let id = 0;
+    const manager = new TriggerManager({
+      enabled: true,
+      store,
+      execution: { isProfileOnline: () => true, submit },
+      results: { route, reconcile: async () => undefined },
+      now: () => FIRE_AT,
+      createId: () => `id-${++id}`,
+      pollIntervalMs: 60_000,
+    });
 
     await manager.reconcile();
     await manager.drain();
 
     expect(await store.listOccurrences()).toEqual([
       expect.objectContaining({
-        state: 'dead',
-        failure: expect.objectContaining({ code: 'result-route-unsupported' }),
+        state: 'succeeded',
       }),
     ]);
-    expect(submit).not.toHaveBeenCalled();
+    expect(submit).toHaveBeenCalledTimes(1);
+    expect(route).toHaveBeenCalledTimes(1);
+    expect(manager.snapshot()).toMatchObject({ succeeded: 1, failed: 0 });
   });
 });
 

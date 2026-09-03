@@ -4,8 +4,7 @@ Status: proposed direction. This document defines the target architecture and
 progressive delivery plan; no scheduled execution behavior is shipped by this
 document.
 
-Implementation status: Stages 0 through 5 are accepted; Stage 6 is implemented
-on its integration branch. Existing conversation
+Implementation status: Stages 0 through 7 are implemented. Existing conversation
 starts pass through the runtime-validated `RunIntent` boundary. The Trigger
 Provider ABI now defines provider manifests, capabilities, serializable source
 envelopes, lifecycle ownership, runtime validation, a registry, and a reusable
@@ -20,13 +19,19 @@ process-safe atomic-file adapters, revision-checked definition updates, atomic
 occurrence materialization plus schedule advancement, fenced leases, restart
 recovery, persisted deterministic retries, deferred/dead handling, and bounded
 cleanup. The host-owned TriggerManager now composes one-time and recurring
-history-only work with the existing profile execution path. It reconciles
+work with the existing profile execution path. It reconciles
 missed daily, weekly, and constrained-cron fires from durable cursors, detects
 wall-clock jumps, restores work when a stopped profile returns, and enforces
-overlap ceilings without blocking future clock scans on long agent runs.
+overlap ceilings without blocking future clock scans on long agent runs. Agent
+completion and result delivery are separate durable workflows: deterministic
+delivery ids and a private atomic ledger make proactive sends idempotent and
+restart-recoverable, while channel failure never reruns a successful agent.
+Conversation anchors stay opaque in trigger state and resolve through the
+profile-owned Channel Manager. The fake non-Lark provider proves the same
+result path is channel-neutral.
 Production activation remains behind
 the explicit `ARIA_TRIGGER_RUNTIME=enabled` rollout switch and is off by
-default; proactive result delivery remains a later stage.
+default.
 
 ## Decision
 

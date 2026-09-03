@@ -1,7 +1,9 @@
 import {
   CHANNEL_PLUGIN_ABI_VERSION,
   type ChannelConfig,
+  type ChannelDeliveryReceipt,
   type ChannelInboundEnvelope,
+  type ChannelOutboundIntent,
   type ChannelPlugin,
   type ChannelRuntime,
   type ResolvedChannelInstance,
@@ -11,7 +13,9 @@ export type FakeChannelConfig = ChannelConfig & { label: string };
 
 export interface FakeChannelPluginOptions {
   close?: () => Promise<void>;
+  deliver?: (intent: ChannelOutboundIntent) => Promise<ChannelDeliveryReceipt>;
   emitInboundOnStart?: boolean;
+  proactiveMessages?: boolean;
 }
 
 export function fakeChannelInstance(
@@ -68,7 +72,7 @@ export function createFakeChannelPlugin(
         outbound: ['text'],
         streaming: 'none',
         conversations: ['p2p'],
-        proactiveMessages: false,
+        proactiveMessages: options.proactiveMessages ?? false,
         humanHandoff: false,
       },
     },
@@ -103,12 +107,12 @@ export function createFakeChannelPlugin(
           updatedAt: 1,
         }),
         health: async () => ({ status: 'healthy', checkedAt: 1 }),
-        deliver: async (intent) => ({
+        deliver: options.deliver ?? (async (intent) => ({
           deliveryId: intent.deliveryId,
           status: 'sent',
           providerMessageId: `provider:${intent.deliveryId}`,
           deliveredAt: 1,
-        }),
+        })),
         drain: async () => ({
           drained: true,
           remainingInbound: 0,
