@@ -11,6 +11,7 @@ import {
 import { Supervisor } from '../../../src/runtime/supervisor';
 import { registerEnginePlugin } from '../../../src/agent/plugin/registry';
 import { defineEngineRuntimeDescriptor } from '../../../src/agent/runtime/types';
+import { migrateRootConfigToSchemaV3 } from '../../../src/config/channel-schema-migration';
 import { FakeAgentAdapter } from '../../helpers/fake-agent';
 import { resolveAppPaths } from '../../../src/config/app-paths';
 import { readRuntimeLockMeta } from '../../../src/runtime/locks';
@@ -150,6 +151,33 @@ describe('Supervisor', () => {
       expect(await readFile(configPath, 'utf8')).toBe(before);
     },
   );
+
+  it('starts, reconnects, and stops from stored schema v3 without rewriting it', async () => {
+    registerFakeEngine('schema-v3-reconnect-test');
+    const configPath = join(root, 'config.json');
+    const current = (await loadRootConfig(configPath))!;
+    current.profiles.claude!.agentKind = 'schema-v3-reconnect-test';
+    const migrated = migrateRootConfigToSchemaV3(current);
+    await saveRootConfig(migrated, configPath);
+    const before = await readFile(configPath, 'utf8');
+
+    sup = new Supervisor({
+      configPath,
+      rootDir: root,
+      runPreflight: false,
+      startChannelFn: stubStartChannel,
+      larkChannelRolloutMode: 'opt-in',
+    });
+
+    await sup.startProfile('claude');
+    await sup.restartProfile('claude');
+    await sup.stopProfile('claude');
+
+    expect(started).toEqual(['claude', 'claude']);
+    expect(disconnected).toEqual(['claude', 'claude']);
+    expect(await readFile(configPath, 'utf8')).toBe(before);
+    expect((await loadRootConfig(configPath))?.schemaVersion).toBe(3);
+  });
 
   it.each([
     ['off', 'legacy'],

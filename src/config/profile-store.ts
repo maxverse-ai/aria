@@ -22,13 +22,22 @@ export async function loadRootConfig(path: string): Promise<RootConfig | undefin
   }
 }
 
-function normalizeRootConfig(root: RootConfig): RootConfig {
+export function normalizeRootConfig(root: RootConfig): RootConfig {
   const profiles: RootConfig['profiles'] = {};
   for (const [name, profile] of Object.entries(root.profiles)) {
-    profiles[name] = normalizeProfileConfig(profile);
+    const normalized = normalizeProfileConfig(profile);
+    if (normalized.schemaVersion !== root.schemaVersion) {
+      throw new Error(
+        `profile ${name} schemaVersion ${normalized.schemaVersion} does not match root schemaVersion ${root.schemaVersion}`,
+      );
+    }
+    profiles[name] = normalized;
+  }
+  if (!root.activeProfile || !profiles[root.activeProfile]) {
+    throw new Error(`profile not found: ${root.activeProfile || '<empty activeProfile>'}`);
   }
   return {
-    schemaVersion: 2,
+    schemaVersion: root.schemaVersion,
     activeProfile: root.activeProfile,
     preferences: {},
     ...(root.secrets ? { secrets: root.secrets } : {}),
@@ -62,6 +71,7 @@ type StoredProfileConfig = Pick<
   | 'kimi'
   | 'pi'
   | 'plugins'
+  | 'channels'
   | 'attachments'
   | 'comments'
   | 'meeting'
@@ -79,7 +89,7 @@ function serializeRootConfig(root: RootConfig): StoredRootConfig {
     profiles[name] = serializeProfileConfig(profile);
   }
   return {
-    schemaVersion: 2,
+    schemaVersion: root.schemaVersion,
     activeProfile: root.activeProfile,
     preferences: {},
     ...(root.secrets ? { secrets: root.secrets } : {}),
@@ -105,6 +115,7 @@ function serializeProfileConfig(profile: ProfileConfig): StoredProfileConfig {
     ...(profile.kimi ? { kimi: profile.kimi } : {}),
     ...(profile.pi ? { pi: profile.pi } : {}),
     ...(profile.plugins && profile.plugins.length > 0 ? { plugins: profile.plugins } : {}),
+    ...(profile.channels ? { channels: profile.channels } : {}),
     attachments: profile.attachments,
     comments: {},
     meeting: profile.meeting,
@@ -175,7 +186,7 @@ export function runtimeProfileConfig(root: RootConfig, profile: string): AppConf
 
 export function createRootConfig(profile: string, cfg: ProfileConfig, secrets = cfg.secrets): RootConfig {
   return {
-    schemaVersion: 2,
+    schemaVersion: cfg.schemaVersion,
     activeProfile: profile,
     preferences: {},
     ...(secrets ? { secrets } : {}),
@@ -191,7 +202,8 @@ export function createRootConfig(profile: string, cfg: ProfileConfig, secrets = 
 export function isRootConfig(value: unknown): value is RootConfig {
   if (!value || typeof value !== 'object') return false;
   const root = value as Partial<RootConfig>;
-  return root.schemaVersion === 2 && Boolean(root.profiles && typeof root.profiles === 'object');
+  return (root.schemaVersion === 2 || root.schemaVersion === 3)
+    && Boolean(root.profiles && typeof root.profiles === 'object');
 }
 
 export function agentKindFromString(value: string | undefined): AgentKind | undefined {

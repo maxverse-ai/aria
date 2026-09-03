@@ -47,7 +47,8 @@ import { ProfileRuntimeSlot } from './profile-runtime-slot';
 import { modelCatalog } from '../agent/model-catalog/service';
 import { ProfileConversationRuntimeOwner } from '../conversation/profile-runtime-owner';
 import {
-  projectSchemaV2ChannelInstances,
+  projectProfileChannelInstances,
+  requirePrimaryLarkChannelInstance,
   type LarkChannelConfig,
 } from '../channel/instance-resolver';
 import {
@@ -132,7 +133,7 @@ class ManagedProfile {
   private nativeReadRuntime?: NativeReadProfileRuntime;
   private conversationRuntime?: ProfileConversationRuntimeOwner;
   private larkChannelRuntime?: ProfileLarkChannelRuntime;
-  private resolvedChannelInstances: readonly ResolvedChannelInstance<LarkChannelConfig>[] = [];
+  private resolvedChannelInstances: readonly ResolvedChannelInstance[] = [];
 
   constructor(
     readonly profile: string,
@@ -203,20 +204,25 @@ class ManagedProfile {
           ? { governanceAudit: this.nativeReadRuntime.governanceAudit }
           : {}),
       });
-      const resolvedChannelInstances = projectSchemaV2ChannelInstances({
+      const resolvedChannelInstances = projectProfileChannelInstances({
         profileId: this.profile,
         profile: {
           schemaVersion: this.profileConfig.schemaVersion,
           accounts: this.cfg.accounts,
+          ...(this.profileConfig.channels ? { channels: this.profileConfig.channels } : {}),
         },
       });
+      const larkInstance = requirePrimaryLarkChannelInstance(
+        resolvedChannelInstances,
+        this.cfg.accounts.app,
+      );
       this.resolvedChannelInstances = resolvedChannelInstances;
       this.larkChannelRuntime = await this.startLarkChannelRuntime({
         cfg: this.cfg,
         controls: this.controls,
         appPaths: this.appPaths,
         conversationRuntime: this.conversationRuntime,
-        instance: resolvedChannelInstances[0],
+        instance: larkInstance,
       });
       this.bridge = this.larkChannelRuntime.bridge;
       const channelManagerSnapshot = this.larkChannelRuntime.snapshot();
@@ -687,13 +693,20 @@ class ManagedProfile {
       const next = nextRuntime.cfg;
       if (!isComplete(next)) throw new Error('config incomplete after change');
       assertReconnectAgentKindUnchanged(this.profileConfig.agentKind, nextRuntime.profileConfig.agentKind);
-      const nextResolvedChannelInstances = projectSchemaV2ChannelInstances({
+      const nextResolvedChannelInstances = projectProfileChannelInstances({
         profileId: this.profile,
         profile: {
           schemaVersion: nextRuntime.profileConfig.schemaVersion,
           accounts: next.accounts,
+          ...(nextRuntime.profileConfig.channels
+            ? { channels: nextRuntime.profileConfig.channels }
+            : {}),
         },
       });
+      const nextLarkInstance = requirePrimaryLarkChannelInstance(
+        nextResolvedChannelInstances,
+        next.accounts.app,
+      );
       nextEngineRuntime = createProfileEngineRuntime(nextRuntime.profileConfig, {
         ...nextRuntime.appPaths,
         configPath: nextRuntime.configPath,
@@ -720,7 +733,7 @@ class ManagedProfile {
         controls: nextControls,
         appPaths: nextRuntime.appPaths,
         conversationRuntime,
-        instance: nextResolvedChannelInstances[0],
+        instance: nextLarkInstance,
       });
       const nextBridge = nextLarkChannelRuntime.bridge;
       const previousLarkChannelRuntime = this.larkChannelRuntime;

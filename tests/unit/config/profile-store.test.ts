@@ -279,4 +279,48 @@ describe('profile store canonical serialization', () => {
     });
   });
 
+  it('round-trips schema v3 channels and rejects mixed root/profile versions', async () => {
+    const root = await tmpRoot();
+    const configPath = join(root, 'config.json');
+    const v2 = createDefaultProfileConfig({ agentKind: 'claude', accounts: { app } });
+    const profile = {
+      ...v2,
+      schemaVersion: 3 as const,
+      channels: {
+        plugins: [],
+        instances: {
+          'lark-primary': {
+            plugin: 'lark',
+            enabled: true,
+            configVersion: 1,
+            config: {
+              appId: app.id,
+              tenant: app.tenant,
+              credentialMode: 'env-template',
+            },
+            secretRefs: { appSecret: { source: 'env' as const, id: 'APP_SECRET' } },
+          },
+        },
+      },
+    };
+
+    await saveRootConfig({
+      schemaVersion: 3,
+      activeProfile: 'primary',
+      preferences: {},
+      profiles: { primary: profile },
+    }, configPath);
+    const loaded = await loadRootConfig(configPath);
+    expect(loaded?.schemaVersion).toBe(3);
+    expect(loaded?.profiles.primary?.channels).toEqual(profile.channels);
+
+    await writeFile(configPath, JSON.stringify({
+      schemaVersion: 3,
+      activeProfile: 'primary',
+      preferences: {},
+      profiles: { primary: v2 },
+    }));
+    await expect(loadRootConfig(configPath)).rejects.toThrow(/does not match root schemaVersion/);
+  });
+
 });

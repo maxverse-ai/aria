@@ -1,10 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import { createDefaultProfileConfig } from '../../../src/config/profile-schema';
+import {
+  createDefaultProfileConfig,
+  normalizeProfileConfig,
+} from '../../../src/config/profile-schema';
 import type { AppCredentials } from '../../../src/config/schema';
 import {
   BUILT_IN_LARK_CONFIG_VERSION,
   BUILT_IN_LARK_PLUGIN_ID,
+  projectProfileChannelInstances,
   projectSchemaV2ChannelInstances,
+  requirePrimaryLarkChannelInstance,
   SCHEMA_V2_LARK_INSTANCE_ID,
 } from '../../../src/channel/instance-resolver';
 
@@ -111,5 +116,112 @@ describe('schema-v2 channel instance projection', () => {
         profile: { ...profile(), schemaVersion: 3 as never },
       }),
     ).toThrow(/unsupported profile schema/);
+  });
+});
+
+describe('schema-v3 channel instance projection', () => {
+  it('projects separately named channel instances without mixing WeChat identities', () => {
+    const input = normalizeProfileConfig({
+      ...profile(),
+      schemaVersion: 3,
+      channels: {
+        plugins: [],
+        instances: {
+          'personal-primary': {
+            plugin: 'weixin-ilink',
+            enabled: false,
+            configVersion: 1,
+            config: { login: 'qr' },
+            secretRefs: {},
+          },
+          'customer-service': {
+            plugin: 'wechat-kf',
+            enabled: false,
+            configVersion: 1,
+            config: { callbackPath: '/wechat-kf/callback' },
+            secretRefs: {},
+          },
+          'lark-primary': {
+            plugin: 'lark',
+            enabled: true,
+            configVersion: 1,
+            config: {
+              appId: baseApp.id,
+              tenant: baseApp.tenant,
+              credentialMode: 'secret-ref',
+            },
+            secretRefs: { appSecret: baseApp.secret },
+          },
+        },
+      },
+    });
+
+    const instances = projectProfileChannelInstances({
+      profileId: 'work',
+      profile: input,
+    });
+    expect(instances.map((instance) => `${instance.pluginId}/${instance.instanceId}`)).toEqual([
+      'wechat-kf/customer-service',
+      'lark/lark-primary',
+      'weixin-ilink/personal-primary',
+    ]);
+    expect(requirePrimaryLarkChannelInstance(instances, baseApp).instanceId)
+      .toBe('lark-primary');
+    expect(Object.isFrozen(instances)).toBe(true);
+    expect(Object.isFrozen(instances[0]?.config)).toBe(true);
+  });
+
+  it('fails closed when v3 Lark desired state diverges from the active binding', () => {
+    const input = normalizeProfileConfig({
+      ...profile(),
+      schemaVersion: 3,
+      channels: {
+        plugins: [],
+        instances: {
+          'lark-primary': {
+            plugin: 'lark',
+            enabled: true,
+            configVersion: 1,
+            config: {
+              appId: 'different-app',
+              tenant: baseApp.tenant,
+              credentialMode: 'secret-ref',
+            },
+            secretRefs: { appSecret: baseApp.secret },
+          },
+        },
+      },
+    });
+
+    expect(() => projectProfileChannelInstances({ profileId: 'work', profile: input }))
+      .toThrow(/does not match legacy Lark binding/);
+  });
+
+  it('fails closed when the v3 Lark secret reference diverges from the active binding', () => {
+    const input = normalizeProfileConfig({
+      ...profile(),
+      schemaVersion: 3,
+      channels: {
+        plugins: [],
+        instances: {
+          'lark-primary': {
+            plugin: 'lark',
+            enabled: true,
+            configVersion: 1,
+            config: {
+              appId: baseApp.id,
+              tenant: baseApp.tenant,
+              credentialMode: 'secret-ref',
+            },
+            secretRefs: {
+              appSecret: { source: 'exec', provider: 'bridge', id: 'different-secret' },
+            },
+          },
+        },
+      },
+    });
+
+    expect(() => projectProfileChannelInstances({ profileId: 'work', profile: input }))
+      .toThrow(/does not match legacy Lark binding/);
   });
 });

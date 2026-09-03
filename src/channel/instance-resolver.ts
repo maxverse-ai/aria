@@ -1,4 +1,8 @@
-import type { ProfileConfig } from '../config/profile-schema';
+import { isDeepStrictEqual } from 'node:util';
+import type {
+  ProfileChannelsConfig,
+  ProfileConfig,
+} from '../config/profile-schema';
 import {
   isSecretRef,
   type AppCredentials,
@@ -37,9 +41,24 @@ export interface SchemaV2ChannelProjectionInput {
   };
 }
 
+export interface SchemaV3ChannelProjectionInput {
+  profileId: string;
+  profile: {
+    schemaVersion: ProfileConfig['schemaVersion'];
+    accounts: {
+      app: AppCredentials;
+    };
+    channels?: ProfileChannelsConfig;
+  };
+}
+
+export type ProfileChannelProjectionInput = SchemaV3ChannelProjectionInput;
+
 export type SchemaV2ChannelInstances = readonly [
   ResolvedChannelInstance<LarkChannelConfig>,
 ];
+
+export type SchemaV3ChannelInstances = readonly ResolvedChannelInstance[];
 
 /**
  * Pure compatibility projection from the authoritative schema-v2 profile into
@@ -79,6 +98,97 @@ export function projectSchemaV2ChannelInstances(
   return Object.freeze([Object.freeze(instance)]) as SchemaV2ChannelInstances;
 }
 
+/** Project either supported stored profile schema without mutating it. */
+export function projectProfileChannelInstances(
+  input: ProfileChannelProjectionInput,
+): SchemaV3ChannelInstances {
+  if (input.profile.schemaVersion === 2) {
+    return projectSchemaV2ChannelInstances(input as SchemaV2ChannelProjectionInput);
+  }
+  if (input.profile.schemaVersion !== 3 || !input.profile.channels) {
+    throw new ChannelPluginError('unsupported profile schema for channel projection', {
+      kind: 'configuration',
+      code: 'unsupported-channel-profile-schema',
+    });
+  }
+
+  const instances = Object.entries(input.profile.channels.instances)
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([instanceId, stored]) => {
+      const instance: ResolvedChannelInstance = {
+        profileId: input.profileId,
+        pluginId: stored.plugin,
+        instanceId,
+        enabled: stored.enabled,
+        configVersion: stored.configVersion,
+        config: deepFreeze(structuredClone(stored.config)),
+        secretRefs: deepFreeze(structuredClone(stored.secretRefs)),
+      };
+      assertResolvedChannelInstance(instance);
+      return Object.freeze(instance);
+    });
+  requirePrimaryLarkChannelInstance(instances, input.profile.accounts.app);
+  return Object.freeze(instances);
+}
+
+/**
+ * Stage 8 keeps the proven Lark transport on legacy account credentials. The
+ * v3 record must therefore describe that exact same binding until the later
+ * management cutover removes this compatibility seam.
+ */
+export function requirePrimaryLarkChannelInstance(
+  instances: readonly ResolvedChannelInstance[],
+  app: AppCredentials,
+): ResolvedChannelInstance<LarkChannelConfig> {
+  const matches = instances.filter((instance) => instance.pluginId === BUILT_IN_LARK_PLUGIN_ID);
+  if (matches.length !== 1 || matches[0]?.instanceId !== SCHEMA_V2_LARK_INSTANCE_ID) {
+    throw new ChannelPluginError('schema v3 requires exactly one lark-primary instance', {
+      kind: 'configuration',
+      code: 'invalid-primary-lark-instance',
+    });
+  }
+  const instance = matches[0];
+  const config = instance.config as Partial<LarkChannelConfig>;
+  const projectedCredential = projectCredential(app.secret);
+  const projectedSecretRefs = projectedCredential.ref
+    ? { appSecret: projectedCredential.ref }
+    : {};
+  if (
+    instance.configVersion !== BUILT_IN_LARK_CONFIG_VERSION ||
+    instance.enabled !== true ||
+    config.appId !== app.id ||
+    config.tenant !== app.tenant ||
+    config.credentialMode !== projectedCredential.mode ||
+    !isDeepStrictEqual(instance.secretRefs, projectedSecretRefs)
+  ) {
+    throw new ChannelPluginError('schema v3 lark-primary does not match legacy Lark binding', {
+      kind: 'configuration',
+      code: 'lark-channel-binding-mismatch',
+    });
+  }
+  return instance as ResolvedChannelInstance<LarkChannelConfig>;
+}
+
+/** Build the canonical v3 channel section for one schema-v2 profile. */
+export function createSchemaV3ChannelsFromSchemaV2Profile(input: {
+  profileId: string;
+  profile: SchemaV2ChannelProjectionInput['profile'];
+}): ProfileChannelsConfig {
+  const [lark] = projectSchemaV2ChannelInstances(input);
+  return Object.freeze({
+    plugins: Object.freeze([]),
+    instances: Object.freeze({
+      [lark.instanceId]: Object.freeze({
+        plugin: lark.pluginId,
+        enabled: lark.enabled,
+        configVersion: lark.configVersion,
+        config: lark.config,
+        secretRefs: lark.secretRefs,
+      }),
+    }),
+  });
+}
+
 function projectCredential(secret: AppCredentials['secret']): {
   mode: LarkCredentialMode;
   ref?: Readonly<SecretRef>;
@@ -107,4 +217,12 @@ function projectCredential(secret: AppCredentials['secret']): {
       ...(secret.provider !== undefined ? { provider: secret.provider } : {}),
     }),
   };
+}
+
+function deepFreeze<T>(value: T): T {
+  if (value && typeof value === 'object' && !Object.isFrozen(value)) {
+    Object.freeze(value);
+    Object.values(value as Record<string, unknown>).forEach((item) => deepFreeze(item));
+  }
+  return value;
 }

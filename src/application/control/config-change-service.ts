@@ -418,13 +418,21 @@ function validateCandidate(
     return;
   }
   if (
-    after.schemaVersion !== 2 ||
+    (after.schemaVersion !== 2 && after.schemaVersion !== 3) ||
     !after.profiles ||
     typeof after.profiles !== 'object' ||
     !after.activeProfile ||
     !after.profiles[after.activeProfile]
   ) {
     throw new ControlChangeError('invalid-plan', 'operation returned an invalid root configuration');
+  }
+  for (const [name, candidateProfile] of Object.entries(after.profiles)) {
+    if (candidateProfile.schemaVersion !== after.schemaVersion) {
+      throw new ControlChangeError(
+        'invalid-plan',
+        `profile schema version does not match root: ${name}`,
+      );
+    }
   }
   if (resource.kind === 'root') return;
 

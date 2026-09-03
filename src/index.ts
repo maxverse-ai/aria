@@ -204,9 +204,20 @@ export {
 export {
   BUILT_IN_LARK_CONFIG_VERSION,
   BUILT_IN_LARK_PLUGIN_ID,
+  createSchemaV3ChannelsFromSchemaV2Profile,
+  projectProfileChannelInstances,
   projectSchemaV2ChannelInstances,
+  requirePrimaryLarkChannelInstance,
   SCHEMA_V2_LARK_INSTANCE_ID,
 } from './channel/instance-resolver';
+export {
+  applyChannelSchemaV3Migration,
+  CHANNEL_SCHEMA_MIGRATION_PLAN_VERSION,
+  migrateProfileConfigToSchemaV3,
+  migrateRootConfigToSchemaV3,
+  planChannelSchemaV3Migration,
+  rollbackChannelSchemaV3Migration,
+} from './config/channel-schema-migration';
 export {
   CURRENT_DEFAULT_LARK_CHANNEL_ROLLOUT_MODE,
   LARK_CHANNEL_ROLLOUT_ENV,
@@ -217,6 +228,9 @@ export { ChannelPluginError } from './channel/plugin/errors';
 export { CHANNEL_PLUGIN_ABI_VERSION } from './channel/plugin/types';
 export {
   assertCanonicalChannelPluginId,
+  assertChannelInstanceRef,
+  assertChannelPluginPackageName,
+  assertChannelPluginPackageVersion,
   assertCapabilityAllowsInbound,
   assertCapabilityAllowsOutbound,
   assertChannelDeliveryReceipt,
@@ -281,9 +295,19 @@ export type {
 export type {
   LarkChannelConfig,
   LarkCredentialMode,
+  ProfileChannelProjectionInput,
   SchemaV2ChannelInstances,
   SchemaV2ChannelProjectionInput,
+  SchemaV3ChannelInstances,
+  SchemaV3ChannelProjectionInput,
 } from './channel/instance-resolver';
+export type {
+  ApplyChannelSchemaMigrationResult,
+  ChannelSchemaMigrationOptions,
+  ChannelSchemaMigrationPlan,
+  ChannelSchemaMigrationProfilePlan,
+  RollbackChannelSchemaMigrationResult,
+} from './config/channel-schema-migration';
 export type {
   LarkChannelOwnershipPolicy,
   LarkChannelRolloutMode,
