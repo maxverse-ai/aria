@@ -24,6 +24,12 @@ import type { SessionStore } from '../session/store';
 import type { WorkspaceStore } from '../workspace/store';
 import { log } from '../core/logger';
 import { observabilityFields } from '../observability/execution-context';
+import {
+  assertRunIntent,
+  createConversationRunIntent,
+  toAttachmentReference,
+  type RunIntent,
+} from '../application/execution-intent';
 
 export interface StartRunFlowInput {
   scopeId: string;
@@ -55,7 +61,9 @@ export interface StartRunFlowInput {
 export type RunFlowRejectCode =
   | WorkingDirectoryRejectReason
   | RunPolicyReject['rejectReason']['code']
-  | RunRejectedCode;
+  | RunRejectedCode
+  | 'intent-context-mismatch'
+  | 'session-policy-unsupported';
 
 export type StartRunFlowResult =
   | {
@@ -84,8 +92,40 @@ export interface RecordRunSessionEventInput {
 }
 
 export async function startRunFlow(input: StartRunFlowInput): Promise<StartRunFlowResult> {
-  const requestedCwd =
-    input.workspaces.cwdFor(input.scopeId) ?? input.profileConfig.workspaces.default ?? '';
+  const intent = createConversationRunIntent({
+    profileId: input.observability?.profile ?? 'active-profile',
+    scopeId: input.scopeId,
+    scope: input.scope,
+    prompt: input.prompt,
+    attachments: input.attachments,
+    access: input.access,
+    capability: input.capability,
+  });
+  return startRunIntentFlow({
+    ...input,
+    intent,
+    resolvedAttachments: input.attachments,
+  });
+}
+
+export interface StartRunIntentFlowInput extends Omit<StartRunFlowInput, 'prompt' | 'attachments'> {
+  intent: RunIntent;
+  /** Policy-ready attachment metadata resolved from the intent's opaque references. */
+  resolvedAttachments: AgentAttachment[];
+}
+
+/** Common execution boundary used by conversations today and future triggers. */
+export async function startRunIntentFlow(
+  input: StartRunIntentFlowInput,
+): Promise<StartRunFlowResult> {
+  assertRunIntent(input.intent);
+  const compatibilityReject = validateIntentExecutionContext(input);
+  if (compatibilityReject) return compatibilityReject;
+  const prompt = input.intent.input.prompt;
+  const attachments = input.resolvedAttachments;
+  const requestedCwd = input.intent.workspaceRef.kind === 'scope'
+    ? input.workspaces.cwdFor(input.intent.workspaceRef.ref) ?? input.profileConfig.workspaces.default ?? ''
+    : input.profileConfig.workspaces.default ?? '';
   const workspace = await resolveWorkingDirectory(requestedCwd);
   if (!workspace.ok) {
     return {
@@ -100,8 +140,8 @@ export async function startRunFlow(input: StartRunFlowInput): Promise<StartRunFl
 
   const policy = evaluateRunPolicy({
     scope: input.scope,
-    attachments: input.attachments,
-    prompt: input.prompt,
+    attachments,
+    prompt,
     requestedCwd,
     cwdRealpath: workspace.cwdRealpath,
     access: input.access,
@@ -131,7 +171,8 @@ export async function startRunFlow(input: StartRunFlowInput): Promise<StartRunFl
   let resumeFrom: string | undefined;
   let sessionId: string | undefined;
   let threadId: string | undefined;
-  if (input.sessionCatalog) {
+  const shouldResume = input.intent.sessionPolicy.kind === 'resume-anchor';
+  if (shouldResume && input.sessionCatalog) {
     const catalogEntry = input.sessionCatalog.activeFor({
       scopeId: input.scopeId,
       agentId: input.capability.agentId,
@@ -146,7 +187,7 @@ export async function startRunFlow(input: StartRunFlowInput): Promise<StartRunFl
       resumeFrom = threadId;
     }
   }
-  if (!resumeFrom && input.capability.agentId === 'claude') {
+  if (shouldResume && !resumeFrom && input.capability.agentId === 'claude') {
     resumeFrom = input.sessions.resumeFor(input.scopeId, workspace.cwdRealpath);
     sessionId = resumeFrom;
     const stale = input.sessions.getRaw(input.scopeId);
@@ -235,6 +276,55 @@ export async function startRunFlow(input: StartRunFlowInput): Promise<StartRunFl
     cwdRealpath: workspace.cwdRealpath,
     ...(resumeFrom ? { resumeFrom } : {}),
   };
+}
+
+function validateIntentExecutionContext(
+  input: StartRunIntentFlowInput,
+): Extract<StartRunFlowResult, { ok: false }> | undefined {
+  const { intent } = input;
+  if (intent.sessionPolicy.kind === 'named-session') {
+    return rejectIntent(
+      'session-policy-unsupported',
+      '当前执行运行时暂不支持命名会话。',
+    );
+  }
+  const expectedProfile = input.observability?.profile;
+  const preferredAgent = intent.engineRequirements.preferredAgentId;
+  const contextMatches =
+    intent.scopeRef === input.scopeId &&
+    intent.actor.actorRef === input.scope.actorId &&
+    (!expectedProfile || intent.profileId === expectedProfile) &&
+    (!preferredAgent || preferredAgent === input.capability.agentId) &&
+    (intent.workspaceRef.kind === 'profile-default' ||
+      (intent.workspaceRef.kind === 'scope' && intent.workspaceRef.ref === input.scopeId)) &&
+    (intent.sessionPolicy.kind !== 'resume-anchor' ||
+      intent.sessionPolicy.anchorRef === input.scopeId) &&
+    attachmentsMatch(intent, input.resolvedAttachments);
+  if (!contextMatches) {
+    return rejectIntent(
+      'intent-context-mismatch',
+      '运行请求与当前 profile、会话、工作区或附件上下文不一致。',
+    );
+  }
+  return undefined;
+}
+
+function attachmentsMatch(intent: RunIntent, attachments: readonly AgentAttachment[]): boolean {
+  if (intent.input.attachments.length !== attachments.length) return false;
+  return attachments.every((attachment, index) => {
+    const expected = intent.input.attachments[index];
+    const actual = toAttachmentReference(attachment, index);
+    return expected?.attachmentRef === actual.attachmentRef &&
+      expected.kind === actual.kind &&
+      expected.requiredness === actual.requiredness;
+  });
+}
+
+function rejectIntent(
+  code: 'intent-context-mismatch' | 'session-policy-unsupported',
+  userVisible: string,
+): Extract<StartRunFlowResult, { ok: false }> {
+  return { ok: false, rejectReason: { code, userVisible } };
 }
 
 async function recordGovernance(

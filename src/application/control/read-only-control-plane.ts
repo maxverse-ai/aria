@@ -60,6 +60,11 @@ export class ReadOnlyControlPlane {
         capability('config.plan.show', 'aria config plan-show <plan-id>'),
         capability('config.plan.confirm', 'aria config confirm <plan-id>', 'write'),
         capability('config.plan.apply', 'aria config apply <plan-id>', 'write'),
+        capability('trigger.capabilities', 'aria trigger capabilities'),
+        capability(
+          'trigger.schema',
+          'aria trigger schema <run-intent|result-route|session-policy>',
+        ),
         capability('runtime.status', 'aria runtime status [--profile <name>]'),
       ],
     };
