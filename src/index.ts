@@ -107,6 +107,7 @@ export type {
   TriggerApplyResult,
   TriggerExecuteRequest,
   TriggerManagementCommand,
+  TriggerDefinitionReadModel,
   TriggerPlanActionRequest,
   TriggerPlanRequest,
   TriggerPlanResult,
@@ -114,6 +115,17 @@ export type {
   TriggerPreviewSnapshot,
   TriggerReadSnapshot,
 } from './trigger/operations';
+export {
+  ConversationReminderService,
+  FileConversationAnchorStore,
+} from './trigger/reminder';
+export type {
+  ConversationAnchorRecord,
+  ConversationAnchorStore,
+  ConversationReminderControl,
+  ConversationReminderCreateInput,
+  ConversationReminderServiceOptions,
+} from './trigger/reminder';
 export type {
   TriggerExecutionGateway,
   TriggerExecutionResult,

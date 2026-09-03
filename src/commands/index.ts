@@ -149,6 +149,7 @@ import { hasStructuredLarkCliUserAuth } from '../lark-cli/identity-policy';
 import { withOutboundIntent } from '../outbound/context';
 import type { LoadedOutboundPolicy } from '../outbound/plugin';
 import type { OutboundPolicyStatus } from '../outbound/plugin';
+import type { ConversationReminderControl } from '../trigger/reminder';
 
 function runDetachedOutbound(
   ctx: CommandContext,
@@ -199,6 +200,8 @@ export interface Controls {
    * `meeting.enabled` is on. Late-bound by startChannel. */
   meeting?: MeetingManager;
   outboundPolicyStatus?(): OutboundPolicyStatus;
+  /** Channel adapter over the Supervisor-owned reminder application service. */
+  triggerReminders?: ConversationReminderControl;
 }
 
 export interface AgentSwitchResult {
@@ -293,6 +296,7 @@ const handlers: Record<string, Handler> = {
   '/invite': handleInvite,
   '/remove': handleRemove,
   '/meeting': handleMeeting,
+  '/remind': handleRemind,
 };
 
 /**
@@ -2219,6 +2223,82 @@ function formatDoctorEchoStatus(echoText: string, state: RunState): string {
 async function handleHelp(_args: string, ctx: CommandContext): Promise<void> {
   const card = helpCard(ctx.agent.displayName);
   await presentCommandCard(ctx, card);
+}
+
+async function handleRemind(args: string, ctx: CommandContext): Promise<void> {
+  const reminders = ctx.controls.triggerReminders;
+  if (!reminders) {
+    await reply(ctx, '❌ 当前运行模式没有启用提醒管理。');
+    return;
+  }
+  const actor: ControlActorContext = { source: 'card', principal: ctx.msg.senderId };
+  const [sub = '', ...rest] = args.trim().split(/\s+/);
+  try {
+    if (sub === 'list') {
+      const definitions = await reminders.list(actor);
+      await reply(ctx, definitions.length === 0
+        ? '当前会话账号还没有提醒。'
+        : definitions.map((item) => `- \`${item.id}\` · ${item.state} · ${item.nextFireAt ? new Date(item.nextFireAt).toISOString() : '无下次执行'}`).join('\n'));
+      return;
+    }
+    if (sub === 'cancel') {
+      const id = rest[0];
+      if (!id) return remindUsage(ctx);
+      await reminders.cancel(id, actor);
+      await reply(ctx, `✅ 已取消提醒 \`${id}\`。`);
+      return;
+    }
+    if (sub === 'snooze') {
+      const [id, at] = rest;
+      if (!id || !at) return remindUsage(ctx);
+      const definition = await reminders.snooze(id, at, actor);
+      await reply(ctx, `✅ 已将提醒 \`${id}\` 延后到 ${new Date(definition.nextFireAt!).toISOString()}。`);
+      return;
+    }
+    if (sub === 'update') {
+      const [id, ...promptParts] = rest;
+      const prompt = promptParts.join(' ');
+      if (!id || !prompt) return remindUsage(ctx);
+      await reminders.update(id, prompt, actor);
+      await reply(ctx, `✅ 已更新提醒 \`${id}\` 的任务内容。`);
+      return;
+    }
+    if (sub === 'history') {
+      const id = rest[0];
+      if (!id) return remindUsage(ctx);
+      const history = await reminders.history(id, actor);
+      await reply(ctx, history.occurrences.length === 0
+        ? `提醒 \`${id}\` 还没有执行记录。`
+        : history.occurrences.map((item) => `- ${new Date(item.scheduledFor).toISOString()} · ${item.state} · attempt ${item.attempt}`).join('\n'));
+      return;
+    }
+    const createArgs = sub === 'at' ? rest : [sub, ...rest];
+    const [at, ...promptParts] = createArgs;
+    const prompt = promptParts.join(' ');
+    if (!at || !prompt) return remindUsage(ctx);
+    const definition = await reminders.create({
+      scopeId: ctx.msg.chatId,
+      sourceMessageId: ctx.msg.messageId,
+      at,
+      prompt,
+      label: prompt.length > 48 ? `${prompt.slice(0, 48)}…` : prompt,
+    }, actor);
+    await reply(ctx, `✅ 提醒已创建：\`${definition.id}\`，将在 ${new Date(definition.nextFireAt!).toISOString()} 触发。`);
+  } catch (error) {
+    await reply(ctx, `❌ 提醒操作失败：${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+function remindUsage(ctx: CommandContext): Promise<void> {
+  return reply(ctx, [
+    '**提醒命令**',
+    '- `/remind at <ISO时间> <任务>` — 创建并锚定到当前会话',
+    '- `/remind list` — 我的提醒',
+    '- `/remind snooze <id> <ISO时间>` — 延后',
+    '- `/remind update <id> <新任务>` — 更新内容',
+    '- `/remind cancel <id>` — 取消',
+    '- `/remind history <id>` — 执行历史',
+  ].join('\n'));
 }
 
 // ─── /account ─────────────────────────────────────────────────────────────

@@ -244,7 +244,7 @@ export function triggerCapabilities(): TriggerCapabilitySnapshot {
   return {
     schema: 'aria.trigger.capabilities.v1',
     apiVersion: TRIGGER_CONTROL_API_VERSION,
-    implementationStage: 'unified-operations',
+    implementationStage: 'conversation-reminders',
     runtimeEnabled: false,
     capabilities: [
       {
@@ -268,6 +268,12 @@ export function triggerCapabilities(): TriggerCapabilitySnapshot {
       {
         id: 'trigger.manage',
         cli: 'aria trigger plan|confirm|apply|execute',
+        access: 'write',
+        outputs: ['text', 'json'],
+      },
+      {
+        id: 'trigger.reminder',
+        cli: '/remind at|list|snooze|update|cancel|history',
         access: 'write',
         outputs: ['text', 'json'],
       },

@@ -580,7 +580,12 @@ default ownership merely to prove scheduling.
    add CLI and Astryx Web adapters. Preserve plan/confirm/apply and redaction.
 9. **Conversation reminders.** Allow an authorized channel interaction to
    create an anchored reminder without embedding provider ids in schedule
-   records. Add snooze, update, cancel, and history.
+   records. Add snooze, update, cancel, and history. Implemented with `/remind`
+   as a thin Channel adapter over the same Management API. Provider instance,
+   conversation scope, and source-message coordinates live in a mode-`0600`
+   private anchor directory; durable schedule definitions contain only an
+   opaque anchor id. Ownership is bound to the authenticated channel actor and
+   every mutation rechecks both profile and owner.
 10. **Agent-created reminders.** Add explicit engine capability, ownership,
     quotas, and abuse tests before allowing autonomous creation.
 11. **Extension proof.** Implement a harmless webhook or synthetic event

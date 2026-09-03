@@ -62,7 +62,6 @@ import {
 import {
   FileTriggerResultDeliveryStore,
   TriggerResultRouter,
-  type ResolvedConversationRoute,
 } from '../trigger/result';
 import {
   TriggerManagementApi,
@@ -72,8 +71,15 @@ import {
   type TriggerReadSnapshot,
 } from '../trigger/operations';
 import {
+  ConversationReminderService,
+  FileConversationAnchorStore,
+  type ConversationReminderControl,
+} from '../trigger/reminder';
+import {
+  BUILT_IN_LARK_PLUGIN_ID,
   projectProfileChannelInstances,
   requirePrimaryLarkChannelInstance,
+  SCHEMA_V2_LARK_INSTANCE_ID,
   type LarkChannelConfig,
 } from '../channel/instance-resolver';
 import {
@@ -182,6 +188,7 @@ class ManagedProfile {
     private startChannelFn: StartChannelFn,
     private larkChannelPolicy: Readonly<LarkChannelOwnershipPolicy>,
     private onExitCommand: (profile: string) => void,
+    private triggerReminders?: ConversationReminderControl,
     private createNativeReadRuntime?: SupervisorOptions['createNativeReadRuntime'],
   ) {
     this.runtimeSlot = new ProfileRuntimeSlot(engineRuntime);
@@ -410,20 +417,6 @@ class ManagedProfile {
     return { runId: started.execution.runId, completion };
   }
 
-  resolveTriggerConversation(conversationRef: string): ResolvedConversationRoute {
-    const instance = this.larkChannelRuntime?.manager?.snapshot().instances
-      .find((candidate) => candidate.state === 'ready');
-    if (!instance) throw Object.assign(new Error('no proactive channel instance is ready'), {
-      code: 'proactive-channel-unavailable',
-    });
-    return {
-      profileId: this.profile,
-      pluginId: instance.pluginId,
-      instanceId: instance.instanceId,
-      scopeId: conversationRef,
-    };
-  }
-
   deliverTriggerResult(intent: ChannelOutboundIntent): Promise<ChannelDeliveryReceipt> {
     const manager = this.larkChannelRuntime?.manager;
     if (!manager) throw Object.assign(new Error('channel manager is unavailable'), {
@@ -499,6 +492,7 @@ class ManagedProfile {
       engineGeneration() {
         return self.runtimeSlot.currentGeneration();
       },
+      ...(this.triggerReminders ? { triggerReminders: this.triggerReminders } : {}),
     };
     return currentControls;
   }
@@ -913,21 +907,22 @@ export class Supervisor {
   private readonly larkChannelPolicy: Readonly<LarkChannelOwnershipPolicy>;
   private readonly triggerManager: TriggerManager;
   private readonly triggerApi: TriggerManagementApi;
+  private readonly triggerReminders: ConversationReminderService;
 
   constructor(private opts: SupervisorOptions) {
     this.larkChannelPolicy = resolveLarkChannelOwnership(
       opts.larkChannelRolloutMode ?? process.env[LARK_CHANNEL_ROLLOUT_ENV],
     );
-    const triggerStateFile = join(opts.rootDir ?? dirname(opts.configPath), 'triggers', 'state.v1.json');
-    const triggerResultFile = join(opts.rootDir ?? dirname(opts.configPath), 'triggers', 'result-deliveries.v1.json');
+    const triggerRoot = opts.rootDir ?? dirname(opts.configPath);
+    const triggerStateFile = join(triggerRoot, 'triggers', 'state.v1.json');
+    const triggerResultFile = join(triggerRoot, 'triggers', 'result-deliveries.v1.json');
+    const conversationAnchors = new FileConversationAnchorStore(
+      join(triggerRoot, 'triggers', 'conversation-anchors.v1.json'),
+    );
     const resultRouter = new TriggerResultRouter({
       store: new FileTriggerResultDeliveryStore(triggerResultFile),
       resolver: {
-        resolve: async (profileId, conversationRef) => {
-          const profile = this.managed.get(profileId);
-          if (!profile) throw Object.assign(new Error(`profile is offline: ${profileId}`), { code: 'profile-offline' });
-          return profile.resolveTriggerConversation(conversationRef);
-        },
+        resolve: (profileId, conversationRef) => conversationAnchors.resolve(profileId, conversationRef),
       },
       channel: {
         deliver: (intent) => {
@@ -957,9 +952,13 @@ export class Supervisor {
       ...(opts.triggerPollIntervalMs ? { pollIntervalMs: opts.triggerPollIntervalMs } : {}),
     });
     this.triggerApi = new TriggerManagementApi({
-      rootDir: opts.rootDir ?? dirname(opts.configPath),
+      rootDir: triggerRoot,
       store: triggerStore,
       onApplied: () => this.triggerManager.reconcile(),
+    });
+    this.triggerReminders = new ConversationReminderService({
+      api: this.triggerApi,
+      anchors: conversationAnchors,
     });
   }
 
@@ -1013,6 +1012,29 @@ export class Supervisor {
       schema: 'aria.trigger-management.execute.request.v1', apiVersion: 1,
       requestId: randomUUID(), actor, command, input,
     });
+  }
+
+  private reminderControlFor(profileId: string): ConversationReminderControl {
+    return {
+      create: (input, actor) => this.triggerReminders.create({
+        profileId,
+        endpoint: {
+          pluginId: BUILT_IN_LARK_PLUGIN_ID,
+          instanceId: SCHEMA_V2_LARK_INSTANCE_ID,
+          scopeId: input.scopeId,
+          ...(input.sourceMessageId ? { sourceMessageId: input.sourceMessageId } : {}),
+        },
+        at: input.at,
+        prompt: input.prompt,
+        ...(input.timeZone ? { timeZone: input.timeZone } : {}),
+        ...(input.label ? { label: input.label } : {}),
+      }, actor),
+      list: (actor) => this.triggerReminders.list(profileId, actor),
+      snooze: (definitionId, at, actor) => this.triggerReminders.snooze(profileId, definitionId, at, actor),
+      update: (definitionId, prompt, actor) => this.triggerReminders.update(profileId, definitionId, prompt, actor),
+      cancel: (definitionId, actor) => this.triggerReminders.cancel(profileId, definitionId, actor),
+      history: (definitionId, actor) => this.triggerReminders.history(profileId, definitionId, actor),
+    };
   }
 
   /** Bring a profile online inside this process. Throws on lock/app conflict. */
@@ -1077,6 +1099,7 @@ export class Supervisor {
         this.startChannelFn,
         this.larkChannelPolicy,
         (p) => void this.stopProfile(p).catch(() => undefined),
+        this.reminderControlFor(appPaths.profile),
         this.opts.createNativeReadRuntime,
       );
       await managed.bringUp(new Date().toISOString());

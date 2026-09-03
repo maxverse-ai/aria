@@ -316,6 +316,41 @@ describe('Bridge command contracts', () => {
     const root = await loadRootConfig(h.controls.configPath);
     expect(root?.profiles.claude?.access.allowedChats).toEqual(['oc-group-1', 'oc-group-2']);
   });
+
+  it('anchors /remind creations to the current conversation and exposes owner operations', async () => {
+    const h = await createHarness();
+    const create = vi.fn(async () => ({
+      id: 'reminder-a',
+      state: 'active',
+      nextFireAt: Date.parse('2026-09-04T08:00:00.000Z'),
+    }));
+    const list = vi.fn(async () => [{
+      id: 'reminder-a',
+      state: 'active',
+      nextFireAt: Date.parse('2026-09-04T08:00:00.000Z'),
+    }]);
+    h.controls.triggerReminders = {
+      create: create as never,
+      list: list as never,
+      snooze: vi.fn() as never,
+      update: vi.fn() as never,
+      cancel: vi.fn() as never,
+      history: vi.fn() as never,
+    };
+
+    await expect(h.run('/remind at 2026-09-04T08:00:00Z prepare report')).resolves.toBe(true);
+    expect(create).toHaveBeenCalledWith(expect.objectContaining({
+      scopeId: 'chat-1',
+      sourceMessageId: 'om--remind-at-2026-09-0',
+      at: '2026-09-04T08:00:00Z',
+      prompt: 'prepare report',
+    }), { source: 'card', principal: 'ou-admin' });
+    expect(lastMarkdown(h.channel)).toContain('reminder-a');
+
+    await expect(h.run('/remind list')).resolves.toBe(true);
+    expect(list).toHaveBeenCalledWith({ source: 'card', principal: 'ou-admin' });
+    expect(lastMarkdown(h.channel)).toContain('reminder-a');
+  });
 });
 
 async function createHarness(): Promise<Harness> {

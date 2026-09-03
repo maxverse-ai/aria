@@ -46,6 +46,7 @@ describe('TriggerResultRouter', () => {
       resolver: {
         resolve: async () => ({
           profileId: 'profile-a', pluginId: 'fake-channel', instanceId: 'primary', scopeId: 'scope-a',
+          sourceMessageId: 'message-a',
         }),
       },
       channel: manager,
@@ -59,6 +60,7 @@ describe('TriggerResultRouter', () => {
     expect(deliver).toHaveBeenCalledWith(expect.objectContaining({
       deliveryId: 'occurrence-a:conversation',
       scopeId: 'scope-a',
+      sourceMessageId: 'message-a',
       content: { kind: 'text', text: 'report ready' },
     }));
     expect(await store.get('occurrence-a:conversation')).toMatchObject({

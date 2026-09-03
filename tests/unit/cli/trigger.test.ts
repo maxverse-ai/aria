@@ -28,7 +28,7 @@ describe('trigger contract CLI', () => {
     expect(JSON.parse(String(output.mock.calls[0]?.[0]))).toMatchObject({
       schema: 'aria.trigger.capabilities.v1',
       apiVersion: 1,
-      implementationStage: 'unified-operations',
+      implementationStage: 'conversation-reminders',
       runtimeEnabled: false,
     });
   });

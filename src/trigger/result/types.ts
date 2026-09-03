@@ -32,6 +32,7 @@ export interface ResolvedConversationRoute {
   pluginId: string;
   instanceId: string;
   scopeId: string;
+  sourceMessageId?: string;
 }
 
 /** Resolves an opaque anchor outside durable schedule records. */
