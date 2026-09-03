@@ -281,6 +281,19 @@ export type { FileAttachmentInput } from './media/file-store';
 export type { ConversationSource } from './conversation/types';
 export { ChannelPluginRegistry } from './channel/plugin/registry';
 export {
+  ExternalChannelPluginLoader,
+  InstalledChannelPluginPackageSource,
+} from './channel/plugin/loader';
+export type {
+  ExternalChannelPluginLoaderOptions,
+  ExternalChannelPluginPackageMetadata,
+  ExternalChannelPluginPackageSource,
+  ExternalChannelPluginRequest,
+  LoadedExternalChannelPlugin,
+  ResolvedExternalChannelPluginPackage,
+  TrustedExternalChannelPlugin,
+} from './channel/plugin/loader';
+export {
   CHANNEL_MANAGER_SNAPSHOT_VERSION,
   ChannelManager,
   DEFAULT_CHANNEL_MANAGER_DRAIN_MS,

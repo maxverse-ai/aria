@@ -103,12 +103,15 @@ describe('ChannelPluginRegistry', () => {
     registry.register(plugin);
 
     const firstStart = registry.start('fake-channel', context());
+    expect(registry.inUseCount('fake-channel')).toBe(1);
+    expect(() => registry.unregister('fake-channel')).toThrow(/active channel plugin/);
     await expect(registry.start('fake-channel', context())).rejects.toThrow(
       /already active/,
     );
     release();
     const runtime = await firstStart;
     await runtime.close();
+    expect(registry.inUseCount('fake-channel')).toBe(0);
   });
 
   it('rejects cross-instance and undeclared outbound capabilities', async () => {

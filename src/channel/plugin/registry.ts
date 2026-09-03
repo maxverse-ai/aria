@@ -27,7 +27,7 @@ import {
 export class ChannelPluginRegistry {
   private readonly plugins = new Map<string, ChannelPlugin>();
   private readonly active = new Map<string, ChannelRuntime>();
-  private readonly starting = new Set<string>();
+  private readonly starting = new Map<string, string>();
 
   register(plugin: ChannelPlugin): void {
     assertChannelPlugin(plugin);
@@ -41,7 +41,7 @@ export class ChannelPluginRegistry {
   }
 
   unregister(id: string): boolean {
-    if (this.activeCount(id) > 0) {
+    if (this.inUseCount(id) > 0) {
       throw configurationError(`cannot unregister active channel plugin: ${id}`);
     }
     return this.plugins.delete(id);
@@ -75,6 +75,16 @@ export class ChannelPluginRegistry {
     return count;
   }
 
+  /** Active plus in-flight starts; any nonzero value blocks unregister. */
+  inUseCount(pluginId?: string): number {
+    if (!pluginId) return this.active.size + this.starting.size;
+    let count = this.activeCount(pluginId);
+    for (const startingPluginId of this.starting.values()) {
+      if (startingPluginId === pluginId) count += 1;
+    }
+    return count;
+  }
+
   getActive(ref: ChannelInstanceRef): ChannelRuntime | undefined {
     return this.active.get(channelRuntimeKey(ref));
   }
@@ -99,7 +109,7 @@ export class ChannelPluginRegistry {
       );
     }
 
-    this.starting.add(key);
+    this.starting.set(key, id);
     let instance: typeof context.instance;
     let startedRuntime: ChannelRuntime | undefined;
     try {

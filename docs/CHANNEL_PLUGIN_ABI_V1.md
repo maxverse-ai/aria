@@ -57,6 +57,34 @@ The ids `wechat`, `weixin`, `wx`, and `wxkf` are reserved aliases and cannot be
 registered. Customer Service uses `wechat-kf`; personal WeChat iLink uses
 `weixin-ilink`.
 
+## External package loading
+
+`ExternalChannelPluginLoader` loads only packages that are already installed.
+It does not download, install, sandbox, enable, or configure them. Two inputs
+must agree before any package code runs:
+
+- desired state supplies a valid package name and exact semver;
+- deployment policy separately trusts that same package/version and declares
+  its expected canonical plugin id.
+
+The installed package metadata is read before the module is imported. The
+loader then requires the named `channelPluginPackage` export shown above and
+checks its ABI, manifest package identity, trusted plugin id, configuration
+version, and each matching instance's public config. Default exports and engine
+plugin declarations are not aliases for this contract.
+
+Loading a batch is transactional at the registry boundary. A resolution,
+metadata, import, export, contract, config, duplicate-id, or registration
+failure leaves none of that batch registered. Existing built-ins are never
+replaced. `unload()` and `unloadAll()` act only on registrations owned by that
+loader, and fail while any matching runtime is starting or active. After a
+ChannelManager start failure has rolled back runtimes, the caller can unload the
+package registrations cleanly and retry or return to the previous composition.
+
+The Stage 9 fixture creates no network connection, timer, file, or credential
+access. It proves the loader boundary only; no external provider is enabled by
+this stage.
+
 ## Runtime invariants
 
 - Every runtime is keyed by `(profileId, pluginId, instanceId)`. Cross-instance
@@ -84,6 +112,7 @@ plugin instance through ingress, snapshot, health, delivery, drain, and repeated
 close. Plugin repositories can call it from Vitest, Jest, Node test, or another
 runner and add provider-specific failure/restart fixtures around it.
 
-Package discovery, process isolation, persisted instance configuration, shared
-reliability stores, and production ChannelManager composition are deliberately
-outside ABI v1 and ship in later stages of the channel platform plan.
+Process isolation, package installation, shared reliability stores, and
+production ChannelManager composition are deliberately outside ABI v1 and ship
+in later stages of the channel platform plan. Installed package discovery and
+trust-gated registry ownership are provided by the Stage 9 loader.

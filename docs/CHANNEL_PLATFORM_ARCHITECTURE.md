@@ -300,6 +300,16 @@ Implementation status:
   record and never invents `wechat-kf` or `weixin-ilink` instances. Fresh
   installs remain on v2 pending separate production migration evidence. See
   [Channel profile schema v3](./CHANNEL_SCHEMA_V3.md).
+- Stage 9 adds a fail-closed external package loader without composing it into
+  Supervisor or enabling a provider. Desired package pins and a separate
+  deployment-owned trust list must agree on package, exact version, and plugin
+  id before package code is imported. Installed metadata, the named ABI export,
+  manifest identity, ABI/config versions, and matching instance config are
+  validated before atomic registry mutation. Batch failure rolls back earlier
+  registrations; starting or active runtimes block unload. A no-network fixture
+  proves load, lifecycle failure cleanup, unload, and reload without credentials
+  or production configuration changes. See
+  [Channel Plugin ABI v1](./CHANNEL_PLUGIN_ABI_V1.md#external-package-loading).
 
 0. **Baseline and decision.** Land this architecture decision, record the
    current seams, and prove unchanged production behavior with repository checks.
@@ -330,7 +340,9 @@ Implementation status:
    available, while the fresh-install default intentionally remains v2.
 9. **External plugin loader.** Load a harmless fixture package first. Validate
    trust, pinning, ids, ABI/config versions, lifecycle failure, and uninstall
-   behavior before accepting a real third-party protocol.
+   behavior before accepting a real third-party protocol. **Implemented:** the
+   loader boundary and no-network fixture are available; production composition
+   and every real third-party protocol remain later stages.
 10. **Unified operations.** Expose list/status/configure/login/logout/start/stop/
     restart/doctor through Management API and the runtime read model, then add
     CLI/Web adapters.
