@@ -66,6 +66,20 @@ export function assertCanonicalChannelPluginId(id: unknown): asserts id is strin
   }
 }
 
+export function assertChannelPluginPackageName(name: unknown): asserts name is string {
+  const value = requireNonEmptyString(name, 'channel plugin package name', 214);
+  if (!PACKAGE_NAME_PATTERN.test(value)) {
+    invalidContract(`invalid channel plugin package name: ${value}`);
+  }
+}
+
+export function assertChannelPluginPackageVersion(version: unknown): asserts version is string {
+  const value = requireNonEmptyString(version, 'channel plugin package version', 128);
+  if (!SEMVER_PATTERN.test(value)) {
+    invalidContract(`invalid channel plugin package version: ${value}`);
+  }
+}
+
 export function assertChannelPluginManifest(
   value: unknown,
 ): asserts value is ChannelPluginManifest {
@@ -81,18 +95,8 @@ export function assertChannelPluginManifest(
   requireJsonRecord(manifest.configSchema, 'manifest configSchema');
 
   const packageInfo = requireRecord(manifest.package, 'manifest package');
-  const packageName = requireNonEmptyString(packageInfo.name, 'package name', 214);
-  if (!PACKAGE_NAME_PATTERN.test(packageName)) {
-    invalidContract(`invalid channel plugin package name: ${packageName}`);
-  }
-  const packageVersion = requireNonEmptyString(
-    packageInfo.version,
-    'package version',
-    128,
-  );
-  if (!SEMVER_PATTERN.test(packageVersion)) {
-    invalidContract(`invalid channel plugin package version: ${packageVersion}`);
-  }
+  assertChannelPluginPackageName(packageInfo.name);
+  assertChannelPluginPackageVersion(packageInfo.version);
   assertCapabilities(manifest.capabilities);
 }
 
@@ -384,7 +388,7 @@ function assertAttachments(value: unknown): void {
   }
 }
 
-function assertChannelInstanceRef(value: unknown): void {
+export function assertChannelInstanceRef(value: unknown): void {
   const ref = requireRecord(value, 'channel instance reference');
   requireOpaqueId(ref.profileId, 'profileId', 128);
   assertCanonicalChannelPluginId(ref.pluginId);

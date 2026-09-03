@@ -3,6 +3,7 @@ import {
   type ProfileConfig,
 } from '../../config/profile-schema';
 import { isSecretRef, type SecretsConfig } from '../../config/schema';
+import { migrateProfileConfigToSchemaV3 } from '../../config/channel-schema-migration';
 import {
   ControlChangeError,
   type ControlChangeSummary,
@@ -69,7 +70,15 @@ export const profileCreateCommand: ManagementCommandDefinition = {
       );
     }
     const definition = preparedDefinition(parameters, root.secrets);
-    const config = structuredClone(definition.config);
+    const config = root.schemaVersion === 3 && definition.config.schemaVersion === 2
+      ? migrateProfileConfigToSchemaV3(profile, definition.config)
+      : structuredClone(definition.config);
+    if (config.schemaVersion !== root.schemaVersion) {
+      throw new ControlChangeError(
+        'invalid-plan',
+        `profile schemaVersion ${config.schemaVersion} does not match root schemaVersion ${root.schemaVersion}`,
+      );
+    }
     const incomingSecrets = definition.rootSecrets ?? config.secrets;
     delete config.secrets;
     const beforeCount = Object.keys(root.profiles).length;

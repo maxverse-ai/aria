@@ -291,6 +291,15 @@ Implementation status:
   completion, so rollback needs no state conversion. Existing callback paths,
   raw ids, cursor files, receipts, prepared deliveries, and conversation state
   remain unchanged. Personal WeChat is still deferred to Stage 11.
+- Stage 8 adds a validated stored schema v3 and an explicit v2-to-v3 migration
+  transaction. Both versions remain readable and writable; ordinary reads do
+  not migrate. Planning is secret-free and mutation-free, apply requires an
+  unchanged source revision and exact private backup, and write verification
+  failure restores the original bytes. Schema rollback restores that exact v2
+  backup. Migration creates only the authoritative `lark` / `lark-primary`
+  record and never invents `wechat-kf` or `weixin-ilink` instances. Fresh
+  installs remain on v2 pending separate production migration evidence. See
+  [Channel profile schema v3](./CHANNEL_SCHEMA_V3.md).
 
 0. **Baseline and decision.** Land this architecture decision, record the
    current seams, and prove unchanged production behavior with repository checks.
@@ -317,6 +326,8 @@ Implementation status:
 8. **Stored schema evolution.** Add explicit v2-to-v3 dry run, backup, apply,
    validation, and rollback. Both versions remain readable during the support
    window; fresh installs use v3 only after migration evidence is complete.
+   **Implemented:** the migration API and compatibility projection are
+   available, while the fresh-install default intentionally remains v2.
 9. **External plugin loader.** Load a harmless fixture package first. Validate
    trust, pinning, ids, ABI/config versions, lifecycle failure, and uninstall
    behavior before accepting a real third-party protocol.

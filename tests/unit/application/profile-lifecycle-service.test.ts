@@ -11,6 +11,7 @@ import {
   type ProfileRetentionStore,
 } from '../../../src/application/control';
 import { resolveAppPaths } from '../../../src/config/app-paths';
+import { migrateRootConfigToSchemaV3 } from '../../../src/config/channel-schema-migration';
 import { createDefaultProfileConfig } from '../../../src/config/profile-schema';
 import {
   createRootConfig,
@@ -58,6 +59,25 @@ describe('ProfileLifecycleService', () => {
     expect(root?.activeProfile).toBe('primary');
     expect(root?.profiles.third?.accounts.app.id).toBe('cli_third');
     expect(await appliedOperation(rootDir)).toBe('profile.create');
+  });
+
+  it('adds a prepared v2 profile to a v3 root as a canonical v3 profile', async () => {
+    const rootDir = await createFixture();
+    const configPath = join(rootDir, 'config.json');
+    await saveRootConfig(
+      migrateRootConfigToSchemaV3((await loadRootConfig(configPath))!),
+      configPath,
+    );
+    const service = lifecycleService(rootDir);
+
+    await service.create('third', preparedProfile('cli_third'), actor);
+
+    const root = await loadRootConfig(configPath);
+    expect(root?.schemaVersion).toBe(3);
+    expect(root?.profiles.third?.schemaVersion).toBe(3);
+    expect(Object.keys(root?.profiles.third?.channels?.instances ?? {})).toEqual([
+      'lark-primary',
+    ]);
   });
 
   it('archives the active profile and commits the deterministic fallback', async () => {

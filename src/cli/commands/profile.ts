@@ -201,7 +201,7 @@ export async function runProfileExport(
     );
   }
   const exportedBase: RootConfig = {
-    schemaVersion: 2,
+    schemaVersion: profile.schemaVersion,
     activeProfile: name,
     preferences: {},
     ...(opts.includeSecrets && root.secrets ? { secrets: cloneJson(root.secrets) } : {}),

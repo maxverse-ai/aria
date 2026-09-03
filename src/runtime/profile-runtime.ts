@@ -29,6 +29,7 @@ import {
   type ProfileConfig,
   type RootConfig,
 } from '../config/profile-schema';
+import { migrateProfileConfigToSchemaV3 } from '../config/channel-schema-migration';
 import type { AppConfig, SecretInput, TenantBrand } from '../config/schema';
 import { isComplete, isSecretRef, secretKeyForApp } from '../config/schema';
 import { resolveAppSecret } from '../config/secret-resolver';
@@ -211,9 +212,10 @@ async function bootstrapProfileIntoExistingRoot(args: {
       : appendPreparedProfile(rootConfig, profile, profileConfig, encrypted.secrets);
     if (configPath !== appPaths.configFile) await saveRootConfig(nextRoot, configPath);
     console.log(`配置已保存到 ${configPath}\n`);
+    const committedProfileConfig = nextRoot.profiles[profile]!;
     return {
       cfg: runtimeProfileConfig(nextRoot, profile),
-      profileConfig,
+      profileConfig: committedProfileConfig,
       configPath,
       appPaths,
       profile,
@@ -262,7 +264,7 @@ function createRootConfigForCustomPath(
   secrets: AppConfig['secrets'],
 ): RootConfig {
   return {
-    schemaVersion: 2,
+    schemaVersion: profileConfig.schemaVersion,
     activeProfile: profile,
     preferences: {},
     ...(secrets ? { secrets } : {}),
@@ -281,13 +283,21 @@ function appendPreparedProfile(
   profileConfig: ProfileConfig,
   secrets: AppConfig['secrets'],
 ): RootConfig {
+  const compatibleProfile = root.schemaVersion === 3 && profileConfig.schemaVersion === 2
+    ? migrateProfileConfigToSchemaV3(profile, profileConfig)
+    : profileConfig;
+  if (compatibleProfile.schemaVersion !== root.schemaVersion) {
+    throw new Error(
+      `profile schemaVersion ${compatibleProfile.schemaVersion} does not match root schemaVersion ${root.schemaVersion}`,
+    );
+  }
   return {
     ...root,
     ...(root.secrets ?? secrets ? { secrets: root.secrets ?? secrets } : {}),
     profiles: {
       ...root.profiles,
       [profile]: {
-        ...profileConfig,
+        ...compatibleProfile,
         secrets: undefined,
       },
     },

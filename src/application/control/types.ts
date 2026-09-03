@@ -35,7 +35,7 @@ export interface ProfileSummarySnapshot {
   profile: {
     name: string;
     active: boolean;
-    schemaVersion: 2;
+    schemaVersion: 2 | 3;
   };
   agent: {
     kind: AgentKind;
@@ -59,7 +59,7 @@ export interface ConfigSnapshot {
   profile: {
     name: string;
     active: boolean;
-    schemaVersion: 2;
+    schemaVersion: 2 | 3;
   };
   agent: {
     kind: AgentKind;

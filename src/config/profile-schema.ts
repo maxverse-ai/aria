@@ -2,8 +2,17 @@ import type {
   AppCredentials,
   AppPreferences,
   MessageReplyMode,
+  SecretRef,
   SecretsConfig,
 } from './schema';
+import type { ChannelConfig } from '../channel/plugin/types';
+import {
+  assertCanonicalChannelPluginId,
+  assertChannelInstanceRef,
+  assertChannelPluginPackageName,
+  assertChannelPluginPackageVersion,
+  assertResolvedChannelInstance,
+} from '../channel/plugin/validation';
 import { getEnginePlugin } from '../agent/plugin/registry';
 import {
   normalizePermissions,
@@ -200,8 +209,26 @@ export interface LarkCliConfig {
   };
 }
 
+export interface StoredChannelPluginPackage {
+  package: string;
+  version: string;
+}
+
+export interface StoredChannelInstance {
+  plugin: string;
+  enabled: boolean;
+  configVersion: number;
+  config: ChannelConfig;
+  secretRefs: Readonly<Record<string, SecretRef>>;
+}
+
+export interface ProfileChannelsConfig {
+  plugins: readonly StoredChannelPluginPackage[];
+  instances: Readonly<Record<string, StoredChannelInstance>>;
+}
+
 export interface ProfileConfig {
-  schemaVersion: 2;
+  schemaVersion: 2 | 3;
   agentKind: AgentKind;
   /** Deployment mode switch. Default 'personal'. See {@link ProfileMode}. */
   mode: ProfileMode;
@@ -227,6 +254,8 @@ export interface ProfileConfig {
   pi?: PiConfig;
   /** External engine plugin package names, loaded at profile start. */
   plugins?: string[];
+  /** Channel packages and instances. Required only by stored schema v3. */
+  channels?: ProfileChannelsConfig;
   attachments: AttachmentConfig;
   comments: CommentConfig;
   /** In-meeting agent settings. See {@link MeetingConfig}. */
@@ -249,7 +278,7 @@ export function effectiveLarkCliIdentity(
 }
 
 export interface RootConfig {
-  schemaVersion: 2;
+  schemaVersion: 2 | 3;
   activeProfile: string;
   preferences: Record<string, never>;
   secrets?: SecretsConfig;
@@ -314,14 +343,18 @@ export function normalizeProfileConfig(input: unknown): ProfileConfig {
     kimi?: KimiConfig;
     pi?: PiConfig;
     plugins?: unknown;
+    channels?: unknown;
     attachments?: Partial<AttachmentConfig>;
     comments?: unknown;
     meeting?: unknown;
     larkCli?: unknown;
   };
 
-  if (raw.schemaVersion !== 2) {
-    throw new Error('profile schemaVersion must be 2');
+  if (raw.schemaVersion !== 2 && raw.schemaVersion !== 3) {
+    throw new Error('profile schemaVersion must be 2 or 3');
+  }
+  if (raw.schemaVersion === 2 && raw.channels !== undefined) {
+    throw new Error('profile schemaVersion 2 cannot declare channels');
   }
   if (typeof raw.agentKind !== 'string' || raw.agentKind.trim().length === 0) {
     throw new Error('agentKind must be a registered engine id');
@@ -348,9 +381,12 @@ export function normalizeProfileConfig(input: unknown): ProfileConfig {
   const meeting = normalizeMeeting(raw.meeting);
   const larkCli = normalizeLarkCli(raw.larkCli);
   const plugins = normalizePlugins(raw.plugins);
+  const channels = raw.schemaVersion === 3
+    ? normalizeProfileChannels(raw.channels)
+    : undefined;
 
   return {
-    schemaVersion: 2,
+    schemaVersion: raw.schemaVersion,
     agentKind: raw.agentKind,
     mode: raw.mode === 'team' ? 'team' : 'personal',
     accounts,
@@ -368,6 +404,7 @@ export function normalizeProfileConfig(input: unknown): ProfileConfig {
     ...(raw.kimi ? { kimi: normalizeKimi(raw.kimi) } : {}),
     ...(raw.pi ? { pi: normalizePi(raw.pi) } : {}),
     ...(plugins.length > 0 ? { plugins } : {}),
+    ...(channels ? { channels } : {}),
     attachments: {
       maxCount: numberOr(raw.attachments?.maxCount, 10),
       maxBytes: numberOr(raw.attachments?.maxBytes, 100 * 1024 * 1024),
@@ -380,6 +417,83 @@ export function normalizeProfileConfig(input: unknown): ProfileConfig {
     meeting,
     larkCli,
   };
+}
+
+function normalizeProfileChannels(input: unknown): ProfileChannelsConfig {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+    throw new Error('profile schemaVersion 3 requires channels');
+  }
+  const raw = input as { plugins?: unknown; instances?: unknown };
+  if (!Array.isArray(raw.plugins)) {
+    throw new Error('channels.plugins must be an array');
+  }
+  if (!raw.instances || typeof raw.instances !== 'object' || Array.isArray(raw.instances)) {
+    throw new Error('channels.instances must be an object');
+  }
+
+  const seenPackages = new Set<string>();
+  const packages = raw.plugins.map((value, index) => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      throw new Error(`channels.plugins[${index}] must be an object`);
+    }
+    const item = value as { package?: unknown; version?: unknown };
+    const packageName = requireTrimmedString(item.package, `channels.plugins[${index}].package`);
+    const version = requireTrimmedString(item.version, `channels.plugins[${index}].version`);
+    assertChannelPluginPackageName(packageName);
+    assertChannelPluginPackageVersion(version);
+    if (seenPackages.has(packageName)) {
+      throw new Error(`duplicate channel plugin package: ${packageName}`);
+    }
+    seenPackages.add(packageName);
+    return Object.freeze({ package: packageName, version });
+  });
+
+  const instances: Record<string, StoredChannelInstance> = {};
+  for (const instanceId of Object.keys(raw.instances).sort()) {
+    const value = (raw.instances as Record<string, unknown>)[instanceId];
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      throw new Error(`channel instance ${instanceId} must be an object`);
+    }
+    const item = value as {
+      plugin?: unknown;
+      enabled?: unknown;
+      configVersion?: unknown;
+      config?: unknown;
+      secretRefs?: unknown;
+    };
+    const plugin = requireTrimmedString(item.plugin, `channel instance ${instanceId} plugin`);
+    assertCanonicalChannelPluginId(plugin);
+    assertChannelInstanceRef({ profileId: 'profile', pluginId: plugin, instanceId });
+    const candidate = {
+      profileId: 'profile',
+      pluginId: plugin,
+      instanceId,
+      enabled: item.enabled,
+      configVersion: item.configVersion,
+      config: item.config,
+      secretRefs: item.secretRefs,
+    };
+    assertResolvedChannelInstance(candidate);
+    instances[instanceId] = Object.freeze({
+      plugin,
+      enabled: candidate.enabled,
+      configVersion: candidate.configVersion,
+      config: Object.freeze(structuredClone(candidate.config)),
+      secretRefs: Object.freeze(structuredClone(candidate.secretRefs)),
+    });
+  }
+
+  return Object.freeze({
+    plugins: Object.freeze(packages),
+    instances: Object.freeze(instances),
+  });
+}
+
+function requireTrimmedString(value: unknown, label: string): string {
+  if (typeof value !== 'string' || !value.trim()) {
+    throw new Error(`${label} must be a non-empty string`);
+  }
+  return value.trim();
 }
 
 function normalizeAccounts(input: unknown): ProfileConfig['accounts'] {

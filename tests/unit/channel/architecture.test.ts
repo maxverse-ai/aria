@@ -45,7 +45,8 @@ describe('channel architecture boundary', () => {
     const supervisor = await readFile('src/runtime/supervisor.ts', 'utf8');
     const composition = await readFile('src/runtime/lark-channel-runtime.ts', 'utf8');
 
-    expect(supervisor).toContain('projectSchemaV2ChannelInstances({');
+    expect(supervisor).toContain('projectProfileChannelInstances({');
+    expect(supervisor).toContain('requirePrimaryLarkChannelInstance(');
     expect(supervisor).toContain('startProfileLarkChannelRuntime({');
     expect(composition).toContain("options.policy.owner === 'manager'");
     expect(composition).toContain("options.policy.owner === 'legacy'");

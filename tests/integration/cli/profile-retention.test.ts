@@ -4,6 +4,7 @@ import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { resolveAppPaths } from '../../../src/config/app-paths';
 import { clearKeystoreDerivedKeyCache, setSecret } from '../../../src/config/keystore';
+import { migrateRootConfigToSchemaV3 } from '../../../src/config/channel-schema-migration';
 import {
   createDefaultProfileConfig,
   type AgentKind,
@@ -182,6 +183,22 @@ describe('profile retention and export', () => {
     await expect(
       runProfileExport('claude', { rootDir: root, includeSecrets: true }),
     ).rejects.toThrow(/--yes/);
+  });
+
+  it('exports a schema v3 profile without downgrading its root version', async () => {
+    const root = await makeRoot();
+    await writeProfiles(root, 'claude', ['claude']);
+    const configPath = join(root, 'config.json');
+    await writeJson(configPath, migrateRootConfigToSchemaV3(await readRoot(root)));
+    const lines: string[] = [];
+    vi.spyOn(console, 'log').mockImplementation((line: string) => lines.push(line));
+
+    await runProfileExport('claude', { rootDir: root });
+    const exported = JSON.parse(lines.join('\n')) as RootConfig;
+
+    expect(exported.schemaVersion).toBe(3);
+    expect(exported.profiles.claude?.schemaVersion).toBe(3);
+    expect(exported.profiles.claude?.channels?.instances['lark-primary']).toBeDefined();
   });
 
   it('materializes keystore app secret only when exporting with secrets', async () => {
