@@ -96,7 +96,7 @@ describe('execution intent contract', () => {
     expect(triggerCapabilities()).toMatchObject({
       schema: 'aria.trigger.capabilities.v1',
       apiVersion: 1,
-      implementationStage: 'schedule-domain',
+      implementationStage: 'durable-trigger-state',
       runtimeEnabled: false,
     });
     expect(triggerContractSchema('run-intent')).toMatchObject({

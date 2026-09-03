@@ -60,6 +60,48 @@ export {
 } from './trigger/plugin';
 
 export {
+  DEFAULT_TRIGGER_RETRY_POLICY,
+  FILE_TRIGGER_STATE_VERSION,
+  FileTriggerStateStore,
+  InMemoryTriggerStateStore,
+  TRIGGER_STATE_SCHEMA_VERSION,
+  TriggerStateError,
+  assertDefinitionTransition,
+  assertRunIntentTemplate,
+  assertTriggerDefinition,
+  assertTriggerFailure,
+  assertTriggerOccurrence,
+  assertTriggerRetryPolicy,
+  createPendingOccurrence,
+  triggerOccurrenceIdempotencyKey,
+  triggerRetryDelay,
+} from './trigger/state';
+export type {
+  RunIntentTemplate,
+  TriggerAuthorizationCeiling,
+  TriggerClaimInput,
+  TriggerCleanupInput,
+  TriggerDefinition,
+  TriggerDefinitionFilter,
+  TriggerDefinitionState,
+  TriggerDispatchCheckpoint,
+  TriggerFailureKind,
+  TriggerFailureRecord,
+  TriggerLeaseRef,
+  TriggerMaterializationInput,
+  TriggerMaterializationResult,
+  TriggerOccurrence,
+  TriggerOccurrenceFilter,
+  TriggerOccurrenceLease,
+  TriggerOccurrenceState,
+  TriggerQuotaPolicy,
+  TriggerRetryInput,
+  TriggerRetryPolicy,
+  TriggerStateSnapshot,
+  TriggerStateStore,
+} from './trigger/state';
+
+export {
   ScheduleContractError,
   addLocalDays,
   addLocalMinutes,
