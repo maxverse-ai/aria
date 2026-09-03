@@ -4,13 +4,16 @@ Status: proposed direction. This document defines the target architecture and
 progressive delivery plan; no scheduled execution behavior is shipped by this
 document.
 
-Implementation status: Stages 0 through 2 are accepted. Existing conversation
+Implementation status: Stages 0 through 3 are accepted. Existing conversation
 starts pass through the runtime-validated `RunIntent` boundary. The Trigger
 Provider ABI now defines provider manifests, capabilities, serializable source
 envelopes, lifecycle ownership, runtime validation, a registry, and a reusable
 contract test kit. Read-only discovery is available through
 `aria trigger capabilities` and `aria trigger schema`. Those commands
 deliberately report that scheduled runtime behavior remains disabled.
+The pure Schedule domain supports one-time, daily, weekly, and constrained
+five-field cron calculations with explicit IANA time zones, deterministic DST
+gap/fold behavior, previews, misfire materialization, and overlap decisions.
 
 ## Decision
 
