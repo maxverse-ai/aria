@@ -39,6 +39,7 @@ describe('NativeMessageReadProjector', () => {
       eventId: 'inbound:om_secret', sourceMessageId: 'om_secret', direction: 'inbound',
       conversationKey: 'oc_secret', occurredAt: '2026-08-27T00:00:00.000Z',
       conversationKind: 'group', actorSourceId: 'ou_secret', actorKind: 'user',
+      actorDisplayName: 'Ada',
       content: { format: 'plain-text', text: 'real prompt' },
       attachmentSourceIds: ['image-secret'],
     });
@@ -66,7 +67,7 @@ describe('NativeMessageReadProjector', () => {
     expect(session).toMatchObject({
       agentKind: 'codex', status: 'active', participantIdentityIds: [identity?.id], chatId: chat?.id,
     });
-    expect(identity).toMatchObject({ kind: 'user', resolutionStatus: 'resolved' });
+    expect(identity).toMatchObject({ kind: 'user', displayName: 'Ada', resolutionStatus: 'resolved' });
     expect(chat).toMatchObject({ kind: 'group', resolutionStatus: 'pending' });
     expect(membership).toMatchObject({ chatId: chat?.id, identityId: identity?.id, role: 'unknown' });
     expect(run).toMatchObject({ sessionId: session?.id, associationStatus: 'resolved', status: 'running' });

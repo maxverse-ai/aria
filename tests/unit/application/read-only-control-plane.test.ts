@@ -10,6 +10,9 @@ import {
   writeActiveProfile,
 } from '../../../src/config/profile-store';
 import { createDefaultProfileConfig } from '../../../src/config/profile-schema';
+import { startRuntimeControlServer } from '../../../src/runtime/control-server';
+import { RuntimeActivityTracker } from '../../../src/runtime/activity';
+import type { PresentationState } from '../../../src/outbound/presentation';
 
 const roots: string[] = [];
 
@@ -18,6 +21,23 @@ afterEach(async () => {
 });
 
 describe('ReadOnlyControlPlane', () => {
+  it('gets effective presentation from the authenticated running owner, and reports it absent when offline', async () => {
+    const fixture = await createFixture();
+    const paths = resolveAppPaths({ rootDir: fixture.root, profile: 'team-bot' });
+    const presentation: PresentationState = { schema: 'aria.presentation.v1',
+      configured: { cotMessages: 'detailed', messageReply: 'markdown', showToolCalls: true },
+      effective: { cotMessages: 'off', messageReply: 'markdown', progress: 'none', showToolCalls: false },
+      reasons: ['policy-progress-unavailable'] };
+    const server = await startRuntimeControlServer({ profile: 'team-bot', endpoint: join(fixture.root, 'control.sock'),
+      sidecarFile: paths.runtimeControlFile,
+      snapshot: () => ({ ...new RuntimeActivityTracker('team-bot', 'fixture', []).snapshot(), presentation }) });
+    const plane = new ReadOnlyControlPlane({ rootDir: fixture.root });
+    try { expect((await plane.configSnapshot('team-bot')).presentation.runtime).toEqual(presentation); }
+    finally { await server.close(); }
+    const offline = await plane.configSnapshot('team-bot');
+    expect(offline.presentation.cotMessages).toBe('detailed');
+    expect(offline.presentation.runtime).toBeUndefined();
+  });
   it('reports versioned discoverable capabilities', () => {
     const plane = new ReadOnlyControlPlane({ rootDir: '/unused' });
 

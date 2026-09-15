@@ -47,8 +47,12 @@ export class SessionCatalogReadProjector {
       const history = input.historyBySessionKey?.get(engineHistorySessionKey(entry.agentId, nativeId));
       const draft = sessionResource(this.profileId, entry, nativeId, history);
       const existing = await this.repository.get<NativeSessionResource>('session', draft.id);
+      // A repository revision describes a stored observation, not source content.
+      // Including it in the event digest would make every unchanged scan a write.
+      const { revision: _revision, ...previous } = existing ?? { revision: 0 };
       const resource = existing
         ? {
+            ...previous,
             ...draft,
             createdAt: existing.createdAt,
             updatedAt: latestTimestamp(existing.updatedAt, draft.updatedAt),

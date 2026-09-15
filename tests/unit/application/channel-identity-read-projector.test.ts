@@ -62,7 +62,7 @@ describe('ChannelIdentityReadProjector', () => {
     })).toEqual({ identities: 0, chats: 0, memberships: 0 });
     expect(await repository.currentCursor()).toBe(cursor);
     expect(await repository.list('identity')).toEqual([
-      expect.objectContaining({ kind: 'user', resolutionStatus: 'resolved' }),
+      expect.objectContaining({ kind: 'user', resolutionStatus: 'pending' }),
     ]);
     expect(await repository.list('chat')).toEqual([
       expect.objectContaining({ kind: 'group', resolutionStatus: 'pending' }),
@@ -73,6 +73,54 @@ describe('ChannelIdentityReadProjector', () => {
     const journal = JSON.stringify((await repository.changes(null)).changes);
     expect(journal).not.toContain('oc_private_chat');
     expect(journal).not.toContain('ou_private_member');
+  });
+
+  it('enriches a pending actor from a newer name and ignores sparse or stale observations', async () => {
+    const { repository, projector } = await setup();
+    const base = {
+      sourceChatId: 'oc_chat', chatKind: 'p2p' as const,
+      actor: { sourceIdentityId: 'ou_member', kind: 'user' as const },
+    };
+    await projector.observeMessage({ ...base, observedAt: '2026-08-27T00:00:00.000Z' });
+    await projector.observeMessage({
+      ...base, observedAt: '2026-08-27T00:00:02.000Z',
+      actor: { ...base.actor, displayName: 'Ada' },
+    });
+    await projector.observeMessage({ ...base, observedAt: '2026-08-27T00:00:03.000Z' });
+    await projector.observeMessage({
+      ...base, observedAt: '2026-08-27T00:00:01.000Z',
+      actor: { ...base.actor, displayName: 'Old Name' },
+    });
+
+    expect(await repository.list('identity')).toEqual([
+      expect.objectContaining({
+        kind: 'user', displayName: 'Ada', resolutionStatus: 'resolved',
+        lastResolvedAt: '2026-08-27T00:00:02.000Z',
+      }),
+    ]);
+    const journal = JSON.stringify((await repository.changes(null)).changes);
+    expect(journal).not.toContain('ou_member');
+    expect(journal).not.toContain('Old Name');
+  });
+
+  it('updates a resolved display name from a newer channel observation', async () => {
+    const { repository, projector } = await setup();
+    const actor = { sourceIdentityId: 'ou_member', kind: 'user' as const };
+    await projector.observeMessage({
+      sourceChatId: 'oc_chat', observedAt: '2026-08-27T00:00:00.000Z',
+      actor: { ...actor, displayName: 'Ada' },
+    });
+    await projector.observeMessage({
+      sourceChatId: 'oc_chat', observedAt: '2026-08-27T00:00:01.000Z',
+      actor: { ...actor, displayName: 'Ada Lovelace' },
+    });
+
+    expect(await repository.list('identity')).toEqual([
+      expect.objectContaining({
+        displayName: 'Ada Lovelace', resolutionStatus: 'resolved',
+        lastResolvedAt: '2026-08-27T00:00:01.000Z',
+      }),
+    ]);
   });
 
   it('upgrades lazy topology and never downgrades enriched resources', async () => {

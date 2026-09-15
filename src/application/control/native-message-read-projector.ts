@@ -35,14 +35,20 @@ export class NativeMessageReadProjector implements MessageResourceSink {
       await this.identities.observeMessage({
         sourceChatId: event.conversationKey,
         ...(event.conversationKind ? { chatKind: event.conversationKind } : {}),
+        ...(event.conversationName ? { chatName: event.conversationName } : {}),
         observedAt: event.occurredAt,
         ...(event.actorSourceId ? {
-          actor: { sourceIdentityId: event.actorSourceId, kind: actorKind },
+          actor: {
+            sourceIdentityId: event.actorSourceId,
+            kind: actorKind,
+            ...(event.actorDisplayName ? { displayName: event.actorDisplayName } : {}),
+          },
         } : {}),
       });
       const id = messageId(this.options.profileId, event.sourceMessageId);
       const existing = await this.options.repository.get<NativeMessageResource>('message', id);
-      const binding = event.correlationId ? this.bindings.get(event.correlationId) : undefined;
+      const binding = (event.correlationId ? this.bindings.get(event.correlationId) : undefined)
+        ?? (existing?.sessionId && existing.runId ? { sessionId: existing.sessionId, runId: existing.runId } : undefined);
       const conversationId = nativeReadOpaqueId('conversation', this.options.profileId, event.conversationKey);
       const sequence = existing?.sequence ?? await this.nextSequence(conversationId);
       const hasText = event.content.text !== undefined;
@@ -77,6 +83,7 @@ export class NativeMessageReadProjector implements MessageResourceSink {
         changedAt: event.occurredAt,
         resource,
       });
+      if (binding) await this.touchSession(binding.sessionId, event.occurredAt, event.eventId);
     });
   }
 
@@ -161,17 +168,26 @@ export class NativeMessageReadProjector implements MessageResourceSink {
       eventId: sourceEventId(this.options.profileId, `${bindingShape}:session`),
       changedAt: binding.occurredAt,
       resource: {
+        ...existing,
         resourceType: 'session', id, profileId: this.options.profileId,
         createdAt: existing?.createdAt ?? binding.occurredAt,
-        updatedAt: binding.occurredAt,
+        updatedAt: latest(existing?.updatedAt, binding.occurredAt),
         conversationId,
         agentKind: binding.agentKind,
         status: 'active',
-        lastActivityAt: binding.occurredAt,
+        lastActivityAt: latest(existing?.lastActivityAt, binding.occurredAt),
         chatId: nativeReadOpaqueId('chat', this.options.profileId, binding.conversationKey),
         participantIdentityIds: mergedParticipantIdentityIds,
       },
     });
+  }
+
+  private async touchSession(id: string, occurredAt: string, eventId: string): Promise<void> {
+    const existing = await this.options.repository.get<NativeSessionResource>('session', id);
+    if (!existing || Date.parse(existing.lastActivityAt) >= Date.parse(occurredAt)) return;
+    await this.options.repository.upsert({ eventId: sourceEventId(this.options.profileId, `${eventId}:activity`),
+      changedAt: occurredAt, resource: { ...existing, lastActivityAt: occurredAt,
+        updatedAt: latest(existing.updatedAt, occurredAt) } });
   }
 
   private async bindRun(binding: MessageSessionBinding, id: string, sessionId: string): Promise<void> {
@@ -203,6 +219,10 @@ export class NativeMessageReadProjector implements MessageResourceSink {
 
 function messageId(profileId: string, sourceMessageId: string): string {
   return nativeReadOpaqueId('message', profileId, sourceMessageId);
+}
+
+function latest(left: string | undefined, right: string): string {
+  return left && Date.parse(left) > Date.parse(right) ? left : right;
 }
 
 function sourceEventId(profileId: string, source: string): string {

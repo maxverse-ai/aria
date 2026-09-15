@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import type { NativeReadResourceType } from './native-read-types';
 
 const PREFIXES: Record<
-  NativeReadResourceType | 'conversation' | 'source-event' | 'attachment' | 'credential' | 'policy',
+  NativeReadResourceType | 'conversation' | 'source-event' | 'attachment' | 'credential' | 'policy' | 'management',
   string
 > = {
   profile: 'prf',
@@ -18,6 +18,7 @@ const PREFIXES: Record<
   attachment: 'att',
   credential: 'crd',
   policy: 'pol',
+  management: 'mgr',
 };
 
 /** Deterministic, non-reversible ID for values that must not expose native IDs. */

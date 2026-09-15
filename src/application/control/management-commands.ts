@@ -12,6 +12,7 @@ import {
   profileReasoningUpdateCommand,
 } from './profile-model-command';
 import { profileEngineUpdateCommand } from './profile-engine-command';
+import { profileModeTransitionCommand } from './profile-mode-command';
 import {
   profileActivateCommand,
   profileArchiveCommand,
@@ -30,6 +31,7 @@ export const managementCommands = [
   profileModelUpdateCommand,
   profileReasoningUpdateCommand,
   profileEngineUpdateCommand,
+  profileModeTransitionCommand,
   profileActivateCommand,
   profileCreateCommand,
   profileArchiveCommand,

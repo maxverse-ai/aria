@@ -157,6 +157,55 @@ describe('ConfigChangeService', () => {
     ).rejects.toMatchObject({ code: 'invalid-plan' });
   });
 
+  it.each(['exec', 'file', 'env'] as const)('does not treat the %s secret source discriminator as secret content', async (source) => {
+    const fixture = await createFixture();
+    const root = (await loadRootConfig(fixture.configPath))!;
+    root.secrets = { providers: { privateProvider: { source, command: '/private/provider-command' } } };
+    root.profiles.primary!.accounts.app.secret = { source, provider: 'privateProvider', id: 'private-secret-reference' };
+    root.profiles.primary!.secrets = { providers: { scoped: { source, path: '/private/provider-path' } } };
+    await saveRootConfig(root, fixture.configPath);
+    const command: ManagementCommandDefinition = { ...operation, prepare(input) {
+      const result = operation.prepare(input);
+      result.changes[0]!.field = 'profile.execution.environment';
+      return result;
+    } };
+    const service = new ConfigChangeService({ rootDir: fixture.root, operations: [command] });
+    const plan = await service.createPlan({ operationId: command.id, parameters: { value: false }, actor });
+    expect(plan.status).toBe('planned');
+    const persisted = await readFile(join(fixture.root, 'control', 'plans', plan.id + '.json'), 'utf8');
+    expect(persisted).not.toContain('privateProvider');
+    expect(persisted).not.toContain('private-secret-reference');
+    expect(persisted).not.toContain('/private/provider');
+  });
+
+  it.each(['plaintext', 'reference-id', 'reference-provider', 'provider-command', 'provider-argument', 'provider-environment', 'provider-path', 'defaults'])(
+    'still rejects source-like secret content in %s', async (location) => {
+      const fixture = await createFixture();
+      const root = (await loadRootConfig(fixture.configPath))!;
+      root.profiles.primary!.accounts.app.secret = { source: 'exec', provider: 'fixture-provider', id: 'fixture-reference' };
+      root.secrets = { providers: { fixture: { source: 'exec' } } };
+      const ref = root.profiles.primary!.accounts.app.secret;
+      const provider = root.secrets.providers!.fixture!;
+      if (location === 'plaintext') root.profiles.primary!.accounts.app.secret = 'exec';
+      if (location === 'reference-id') ref.id = 'exec';
+      if (location === 'reference-provider') ref.provider = 'exec';
+      if (location === 'provider-command') provider.command = 'exec';
+      if (location === 'provider-argument') provider.args = ['exec'];
+      if (location === 'provider-environment') provider.env = { source: 'exec' };
+      if (location === 'provider-path') provider.path = 'exec';
+      if (location === 'defaults') root.secrets.defaults = { exec: 'exec' };
+      await saveRootConfig(root, fixture.configPath);
+      const command: ManagementCommandDefinition = { ...operation, prepare(input) {
+        const result = operation.prepare(input);
+        result.changes[0]!.after = 'exec';
+        return result;
+      } };
+      const service = new ConfigChangeService({ rootDir: fixture.root, operations: [command] });
+      await expect(service.createPlan({ operationId: command.id, parameters: { value: false }, actor }))
+        .rejects.toMatchObject({ code: 'invalid-plan' });
+    },
+  );
+
   it('fails closed for sensitive operations until a stronger policy is installed', async () => {
     const fixture = await createFixture();
     const service = new ConfigChangeService({

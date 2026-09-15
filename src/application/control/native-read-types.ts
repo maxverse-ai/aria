@@ -272,6 +272,7 @@ export const NATIVE_READ_ROUTES = [
   '/v1/capabilities',
   '/v1/profiles',
   '/v1/sessions',
+  '/v1/session-summaries',
   '/v1/sessions/{sessionId}',
   '/v1/sessions/{sessionId}/messages',
   '/v1/messages',

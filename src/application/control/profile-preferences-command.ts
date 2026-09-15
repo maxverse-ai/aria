@@ -100,6 +100,9 @@ export const profilePreferencesUpdateCommand: ManagementCommandDefinition = {
     const current = root.profiles[profile];
     if (!current) throw new ControlChangeError('profile-not-found', `profile not found: ${profile}`);
     const input = parseInput(parameters);
+    if (current.executionSpaces && input.mode !== current.mode) {
+      throw new ControlChangeError('operation-unavailable', 'prepared execution spaces require aria space rollback before changing mode');
+    }
     const changes: ControlChangeSummary[] = [];
     const messageReplyMigratedBefore = current.preferences.messageReplyMigrated === true;
 

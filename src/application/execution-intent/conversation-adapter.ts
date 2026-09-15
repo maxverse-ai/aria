@@ -43,7 +43,7 @@ export function createConversationRunIntent(input: CreateConversationRunIntentIn
     },
     idempotencyKey: input.idempotencyKey ?? intentId,
     actor: {
-      kind: 'user',
+      kind: input.scope.actorKind ?? 'user',
       actorRef: input.scope.actorId,
     },
     authorizationRef: `conversation-access:${input.access.reason}`,

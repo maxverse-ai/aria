@@ -2,6 +2,8 @@ import { createHash, randomBytes } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { resolveAppPaths } from '../../config/app-paths';
 import type { RootConfig } from '../../config/profile-schema';
+import type { ProviderConfig, SecretInput, SecretsConfig } from '../../config/schema';
+import { executionSpaceFingerprint } from '../../config/execution-spaces';
 import { ControlChangePlanStore } from './change-plan-store';
 import { FileConfigRepository, type ConfigRepository } from './config-repository';
 import { configRevision } from './config-revision';
@@ -210,6 +212,10 @@ export class ConfigChangeService {
         }
         if (!root) throw new ControlChangeError('invalid-plan', 'root config not found');
         const operation = this.requireOperation(plan.operation.id);
+        if (operation.risk !== 'low' && !this.authorizeCommand?.({ actor,
+          command: commandAuthorizationView(operation), resource: storedResource(plan) })) {
+          throw new ControlChangeError('operation-unavailable', 'command authority is no longer available');
+        }
         if (operation.version !== plan.operation.version) {
           throw new ControlChangeError(
             'operation-unavailable',
@@ -342,11 +348,11 @@ function assertSafePlanPayload(
     throw new ControlChangeError('invalid-plan', 'plan parameters or summaries contain sensitive data');
   }
   const sensitive = new Set<string>([actor.principal]);
-  collectStrings(root.secrets, sensitive);
+  collectSecretsConfigStrings(root.secrets, sensitive);
   for (const profile of Object.values(root.profiles)) {
     sensitive.add(profile.accounts.app.id);
-    collectStrings(profile.accounts.app.secret, sensitive);
-    collectStrings(profile.secrets, sensitive);
+    collectSecretDescriptorStrings(profile.accounts.app.secret, sensitive);
+    collectSecretsConfigStrings(profile.secrets, sensitive);
     collectStrings(profile.access.allowedUsers, sensitive);
     collectStrings(profile.access.allowedChats, sensitive);
     collectStrings(profile.access.admins, sensitive);
@@ -381,6 +387,26 @@ function collectStrings(value: unknown, output: Set<string>): void {
   }
   if (value && typeof value === 'object') {
     Object.values(value).forEach((item) => collectStrings(item, output));
+  }
+}
+
+function collectSecretsConfigStrings(config: SecretsConfig | undefined, output: Set<string>): void {
+  if (!config) return;
+  const { providers, ...other } = config;
+  collectStrings(other, output);
+  for (const provider of Object.values(providers ?? {})) collectSecretDescriptorStrings(provider, output);
+}
+
+function collectSecretDescriptorStrings(value: SecretInput | ProviderConfig | undefined, output: Set<string>): void {
+  // Only the descriptor's schema discriminator is public metadata. In
+  // particular, "exec" must not collide with executionSpaces and "file" with
+  // profile. Plaintext secrets and nested provider values remain protected,
+  // even when their contents happen to equal one of these discriminator names.
+  if (value && typeof value === 'object' && ['env', 'file', 'exec'].includes(value.source)) {
+    const { source: _source, ...sensitive } = value;
+    collectStrings(sensitive, output);
+  } else {
+    collectStrings(value, output);
   }
 }
 
@@ -427,6 +453,15 @@ function validateCandidate(
     throw new ControlChangeError('invalid-plan', 'operation returned an invalid root configuration');
   }
   for (const [name, candidateProfile] of Object.entries(after.profiles)) {
+    const previous = before.profiles[name];
+    if (!isDeepStrictEqual(previous?.executionSpaces, candidateProfile.executionSpaces)
+      && operation.id !== 'profile.mode.transition') {
+      throw new ControlChangeError('operation-unavailable', 'execution space selection is owned by the space transition service');
+    }
+    if (previous?.executionSpaces && candidateProfile.executionSpaces
+      && executionSpaceFingerprint(previous) !== executionSpaceFingerprint(candidateProfile)) {
+      throw new ControlChangeError('operation-unavailable', 'active space deployment changes require a new preparation');
+    }
     if (candidateProfile.schemaVersion !== after.schemaVersion) {
       throw new ControlChangeError(
         'invalid-plan',

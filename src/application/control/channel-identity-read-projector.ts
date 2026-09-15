@@ -44,8 +44,9 @@ export interface ChannelIdentityProjectionResult {
 export interface ChannelMessageIdentityObservation {
   sourceChatId: string;
   chatKind?: NativeChatResource['kind'];
+  chatName?: string;
   observedAt: string;
-  actor?: Pick<ChannelIdentityObservation, 'sourceIdentityId' | 'kind'>;
+  actor?: Pick<ChannelIdentityObservation, 'sourceIdentityId' | 'kind' | 'displayName'>;
 }
 
 /** Converts channel-owned identifiers and names into opaque native-read resources. */
@@ -71,11 +72,14 @@ export class ChannelIdentityReadProjector {
     let memberships = 0;
     const actor = observation.actor;
     if (actor) {
-      identities += Number(await this.ensure(identityResource(this.profileId, {
-        ...actor,
-        resolutionStatus: actor.kind === 'unknown' ? 'pending' : 'resolved',
+      const displayName = actor.displayName?.trim();
+      identities += Number(await this.observeIdentity({
+        sourceIdentityId: actor.sourceIdentityId,
+        kind: actor.kind,
+        ...(displayName ? { displayName } : {}),
+        resolutionStatus: displayName ? 'resolved' : 'pending',
         observedAt: observation.observedAt,
-      })));
+      }));
     }
 
     if (!observation.chatKind) return { identities, chats, memberships };
@@ -92,6 +96,14 @@ export class ChannelIdentityReadProjector {
       resolutionStatus: chatResolved ? 'resolved' : 'pending',
       ...(chatResolved ? { lastResolvedAt: observation.observedAt } : {}),
     }));
+    const chatName = observation.chatName?.trim();
+    if (chatName) {
+      const existing = await this.repository.get<NativeChatResource>('chat', chatId);
+      if (existing && (!existing.lastResolvedAt || Date.parse(existing.lastResolvedAt) <= Date.parse(observation.observedAt))) {
+        await this.upsert({ ...existing, name: chatName, resolutionStatus: 'resolved',
+          updatedAt: observation.observedAt, lastResolvedAt: observation.observedAt });
+      }
+    }
 
     if (actor) {
       const identityId = nativeReadOpaqueId('identity', this.profileId, actor.sourceIdentityId);
@@ -174,6 +186,39 @@ export class ChannelIdentityReadProjector {
     await this.upsert(resource);
     return true;
   }
+
+  /**
+   * Merge a channel message's identity snapshot without allowing a sparse or
+   * older event to erase a previously resolved display name.
+   */
+  private async observeIdentity(identity: ChannelIdentityObservation): Promise<boolean> {
+    const incoming = identityResource(this.profileId, identity);
+    const existing = await this.repository.get<NativeIdentityResource>('identity', incoming.id);
+    if (!existing) {
+      await this.upsert(incoming);
+      return true;
+    }
+    if (!identity.displayName || identity.resolutionStatus !== 'resolved') return false;
+    if (
+      existing.lastResolvedAt
+      && Date.parse(existing.lastResolvedAt) > Date.parse(identity.observedAt)
+    ) return false;
+    const kind = identity.kind === 'unknown' ? existing.kind : identity.kind;
+    if (
+      existing.kind === kind
+      && existing.displayName === identity.displayName
+      && existing.resolutionStatus === 'resolved'
+      && existing.lastResolvedAt === identity.observedAt
+    ) return false;
+    await this.upsert({
+      ...incoming,
+      kind,
+      displayName: identity.displayName,
+      resolutionStatus: 'resolved',
+      lastResolvedAt: identity.observedAt,
+    });
+    return true;
+  }
 }
 
 function identityResource(profileId: string, identity: ChannelIdentityObservation): Omit<NativeIdentityResource, 'revision'> {
@@ -187,7 +232,9 @@ function identityResource(profileId: string, identity: ChannelIdentityObservatio
     ...(identity.displayName ? { displayName: identity.displayName } : {}),
     resolutionStatus: identity.resolutionStatus,
     ...(identity.resolutionErrorCode ? { resolutionErrorCode: identity.resolutionErrorCode } : {}),
-    lastResolvedAt: identity.observedAt,
+    ...(identity.resolutionStatus === 'resolved'
+      ? { lastResolvedAt: identity.observedAt }
+      : {}),
   };
 }
 

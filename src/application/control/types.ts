@@ -91,6 +91,7 @@ export interface ConfigSnapshot {
     messageReply: MessageReplyMode;
     showToolCalls: boolean;
     cotMessages: CotMessagesMode;
+    runtime?: import('../../outbound/presentation').PresentationState;
   };
   execution: {
     maxConcurrentRuns: number;

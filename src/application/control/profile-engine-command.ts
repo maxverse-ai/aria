@@ -50,6 +50,9 @@ export const profileEngineUpdateCommand: ManagementCommandDefinition = {
       'expectedAgentKind',
       128,
     );
+    if (current.executionSpaces) {
+      throw new ControlChangeError('operation-unavailable', 'prepared engine changes require a new execution space preparation');
+    }
     const targetAgentKind = boundedString(
       parameters.targetAgentKind,
       'targetAgentKind',

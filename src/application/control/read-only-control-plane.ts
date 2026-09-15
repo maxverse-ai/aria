@@ -16,6 +16,8 @@ import {
 import { checkRuntimeLock } from '../../runtime/locks';
 import { isAlive, readAndPrune } from '../../runtime/registry';
 import { configRevision } from './config-revision';
+import { requestRestartPreflight } from '../../runtime/control-client';
+import { publicPresentation } from '../../outbound/presentation';
 import {
   CONTROL_API_VERSION,
   type ConfigSnapshot,
@@ -94,6 +96,9 @@ export class ReadOnlyControlPlane {
   async configSnapshot(profile?: string): Promise<ConfigSnapshot> {
     const selected = await this.resolveProfile(profile);
     const cfg = selected.config;
+    const paths = resolveAppPaths({ rootDir: this.rootDir, profile: selected.profile });
+    const runtime = await requestRestartPreflight(paths.runtimeControlFile, selected.profile)
+      .then(snapshot => publicPresentation(snapshot.presentation)).catch(() => undefined);
     return {
       schema: 'aria.control.config.v1',
       apiVersion: CONTROL_API_VERSION,
@@ -134,6 +139,7 @@ export class ReadOnlyControlPlane {
         messageReply: getMessageReplyMode(cfg),
         showToolCalls: getShowToolCalls(cfg),
         cotMessages: getCotMessages(cfg),
+        ...(runtime ? { runtime } : {}),
       },
       execution: {
         maxConcurrentRuns: getMaxConcurrentRuns(cfg),

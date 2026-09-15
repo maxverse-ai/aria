@@ -49,6 +49,7 @@ describe('SessionCatalogReadProjector', () => {
 
     await projector.project({ entries: [entry], historyBySessionKey: history });
     await projector.project({ entries: [entry], historyBySessionKey: history });
+    await projector.project({ entries: [entry], historyBySessionKey: history });
 
     expect(repository.resources).toHaveLength(1);
     expect(repository.resources[0]).toMatchObject({
@@ -57,6 +58,38 @@ describe('SessionCatalogReadProjector', () => {
       agentKind: 'codex',
     });
     expect(repository.eventIds).toHaveLength(1);
+  });
+
+  it('preserves learned metadata without producing new events on unchanged rescans', async () => {
+    const repository = new MemoryRepository('***REMOVED***');
+    const projector = new SessionCatalogReadProjector({ profileId: '***REMOVED***', repository });
+    const entry = catalogEntry({ agentId: 'codex', threadId: 'thread-1' });
+    await projector.project({ entries: [entry] });
+    const { revision: _revision, ...draft } = repository.resources[0] as NativeSessionResource;
+    await repository.upsert<NativeSessionResource>({
+      eventId: 'learned-metadata',
+      resource: {
+        ...draft,
+        title: 'Known title',
+        summary: 'Known summary',
+        participantIdentityIds: ['idn_actor'],
+        lastActivityAt: '1970-01-01T00:00:04.000Z',
+        updatedAt: '1970-01-01T00:00:04.000Z',
+      },
+    });
+    const updated = { ...entry, updatedAt: 2_000 };
+    await projector.project({ entries: [updated] });
+    const eventCount = repository.eventIds.length;
+    await projector.project({ entries: [updated] });
+    await projector.project({ entries: [updated] });
+
+    expect(repository.eventIds).toHaveLength(eventCount);
+    expect(repository.resources[0]).toMatchObject({
+      title: 'Known title',
+      summary: 'Known summary',
+      participantIdentityIds: ['idn_actor'],
+      lastActivityAt: '1970-01-01T00:00:04.000Z',
+    });
   });
 
   it('skips damaged catalog identities instead of inventing a session', async () => {
