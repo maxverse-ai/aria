@@ -18,6 +18,11 @@ const spaceSuites = [
 // console HTML as JS and fails.
 export default defineConfig({
   test: {
+    // The suite runs real filesystem and subprocess work under a parallel CI
+    // matrix; vitest's five-second default reads a loaded runner as a broken
+    // test. A genuinely hung test still fails, just later.
+    testTimeout: 30_000,
+    hookTimeout: 30_000,
     ...(process.platform === "win32" ? { fileParallelism: false } : {}),
     ...(process.platform === "linux" ? {} : { exclude: [...configDefaults.exclude, ...spaceSuites] }),
   },

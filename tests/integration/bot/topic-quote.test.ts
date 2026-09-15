@@ -8,6 +8,7 @@ import { WorkspaceStore } from '../../../src/workspace/store.js';
 import { FakeAgentAdapter } from '../../helpers/fake-agent.js';
 import type { AgentEvent } from '../../../src/agent/types.js';
 import { createTmpProfile, type TmpProfile } from '../../helpers/tmp-profile.js';
+import { waitFor } from '../../helpers/wait-for.js';
 
 const sdkMock = vi.hoisted(() => ({
   channel: undefined as FakeLarkChannel | undefined,
@@ -680,13 +681,4 @@ interface MarkdownStreamInput {
 
 function isMarkdownStreamInput(input: unknown): input is MarkdownStreamInput {
   return Boolean(input && typeof input === 'object' && 'markdown' in input);
-}
-
-async function waitFor(predicate: () => boolean, timeoutMs = 1500): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if (predicate()) return;
-    await new Promise((resolve) => setTimeout(resolve, 20));
-  }
-  throw new Error('timed out waiting for async work');
 }
