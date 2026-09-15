@@ -17,6 +17,7 @@ export class OsDetachedUpdateExecutor implements DetachedUpdateExecutor {
     private readonly platform: NodeJS.Platform = process.platform,
     private readonly nodePath = process.execPath,
     private readonly now: () => Date = () => new Date(),
+    private readonly env: NodeJS.ProcessEnv = process.env,
   ) {}
 
   async execute(planId: string): Promise<{ operationId: string; detached: boolean }> {
@@ -65,12 +66,18 @@ export class OsDetachedUpdateExecutor implements DetachedUpdateExecutor {
     const updaterArgs = [this.updaterEntry, ...args];
     const label = `aria-update-${operationId}`;
     if (this.platform === 'linux') {
+      // `systemd-run --user` starts from the user manager's environment, not
+      // the invoking CLI's environment. Forward only the non-secret gh config
+      // directory so private-release revalidation uses the same isolated
+      // identity without exposing GH_TOKEN in unit metadata or process args.
+      const githubConfig = this.env.GH_CONFIG_DIR;
       await this.runner.run('systemd-run', [
         '--user',
         '--collect',
         '--quiet',
         '--unit', label,
         '--property=Type=exec',
+        ...(githubConfig ? [`--setenv=GH_CONFIG_DIR=${githubConfig}`] : []),
         this.nodePath,
         ...updaterArgs,
       ]);
