@@ -20,6 +20,6 @@ web/dist/
 .vscode/
 
 # Local maintenance scripts and unreleased changelog are not part of the package
-scripts/
+/scripts/
 CHANGELOG.md
 tests-smoke/
