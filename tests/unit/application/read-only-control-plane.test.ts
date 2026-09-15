@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { ReadOnlyControlPlane } from '../../../src/application/control';
 import { resolveAppPaths } from '../../../src/config/app-paths';
+import { controlEndpoint } from '../../helpers/control-endpoint';
 import {
   createRootConfig,
   saveRootConfig,
@@ -28,7 +29,7 @@ describe('ReadOnlyControlPlane', () => {
       configured: { cotMessages: 'detailed', messageReply: 'markdown', showToolCalls: true },
       effective: { cotMessages: 'off', messageReply: 'markdown', progress: 'none', showToolCalls: false },
       reasons: ['policy-progress-unavailable'] };
-    const server = await startRuntimeControlServer({ profile: 'team-bot', endpoint: join(fixture.root, 'control.sock'),
+    const server = await startRuntimeControlServer({ profile: 'team-bot', endpoint: controlEndpoint(fixture.root),
       sidecarFile: paths.runtimeControlFile,
       snapshot: () => ({ ...new RuntimeActivityTracker('team-bot', 'fixture', []).snapshot(), presentation }) });
     const plane = new ReadOnlyControlPlane({ rootDir: fixture.root });

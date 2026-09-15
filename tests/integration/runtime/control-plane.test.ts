@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { requestRestartPreflight, requestRuntimeControl } from '../../../src/runtime/control-client.js';
 import { startRuntimeControlServer, type RuntimeControlServerHandle } from '../../../src/runtime/control-server.js';
 import type { RuntimeActivitySnapshotV1 } from '../../../src/runtime/activity.js';
+import { controlEndpoint } from '../../helpers/control-endpoint';
 import { createTmpProfile } from '../../helpers/tmp-profile.js';
 
 const cleanups: Array<() => Promise<void>> = [];
@@ -15,7 +16,7 @@ describe('runtime control plane', () => {
 
   it('installed transition control awaits a successful drain and can explicitly release admission', async () => {
     const tmp = await createTmpProfile('transition-control-');
-    const endpoint = join(tmp.profile, 'control.sock');
+    const endpoint = controlEndpoint(tmp.profile);
     const sidecarFile = join(tmp.profile, 'control.json');
     let paused = false;
     const drain = vi.fn(async () => { paused = true; });
@@ -33,9 +34,7 @@ describe('runtime control plane', () => {
 
   it('returns the daemon-owned restart preflight snapshot', async () => {
     const tmp = await createTmpProfile('runtime-control-');
-    const endpoint = process.platform === 'win32'
-      ? `\\\\.\\pipe\\aria-runtime-test-${process.pid}`
-      : join(tmp.profile, 'runtime.sock');
+    const endpoint = controlEndpoint(tmp.profile, 'runtime');
     const sidecarFile = join(tmp.profile, 'runtime-control.json');
     let server: RuntimeControlServerHandle | undefined;
     server = await startRuntimeControlServer({

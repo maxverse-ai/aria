@@ -15,6 +15,12 @@ The Channel, Trigger, Agent Runtime, Control Plane, and Workspace documents
 retain ownership of their existing contracts; their current implementation
 status must not be inferred from this target architecture.
 
+Execution spaces require a Linux host. They provision a confined native home, a
+space-owned unix-socket transport and a container driver, so preparing or
+reading a space on another platform fails closed with `execution spaces require
+a Linux host` rather than degrading. The space test suites run only on Linux for
+the same reason.
+
 ## Decision
 
 An execution space owns identity-bearing execution state, resource grants, and

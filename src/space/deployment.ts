@@ -44,7 +44,18 @@ const templateTargets: Record<SpaceEngineId, readonly string[]> = {
 };
 const forbiddenEnvironment = /^(?:HOME$|PATH$|XDG_|LARK|LARKSUITE|ARIA_|CODEX_HOME$|GROK_HOME$|DSH_HOME$|PI_CODING_AGENT_DIR$|CLAUDE_CONFIG_DIR$|OPENCODE_CONFIG_DIR$|LD_|DYLD_|NODE_OPTIONS$|NODE_PATH$|BASH_ENV$|ENV$)/;
 
+/**
+ * Execution spaces provision POSIX process, path and socket state: a confined
+ * native home, a space-owned unix-socket transport and a container driver.
+ * A host without those primitives cannot run them, so say so here rather than
+ * surfacing a bind or path error from deep inside a launch.
+ */
+export function assertSpaceHostSupported(): void {
+  if (process.platform !== 'linux') throw new Error('execution spaces require a Linux host');
+}
+
 export function normalizeSpaceDeployment(value: unknown): SpaceDeploymentDefinition {
+  assertSpaceHostSupported();
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('invalid space deployment');
   const v = value as SpaceDeploymentDefinition;
   if (v.schema !== 'aria.space.deployment.v1' || !SPACE_ENGINE_IDS.includes(v.engineId)

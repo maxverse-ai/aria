@@ -23,7 +23,7 @@ afterEach(async () => {
 });
 
 describe('WechatKfTextHandler', () => {
-  it('X1/D2: verified team image input is staged into the owning space before the common host sees it', async () => {
+  it.runIf(process.platform === 'linux')('X1/D2: verified team image input is staged into the owning space before the common host sees it', async () => {
     const root = await mkdtemp(join(tmpdir(), 'aria-wxkf-space-image-')); roots.push(root);
     const f = await gateFixture(root);
     try {

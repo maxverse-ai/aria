@@ -7,8 +7,13 @@ import { normalizeEngineProfileConfig, type EngineProfileConfig } from '../../sr
 import { createProfileConversationHost } from '../../src/conversation/profile-host';
 import { prepareProfileEngineRuntime } from '../../src/runtime/agent-runtime';
 
-const engines = ['claude', 'codex', 'grok', 'opencode', 'dsh', 'kimi', 'pi'] as const;
-type Engine = typeof engines[number];
+const allEngines = ['claude', 'codex', 'grok', 'opencode', 'dsh', 'kimi', 'pi'] as const;
+type Engine = typeof allEngines[number];
+// `dsh` reports progress over an extra stdio descriptor, which Node only
+// supports on POSIX hosts, so its launch cases do not apply on Windows.
+const engines: readonly Engine[] = process.platform === 'win32'
+  ? allEngines.filter((engine) => engine !== 'dsh')
+  : allEngines;
 const roots: string[] = [];
 const envKeys = [
   'LARK_CHANNEL', 'LARK_CHANNEL_PROFILE', 'LARK_CHANNEL_HOME',
