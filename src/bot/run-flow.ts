@@ -1,7 +1,9 @@
+import type { ParticipantIdentity } from '../conversation/participant-identity';
+import type { AuthorizedSpaceContext } from '../space/authorization';
 import type { AgentCapability } from '../agent/capability';
 import { resolveModelArg } from '../agent/models';
 import type { AgentEvent } from '../agent/types';
-import type { ProfileConfig } from '../config/profile-schema';
+import type { EngineProfileConfig } from '../config/profile-schema';
 import type { AccessDecision } from '../policy/access';
 import {
   evaluateRunPolicy,
@@ -32,13 +34,16 @@ import {
 } from '../application/execution-intent';
 
 export interface StartRunFlowInput {
+  identity?: ParticipantIdentity;
+  spaceContext?: AuthorizedSpaceContext;
+  assertAuthorized?: () => void;
   scopeId: string;
   scope: ScopeContext;
   prompt: string;
   attachments: AgentAttachment[];
   access: AccessDecision;
   capability: AgentCapability;
-  profileConfig: ProfileConfig;
+  profileConfig: EngineProfileConfig;
   sessions: SessionStore;
   sessionCatalog?: SessionCatalog;
   workspaces: WorkspaceStore;
@@ -210,8 +215,11 @@ export async function startRunIntentFlow(
   let execution: RunExecution;
   try {
     execution = await input.executor.submit({
+      identity: input.identity,
       scopeId: input.scopeId,
       policy,
+      spaceContext: input.spaceContext,
+      assertAuthorized: input.assertAuthorized,
       sessionId,
       threadId,
       model: resolveModelArg(

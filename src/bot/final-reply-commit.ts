@@ -1,3 +1,4 @@
+import { hostPublicationQueue } from '../conversation/publication-queue';
 import type { ConversationRuntime } from '../conversation/runtime';
 import type { FreshnessDecision } from '../conversation/freshness-policy';
 import { log } from '../core/logger';
@@ -13,12 +14,15 @@ export interface FinalReplyArtifact {
 type CommitContext = Omit<FinalReplyFreshnessInput, 'turn' | 'draftText'> & {
   scope: string;
   runId: string;
+  publicationKey?: string;
+  cooperative?: boolean;
 };
 
 /** One terminal commit seam for dedicated replies and already-streamed terminals. */
 export class FinalReplyCommit {
   constructor(
     private readonly deps: {
+      beforePublish?: () => Promise<void>;
       conversations: ConversationRuntime;
       freshness: FinalReplyFreshness;
       context: CommitContext;
@@ -26,11 +30,13 @@ export class FinalReplyCommit {
     },
   ) {}
 
+  get cooperative(): boolean { return this.deps.context.cooperative === true; }
+
   async publish(
     draftText: string,
     publish: () => Promise<FinalReplyArtifact | undefined>,
   ): Promise<FreshnessDecision> {
-    return this.deps.conversations.finalizeTurn(
+    return this.serialize(() => this.deps.conversations.finalizeTurn(
       this.deps.context.scope,
       this.deps.context.runId,
       async (turn) => {
@@ -38,6 +44,7 @@ export class FinalReplyCommit {
         const decision = await this.deps.freshness.inspect(input);
         if (!mayPublish(decision)) return decision;
 
+        await this.deps.beforePublish?.();
         const artifact = await publish();
         if (!artifact) return decision;
         const postflight = this.deps.freshness.inspectLocal(input);
@@ -47,7 +54,12 @@ export class FinalReplyCommit {
         }
         return decision;
       },
-    );
+    ));
+  }
+
+  private serialize<T>(operation: () => Promise<T>): Promise<T> {
+    const key = this.deps.context.publicationKey;
+    return key ? hostPublicationQueue.run(key, operation) : operation();
   }
 
   async reconcileExisting(

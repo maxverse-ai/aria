@@ -286,7 +286,11 @@ describe('topic message quote handling', () => {
     );
     await waitFor(() => h.agent.runOptions.length === 1);
 
-    expect(h.channel.rawClient.im.v1.message.list).not.toHaveBeenCalled();
+    // Final-reply freshness may query messages after the triggering event.
+    // Only the unbounded topic bootstrap must be absent for a resumed session.
+    for (const [request] of h.channel.rawClient.im.v1.message.list.mock.calls) {
+      expect(request.params.start_time).toBe('1760000001');
+    }
     const prompt = h.agent.runOptions[0]?.prompt ?? '';
     expect(prompt).not.toContain('<topic_context>');
   });
@@ -494,6 +498,9 @@ async function createHarness(options: {
       allowedChats: ['oc_topic_chat'],
       allowedUsers: ['ou_user'],
     },
+    // This harness exercises markdown reply/thread routing. Keep it independent
+    // of CoT HTTP requests and their asynchronous fallback notifications.
+    preferences: { cotMessages: 'off' },
   });
   const profileConfig = {
     ...baseProfileConfig,

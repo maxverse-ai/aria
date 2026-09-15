@@ -51,6 +51,24 @@ describe('FileChannelReliabilityStores', () => {
     const second = await right.answers.create({ key, createdAt: 12, intents: [] });
     expect(first.createdAt).toBe(11);
     expect(second.createdAt).toBe(11);
+    const followerKey = reliabilityKeyFromEnvelope(envelope('source-2'));
+    const firstBatch = await left.batches.create({
+      key,
+      createdAt: 13,
+      keys: [key, followerKey],
+    });
+    const secondBatch = await right.batches.create({
+      key,
+      createdAt: 14,
+      keys: [key, reliabilityKeyFromEnvelope(envelope('source-3'))],
+    });
+    expect(secondBatch).toEqual(firstBatch);
+    await expect(right.batches.findByMember(followerKey)).resolves.toEqual(firstBatch);
+    await expect(right.batches.create({
+      key: followerKey,
+      createdAt: 15,
+      keys: [followerKey, reliabilityKeyFromEnvelope(envelope('source-4'))],
+    })).resolves.toEqual(firstBatch);
     expect(await new FileChannelReliabilityStores(path).inbox.list()).toHaveLength(1);
     expect((await readFile(path, 'utf8')).match(/profile-a/g)?.length).toBeGreaterThan(0);
   });
@@ -119,5 +137,17 @@ describe('FileChannelReliabilityStores', () => {
     await writeFile(path, '{"schema":"wrong"}\n', { mode: 0o600 });
     await expect(new FileChannelReliabilityStores(path).inbox.list())
       .rejects.toThrow('invalid channel reliability state file');
+  });
+
+  it('loads a pre-batch v1 snapshot with an empty compatible batch store', async () => {
+    const path = await statePath();
+    const stores = new FileChannelReliabilityStores(path);
+    await stores.inbox.list();
+    const oldState = JSON.parse(await readFile(path, 'utf8')) as Record<string, unknown>;
+    delete oldState.batches;
+    await writeFile(path, `${JSON.stringify(oldState)}\n`, { mode: 0o600 });
+
+    const restarted = new FileChannelReliabilityStores(path);
+    await expect(restarted.batches.list()).resolves.toEqual([]);
   });
 });

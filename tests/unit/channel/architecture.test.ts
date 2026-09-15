@@ -34,7 +34,8 @@ describe('channel architecture boundary', () => {
 
     expect(channel).not.toContain('new ConversationRuntime({');
     expect(externalHost).not.toContain('new ConversationRuntime({');
-    expect(supervisor).toContain('new ProfileConversationRuntimeOwner({');
+    expect(supervisor).toContain('composeProfileExecution({');
+    expect(await readFile('src/conversation/composition.ts', 'utf8')).toContain('new ProfileConversationRuntimeOwner(options)');
     expect(supervisor).toContain('conversationRuntime: this.conversationRuntime');
     expect(channel).toContain('const conversations = conversationRuntime.runtime;');
     expect(channel).toContain('const flow = await conversations.start({');

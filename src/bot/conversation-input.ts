@@ -11,6 +11,8 @@ export type ConversationSenderType = 'user' | 'bot';
  * decision) after the message has already entered the conversation.
  */
 export interface ConversationInput {
+  personalGroup?: import('./personal-agent-group').PersonalGroupAdmission;
+  spaceOperation?: import('../space/operation-gate').SpaceOperation;
   message: NormalizedMessage;
   addressing: AddressingContext;
   senderType?: ConversationSenderType;
@@ -48,4 +50,10 @@ export function messageTimestampMs(message: Pick<NormalizedMessage, 'createTime'
   const value = Number(message.createTime);
   if (!Number.isFinite(value) || value <= 0) return 0;
   return value < 1_000_000_000_000 ? value * 1000 : value;
+}
+
+/** Call only after normal channel/space access admission. */
+export function isAdmittedPeer(input: ConversationInput): boolean {
+  return input.senderType === 'bot' && input.addressing.kind === 'structured-mention'
+    && input.addressing.addressedToAgent;
 }

@@ -14,6 +14,13 @@ describe('FinalReplyCommit', () => {
     expect(h.retract).not.toHaveBeenCalled();
   });
 
+  it('does not publish a withheld cooperative reply', async () => {
+    const h = harness({ kind: 'withheld', reason: 'history-unavailable' });
+    const publish = vi.fn();
+    await expect(h.commit.publish('0', publish)).resolves.toMatchObject({ kind: 'withheld' });
+    expect(publish).not.toHaveBeenCalled();
+  });
+
   it('publishes on fail-open', async () => {
     const h = harness({ kind: 'fail-open', reason: 'history-unavailable' });
     const publish = vi.fn(async () => ({ messageId: 'om_final' }));

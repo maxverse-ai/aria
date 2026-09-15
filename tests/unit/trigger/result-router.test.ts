@@ -2,6 +2,10 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { gateFixture, directRequest } from '../../helpers/space-gate';
+import { SpaceOperationLedger } from '../../../src/space/operation-ledger';
+import { SpaceTriggerBoundary } from '../../../src/space/trigger-boundary';
+import { createTriggerRunIntent } from '../../../src/trigger/runtime/intent';
 import { ChannelManager } from '../../../src/channel/manager';
 import { ChannelPluginRegistry } from '../../../src/channel/plugin/registry';
 import {
@@ -26,6 +30,43 @@ afterEach(async () => {
 });
 
 describe('TriggerResultRouter', () => {
+  it('X3/X4: recovered team results retain the original principal, definition revision and destination epoch', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'aria-trigger-space-')); temporaryDirectories.push(directory);
+    const f = await gateFixture(directory, { persistent: true });
+    const ledgerFile = join(directory, 'operations.json');
+    const ledger = new SpaceOperationLedger(f.gate, ledgerFile); await ledger.load();
+    const boundary = new SpaceTriggerBoundary(ledger, { pluginId: 'fixture', instanceId: 'primary' });
+    const d = definition(); d.profileId = 'profile'; d.intentTemplate.actor = { kind: 'user', actorRef: 'a' }; d.intentTemplate.scopeRef = 'group';
+    const o = occurrence(); o.profileId = 'profile';
+    const operation = await f.gate.enter({ ...directRequest('a', 'group'), kind: 'group' }, 'group');
+    await boundary.bindDefinition(d, operation);
+    const intent = createTriggerRunIntent(d, o, 'intent');
+    expect((await boundary.authorizeIntent(intent)).bindingRef).toBe(operation.bindingRef);
+    await expect(boundary.authorizeIntent({ ...intent, actor: { kind: 'user', actorRef: 'b' } })).rejects.toThrow('matching original');
+    const storeFile = join(directory, 'results.json');
+    const send = vi.fn(async () => { throw new Error('offline'); });
+    const router = new TriggerResultRouter({ store: new FileTriggerResultDeliveryStore(storeFile),
+      resolver: { resolve: async () => ({ profileId: 'profile', pluginId: 'fixture', instanceId: 'primary', scopeId: 'group' }) },
+      beforeCheckpoint: (definition, output) => boundary.bindResult(definition, output),
+      channel: { deliver: output => boundary.deliver(output, send) }, now: () => f.state.now, retryDelayMs: 10 });
+    await router.route(d, o, { status: 'succeeded', output: { text: 'private answer' } });
+    expect(send).toHaveBeenCalledOnce();
+    await f.services.close();
+    const restored = await gateFixture(directory, { persistent: true });
+    try {
+      restored.state.humans = ['a', 'b']; restored.state.now += 10;
+      const saved = new SpaceOperationLedger(restored.gate, ledgerFile); await saved.load();
+      const recoveredBoundary = new SpaceTriggerBoundary(saved, { pluginId: 'fixture', instanceId: 'primary' });
+      const retrySend = vi.fn(async output => ({ deliveryId: output.deliveryId, status: 'sent' as const, deliveredAt: 1010 }));
+      const recovered = new TriggerResultRouter({ store: new FileTriggerResultDeliveryStore(storeFile),
+        resolver: { resolve: async () => { throw new Error('retry must use the saved destination'); } },
+        channel: { deliver: output => recoveredBoundary.deliver(output, () => retrySend(output)) }, now: () => restored.state.now, retryDelayMs: 10 });
+      await recovered.reconcile();
+      expect(retrySend).not.toHaveBeenCalled();
+      expect(await new FileTriggerResultDeliveryStore(storeFile).get('occurrence-a:conversation')).toMatchObject({ state: 'retry-wait', attempt: 2 });
+    } finally { await restored.services.close(); }
+  });
+
   it('routes proactively through a non-Lark channel plugin with a deterministic delivery id', async () => {
     const deliver = vi.fn(async (intent) => ({
       deliveryId: intent.deliveryId,

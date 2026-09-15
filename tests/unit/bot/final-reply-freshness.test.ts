@@ -1,4 +1,4 @@
-import type { LarkChannel, NormalizedMessage } from '@larksuite/channel';
+import { normalize, type LarkChannel, type NormalizedMessage } from '@larksuite/channel';
 import { describe, expect, it, vi } from 'vitest';
 import type { ChatTopologyResolver } from '../../../src/bot/chat-topology.js';
 import type { ConversationInput } from '../../../src/bot/conversation-input.js';
@@ -7,6 +7,23 @@ import type { FreshnessHistoryResult } from '../../../src/bot/freshness-history.
 import { PendingQueue } from '../../../src/bot/pending-queue.js';
 
 describe('FinalReplyFreshness', () => {
+  it.each(['local', 'remote'])('keeps self-only ping freshness behavior for %s input', async source => {
+    const message = await normalize({
+      sender: { sender_id: { open_id: 'ou_human' }, sender_type: 'user' },
+      message: { message_id: 'ping', chat_id: 'scope', chat_type: 'group', message_type: 'text',
+        content: JSON.stringify({ text: '@_user_1' }),
+        mentions: [{ key: '@_user_1', id: { open_id: 'ou_bot' }, name: 'Bridge' }],
+      },
+    }, { botIdentity: { openId: 'ou_bot', name: 'Bridge' }, stripBotMentions: false, includeRaw: true });
+    const ping = conversation('ping');
+    ping.message = { ...message, createTime: 1_760_000_001_000 };
+    const h = harness(async () => ({ status: 'complete', inputs: source === 'remote' ? [ping] : [] }));
+    h.pending.block('scope');
+    if (source === 'local') h.pending.push('scope', ping);
+    await expect(h.freshness.inspect(request())).resolves.toEqual({ kind: 'fresh' });
+    expect(message.content).toBe('@Bridge');
+  });
+
   it('holds immediately on local addressed input and records next-turn handoff', async () => {
     const history = vi.fn(async (): Promise<FreshnessHistoryResult> => ({
       status: 'complete',
@@ -89,6 +106,23 @@ describe('FinalReplyFreshness', () => {
       kind: 'fail-open',
       reason: 'history-unavailable',
     });
+  });
+
+  it('withholds cooperative output on unavailable history', async () => {
+    const h = harness(async () => ({ status: 'unavailable', inputs: [] }));
+    await expect(h.freshness.inspect({ ...request(), requireCompleteHistory: true }))
+      .resolves.toEqual({ kind: 'withheld', reason: 'history-unavailable' });
+  });
+
+  it('admits a remote peer only after both explicit addressing and access checks', async () => {
+    const peer = conversation('peer', { senderType: 'bot', senderId: 'ou_peer' });
+    peer.addressing = { addressedToAgent: true, kind: 'structured-mention' };
+    const h = harness(async () => ({ status: 'complete', inputs: [peer] }));
+    h.pending.block('scope');
+    await expect(h.freshness.inspect({ ...request(), canAcceptRemote: () => false })).resolves.toEqual({ kind: 'fresh' });
+    expect(h.pending.snapshot('scope')).toEqual([]);
+    await expect(h.freshness.inspect(request())).resolves.toMatchObject({ kind: 'hold', messageIds: ['peer'] });
+    expect(h.pending.snapshot('scope').map(e => e.message.messageId)).toEqual(['peer']);
   });
 
   it('uses bot output only for exact duplicate suppression', async () => {

@@ -31,7 +31,8 @@ describe('outbound architecture boundary', () => {
 
   it('wraps the channel immediately and keeps Meeting on the explicit raw bypass', async () => {
     const source = await readFile('src/bot/channel.ts', 'utf8');
-    expect(source).toContain('createLarkOutboundGateway(rawChannel');
+    expect(source).toContain('createLarkOutboundGateway(spaceGate ? spaceLarkChannel(rawChannel, spaceGate) : rawChannel');
+    expect(source).toContain('if (spaceGate && controls.profileConfig.meeting.enabled) throw');
     expect(source).toContain('const channel = outboundPolicy?.channel ?? outboundGateway.channel;');
     expect(source).toContain('client: rawChannel.rawClient');
     expect(source).toContain('channel: rawChannel');

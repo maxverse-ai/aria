@@ -1,6 +1,7 @@
 import type { LarkChannel } from '@larksuite/channel';
 import type { TenantBrand } from '../config/schema';
 import type { OutboundSource } from './types';
+import { validateProgressPolicy, type ProgressPolicy } from './progress-policy';
 
 export const OUTBOUND_POLICY_API_VERSION = 2;
 export const REQUIRED_OUTBOUND_SINKS = Object.freeze([
@@ -43,6 +44,8 @@ export interface OutboundPolicyPlugin {
   protectedSinks: readonly string[];
   excludedSinks: readonly string[];
   streamStrategy: 'final-only';
+  /** Explicit checked-payload extension; raw SDK streams remain final-only. */
+  progress?: ProgressPolicy;
   wrapChannel(channel: LarkChannel): LarkChannel;
   withContext<T>(context: Readonly<OutboundPolicyContext>, operation: () => T): T;
   defer(operation: () => Promise<unknown>): void;
@@ -56,6 +59,7 @@ export interface LoadedOutboundPolicy {
   /** Source-anchored control traffic; still inspected by the policy. */
   controlChannel: LarkChannel;
   streamStrategy: 'final-only';
+  progress?: ProgressPolicy;
   run<T>(context: OutboundPolicyContext, operation: () => T): T;
   defer(operation: () => Promise<unknown>): void;
   close(): Promise<void>;
@@ -137,6 +141,7 @@ export async function loadOutboundPolicy(
     channel: wrapped,
     controlChannel,
     streamStrategy: plugin.streamStrategy,
+    ...(plugin.progress ? { progress: plugin.progress } : {}),
     run: (context, operation) => plugin.withContext(Object.freeze({ ...context }), operation),
     defer: (operation) => plugin.defer(operation),
     close: async () => {
@@ -168,6 +173,7 @@ function validatePlugin(plugin: OutboundPolicyPlugin, specifier: string): void {
     throw new Error(`outbound policy module ${specifier} returned no plugin`);
   }
   if (!plugin.id?.trim()) throw new Error('outbound policy plugin id is required');
+  validateProgressPolicy(plugin.progress);
   if (plugin.apiVersion !== OUTBOUND_POLICY_API_VERSION) {
     throw new Error(
       `outbound policy ${plugin.id} uses unsupported apiVersion ${String(plugin.apiVersion)}`,

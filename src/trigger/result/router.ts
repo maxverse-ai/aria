@@ -11,6 +11,7 @@ import type {
 } from './types';
 
 export interface TriggerResultRouterOptions {
+  beforeCheckpoint?: (definition: TriggerDefinition, intent: ChannelOutboundIntent) => Promise<void>;
   store: TriggerResultDeliveryStore;
   resolver: TriggerConversationRouteResolver;
   channel: TriggerResultChannel;
@@ -32,6 +33,7 @@ export class TriggerResultRouter implements TriggerResultGateway {
 
   async route(definition: TriggerDefinition, occurrence: TriggerOccurrence, result: TriggerExecutionResult): Promise<void> {
     if (!result.output?.text) return;
+    if (definition.revision !== occurrence.definitionRevision) throw new Error('trigger result definition changed');
     for (const route of flatten(definition.intentTemplate.resultRoutes)) {
       if (route.kind !== 'conversation') continue;
       const target = await this.options.resolver.resolve(definition.profileId, route.conversationRef);
@@ -42,6 +44,7 @@ export class TriggerResultRouter implements TriggerResultGateway {
         deliveryId,
         content: { kind: 'text', text: result.output.text },
       };
+      await this.options.beforeCheckpoint?.(definition, intent);
       await this.options.store.create({
         schemaVersion: 1, deliveryId, occurrenceId: occurrence.id, routeId: route.routeId,
         state: 'pending', attempt: 0, intent, createdAt: this.now(), updatedAt: this.now(),

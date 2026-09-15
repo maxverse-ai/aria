@@ -1,5 +1,6 @@
 import type {
   ChannelAnswerCheckpoint,
+  ChannelBatchCheckpoint,
   ChannelCompletionReceipt,
   ChannelDeliveryLedgerEntry,
   ChannelInboxRecord,
@@ -13,6 +14,7 @@ interface MemoryState {
   inbox: Map<string, ChannelInboxRecord>;
   receipts: Map<string, ChannelCompletionReceipt>;
   answers: Map<string, ChannelAnswerCheckpoint>;
+  batches: Map<string, ChannelBatchCheckpoint>;
   deliveries: Map<string, ChannelDeliveryLedgerEntry>;
   retries: Map<string, ChannelRetryRecord>;
 }
@@ -23,6 +25,7 @@ export class InMemoryChannelReliabilityStores implements ChannelReliabilityStore
     inbox: new Map(),
     receipts: new Map(),
     answers: new Map(),
+    batches: new Map(),
     deliveries: new Map(),
     retries: new Map(),
   };
@@ -78,6 +81,32 @@ export class InMemoryChannelReliabilityStores implements ChannelReliabilityStore
       if (existing) return clone(existing);
       this.state.answers.set(key, clone(checkpoint));
       return clone(checkpoint);
+    },
+  };
+
+  readonly batches = {
+    get: async (key: ChannelReliabilityKey) => cloneOptional(
+      this.state.batches.get(channelReliabilityKey(key)),
+    ),
+    findByMember: async (key: ChannelReliabilityKey) => {
+      const stableKey = channelReliabilityKey(key);
+      return cloneOptional([...this.state.batches.values()].find((batch) =>
+        batch.keys.some((member) => channelReliabilityKey(member) === stableKey)));
+    },
+    list: async () => [...this.state.batches.values()].map(clone),
+    create: async (checkpoint: ChannelBatchCheckpoint) => {
+      const key = channelReliabilityKey(checkpoint.key);
+      const existing = this.state.batches.get(key);
+      if (existing) return clone(existing);
+      const requested = new Set(checkpoint.keys.map(channelReliabilityKey));
+      const overlap = [...this.state.batches.values()].find((batch) =>
+        batch.keys.some((member) => requested.has(channelReliabilityKey(member))));
+      if (overlap) return clone(overlap);
+      this.state.batches.set(key, clone(checkpoint));
+      return clone(checkpoint);
+    },
+    remove: async (key: ChannelReliabilityKey) => {
+      this.state.batches.delete(channelReliabilityKey(key));
     },
   };
 

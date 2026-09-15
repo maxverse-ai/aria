@@ -1,3 +1,4 @@
+import type { SpaceOperationGate } from '../../space/operation-gate';
 import { createHash } from 'node:crypto';
 import type {
   ProfileConversationHost,
@@ -33,7 +34,7 @@ import {
   type WechatKfPresentation,
   type WechatKfPresentationProvider,
 } from './presentation';
-import type { WechatKfMessageSink } from './processor';
+import type { WechatKfTurnHandler } from './processor';
 import { FileWechatKfReceiptStore } from './receipt-store';
 import { wechatKfActorId, wechatKfScopeId } from './session';
 import type { WechatKfMessage } from './types';
@@ -64,6 +65,8 @@ export interface WechatKfProcessingFeedback {
 }
 
 export interface WechatKfTextHandlerOptions {
+  spaceGate?: SpaceOperationGate;
+  spaceOpenKfid?: string;
   host: Pick<ProfileConversationHost, 'runText' | 'reset' | 'interrupt'> &
     Partial<Pick<ProfileConversationHost, 'run'>>;
   api: Pick<WechatKfApiClient, 'sendText' | 'sendImage'> &
@@ -88,12 +91,13 @@ export interface WechatKfTextHandlerOptions {
 }
 
 /** Deterministic wxkf text/image/command adapter. No command reaches the agent. */
-export class WechatKfTextHandler implements WechatKfMessageSink {
+export class WechatKfTextHandler implements WechatKfTurnHandler {
   private readonly inFlight = new Map<string, Promise<void>>();
   private readonly onboardingInFlight = new Map<string, Promise<void>>();
   private readonly presentation: WechatKfPresentationProvider;
 
   constructor(private readonly options: WechatKfTextHandlerOptions) {
+    if (options.spaceGate && !options.spaceOpenKfid) throw new Error('team wxkf requires its authenticated account binding');
     if (!options.sessionHmacSecret) throw new Error('wxkf session HMAC secret is required');
     if (options.presentation && options.userCopy) {
       throw new Error('wxkf presentation and legacy userCopy cannot both be configured');
@@ -103,54 +107,99 @@ export class WechatKfTextHandler implements WechatKfMessageSink {
   }
 
   accept(message: WechatKfMessage): Promise<void> {
-    const receiptKey = messageReceiptKey(message.msgid);
-    if (this.options.receipts.hasCompleted(receiptKey)) {
-      return this.options.deliveries.remove(message.msgid);
+    return this.acceptTurn([message]);
+  }
+
+  acceptTurn(input: readonly WechatKfMessage[]): Promise<void> {
+    const messages = deduplicateMessages(input);
+    if (messages.length === 0) return Promise.resolve();
+    const primary = messages[0]!;
+    const receiptKeys = messages.map((message) => messageReceiptKey(message.msgid));
+    if (receiptKeys.every((key) => this.options.receipts.hasCompleted(key))) {
+      return Promise.all(messages.map((message) => this.options.deliveries.remove(message.msgid)))
+        .then(() => undefined);
     }
-    const existing = this.inFlight.get(receiptKey);
+    const operationKey = receiptKeys[0]!;
+    const existing = this.inFlight.get(operationKey);
     if (existing) return existing;
-    const operation = this.process(message, receiptKey)
+    const operation = this.process(messages, operationKey)
       .then(async () => {
-        this.options.receipts.markCompleted(receiptKey);
+        for (const receiptKey of receiptKeys) this.options.receipts.markCompleted(receiptKey);
         await this.options.receipts.flush();
-        await this.options.deliveries.remove(message.msgid);
+        await Promise.all(
+          messages.map((message) => this.options.deliveries.remove(message.msgid)),
+        );
       })
       .finally(() => {
-        if (this.inFlight.get(receiptKey) === operation) this.inFlight.delete(receiptKey);
+        if (this.inFlight.get(operationKey) === operation) this.inFlight.delete(operationKey);
       });
-    this.inFlight.set(receiptKey, operation);
+    this.inFlight.set(operationKey, operation);
     return operation;
   }
 
-  private async process(message: WechatKfMessage, sourceMessageKey: string): Promise<void> {
-    if (message.origin !== 3) return;
-    if (message.msgtype !== 'text' && message.msgtype !== 'image') return;
+  private async process(
+    messages: readonly WechatKfMessage[],
+    sourceMessageKey: string,
+    spacePrepared = false,
+  ): Promise<void> {
+    const message = messages[0]!;
+    if (messages.every((item) => item.origin !== 3)) return;
+    if (messages.some((item) => item.origin !== 3)) {
+      throw new Error('wxkf turn cannot mix customer and non-customer messages');
+    }
+    const supported = messages.filter(
+      (item) => item.origin === 3 && (item.msgtype === 'text' || item.msgtype === 'image'),
+    );
+    if (supported.length === 0) return;
     const externalUserId = message.external_userid;
     const openKfid = message.open_kfid;
     if (!externalUserId || !openKfid) {
       throw new Error('wxkf customer message is missing identity');
     }
-    if (message.msgtype === 'text' && !message.text?.content) {
-      throw new Error('wxkf customer text message is missing content');
-    }
-    if (message.msgtype === 'image' && !message.image?.media_id) {
-      throw new Error('wxkf customer image message is missing media_id');
+    for (const item of supported) {
+      if (item.external_userid !== externalUserId || item.open_kfid !== openKfid) {
+        throw new Error('wxkf turn messages must share one customer scope');
+      }
+      if (item.msgtype === 'text' && !item.text?.content) {
+        throw new Error('wxkf customer text message is missing content');
+      }
+      if (item.msgtype === 'image' && !item.image?.media_id) {
+        throw new Error('wxkf customer image message is missing media_id');
+      }
     }
     const actorId = wechatKfActorId(this.options.sessionHmacSecret, externalUserId);
     const scopeId = wechatKfScopeId(this.options.sessionHmacSecret, openKfid, externalUserId);
+    const gate = this.options.spaceGate;
+    if (gate && this.options.spaceOpenKfid !== openKfid) throw new Error('wxkf account binding mismatch');
     const prepared = await this.options.deliveries.get(message.msgid);
+    if (gate && !spacePrepared) {
+      const allow = this.options.authorized;
+      if (!(typeof allow === 'function' ? supported.every(allow) : allow)) throw new Error('wxkf space admission denied');
+      if (prepared && !prepared.spaceCheckpoint) throw new Error('legacy wxkf answer has no team ownership');
+      const operation = prepared?.spaceCheckpoint ? await gate.restore(prepared.spaceCheckpoint)
+        : await gate.enter({ conversationId: scopeId, senderId: actorId, senderKind: 'user', kind: 'direct' }, scopeId);
+      if (operation.scopeRef !== scopeId || operation.request.senderId !== actorId) throw new Error('wxkf answer destination mismatch');
+      return gate.run(operation, () => this.process(messages, sourceMessageKey, true));
+    }
     if (prepared) {
       await this.deliverPrepared(message, prepared);
       return;
     }
-    const command = message.msgtype === 'text'
-      ? parseWechatKfCommand(message.text!.content)
+    const textMessages = supported.filter(
+      (item): item is WechatKfMessage & { text: { content: string } } => item.msgtype === 'text',
+    );
+    const imageMessages = supported.filter(
+      (item): item is WechatKfMessage & { image: { media_id: string } } => item.msgtype === 'image',
+    );
+    const combinedText = textMessages.map((item) => item.text.content.trim()).filter(Boolean).join('\n');
+    const command = supported.length === 1 && textMessages.length === 1
+      ? parseWechatKfCommand(textMessages[0]!.text.content)
       : undefined;
     const presentation = await this.presentation.resolve({
       actorId,
       scopeId,
-      message: message.msgtype === 'text'
-        ? { kind: 'text', text: message.text!.content }
+      message: combinedText
+        ? { kind: 'text', text: combinedText }
         : { kind: 'image' },
       ...(command ? { command: command.kind } : {}),
     });
@@ -165,7 +214,7 @@ export class WechatKfTextHandler implements WechatKfMessageSink {
             await this.options.onboarding.flush();
           });
         } else if (command.kind === 'new') {
-          await this.options.host.reset(scopeId);
+          await (gate ? this.options.host.reset(scopeId, gate.active().context) : this.options.host.reset(scopeId));
           await this.sendDurableContent(
             message,
             presentation.newConversation,
@@ -173,7 +222,7 @@ export class WechatKfTextHandler implements WechatKfMessageSink {
             presentation,
           );
         } else if (command.kind === 'stop') {
-          const interrupted = await this.options.host.interrupt(scopeId);
+          const interrupted = await (gate ? this.options.host.interrupt(scopeId, gate.active().context) : this.options.host.interrupt(scopeId));
           await this.sendDurableContent(
             message,
             interrupted ? presentation.stopped : presentation.nothingToStop,
@@ -199,10 +248,11 @@ export class WechatKfTextHandler implements WechatKfMessageSink {
     }
 
     await this.ensureOnboarding(message, actorId, presentation);
-    const authorized = typeof this.options.authorized === 'function'
-      ? this.options.authorized(message)
-      : this.options.authorized;
-    const feedback = this.options.processingFeedback?.begin({
+    const authorization = this.options.authorized;
+    const authorized = typeof authorization === 'function'
+      ? supported.every((item) => authorization(item))
+      : authorization;
+    const feedback = (gate ? undefined : this.options.processingFeedback)?.begin({
       externalUserId,
       openKfid,
       inboundMessageId: message.msgid,
@@ -211,52 +261,55 @@ export class WechatKfTextHandler implements WechatKfMessageSink {
     const persistedAttachments: NormalizedAttachment[] = [];
     try {
       const attachments: AgentAttachment[] = [];
-      const prompt = message.msgtype === 'text'
-        ? message.text!.content
+      const prompt = combinedText
+        ? combinedText
         : '请分析用户发送的图片，并直接回答与图片有关的问题。';
-      if (message.msgtype === 'image') {
+      if (imageMessages.length > 0) {
         if (!this.options.api.downloadImage || !this.options.attachmentStore) {
           throw new Error('wxkf inbound image capability is unavailable');
         }
-        try {
-          const image = await this.options.api.downloadImage({
-            mediaId: message.image!.media_id,
-            ...(this.options.inboundImageMaxBytes !== undefined
-              ? { maxBytes: this.options.inboundImageMaxBytes }
-              : {}),
-          });
-          const attachment = await this.options.attachmentStore.persist({
-            content: image.content,
-            kind: 'image',
-            mime: image.contentType,
-            source: 'wechat-kf',
-            sourceMessageId: message.msgid,
-            sourceFileKey: message.image!.media_id,
-            originalName: image.filename,
-          }, this.options.inboundImageMaxBytes === undefined ? {} : {
-            imageMaxBytes: this.options.inboundImageMaxBytes,
-            maxFileBytes: this.options.inboundImageMaxBytes,
-            maxBytes: this.options.inboundImageMaxBytes,
-          });
-          if (attachment.decision === 'accepted') persistedAttachments.push(attachment);
-          attachments.push({
-            ...toPolicyAttachment(attachment),
-            requiredness: 'required' as const,
-          });
-        } catch (error) {
-          if (!(error instanceof WechatKfMediaError)) throw error;
-          await this.sendDurableContent(
-            message,
-            error.code === 'image-too-large'
-              ? presentation.imageTooLarge
-              : presentation.imageInvalid,
-            'image-rejected',
-            presentation,
-          );
-          return;
+        for (const imageMessage of imageMessages) {
+          try {
+            const image = await this.options.api.downloadImage({
+              mediaId: imageMessage.image.media_id,
+              ...(this.options.inboundImageMaxBytes !== undefined
+                ? { maxBytes: this.options.inboundImageMaxBytes }
+                : {}),
+            });
+            const attachment = await this.options.attachmentStore.persist({
+              content: image.content,
+              kind: 'image',
+              mime: image.contentType,
+              source: 'wechat-kf',
+              sourceMessageId: imageMessage.msgid,
+              sourceFileKey: imageMessage.image.media_id,
+              originalName: image.filename,
+            }, this.options.inboundImageMaxBytes === undefined ? {} : {
+              imageMaxBytes: this.options.inboundImageMaxBytes,
+              maxFileBytes: this.options.inboundImageMaxBytes,
+              maxBytes: this.options.inboundImageMaxBytes,
+            });
+            if (attachment.decision === 'accepted') persistedAttachments.push(attachment);
+            attachments.push({
+              ...toPolicyAttachment(attachment),
+              requiredness: 'required' as const,
+            });
+          } catch (error) {
+            if (!(error instanceof WechatKfMediaError)) throw error;
+            await this.sendDurableContent(
+              message,
+              error.code === 'image-too-large'
+                ? presentation.imageTooLarge
+                : presentation.imageInvalid,
+              'image-rejected',
+              presentation,
+            );
+            return;
+          }
         }
       }
       const conversationInput = {
+        ...(gate ? { spaceContext: gate.active().context } : {}),
         scopeId,
         actorId,
         prompt,
@@ -267,7 +320,8 @@ export class WechatKfTextHandler implements WechatKfMessageSink {
       };
       let result: ProfileTextConversationResult;
       if (this.options.host.run) {
-        result = await this.options.host.run({ ...conversationInput, attachments });
+        const admitted = gate ? await gate.services.admitAttachments(gate.active().context, attachments) : attachments;
+        result = await this.options.host.run({ ...conversationInput, attachments: admitted });
       } else {
         if (attachments.length > 0) {
           throw new Error('wxkf conversation host image input is unavailable');
@@ -354,6 +408,8 @@ export class WechatKfTextHandler implements WechatKfMessageSink {
         content: chunk,
         messageId: stableOutboundMessageId(kind, message.msgid, index),
       })),
+      (this.options.now ?? Date.now)(),
+      this.options.spaceGate ? await this.options.spaceGate.checkpoint(this.options.spaceGate.active()) : undefined,
     );
   }
 
@@ -373,6 +429,7 @@ export class WechatKfTextHandler implements WechatKfMessageSink {
       if (answer.length === 0) throw new Error('wxkf answer composer returned no parts');
       for (const part of answer) {
         if (part.kind === 'image') {
+          if (this.options.spaceGate) throw new Error('team image output requires a bound asset materializer');
           if (!this.options.imageMaterializer) {
             throw new Error('wxkf answer image materializer is unavailable');
           }
@@ -400,6 +457,8 @@ export class WechatKfTextHandler implements WechatKfMessageSink {
         ...chunk,
         messageId: stableOutboundMessageId('answer', message.msgid, index),
       })),
+      (this.options.now ?? Date.now)(),
+      this.options.spaceGate ? await this.options.spaceGate.checkpoint(this.options.spaceGate.active()) : undefined,
     );
   }
 
@@ -412,12 +471,12 @@ export class WechatKfTextHandler implements WechatKfMessageSink {
   ): Promise<void> {
     const rendered = this.renderContent(content, presentation);
     for (const [index, chunk] of splitWechatKfText(rendered).entries()) {
-      await this.options.api.sendText({
+      await this.send(message, () => this.options.api.sendText({
         externalUserId: message.external_userid!,
         openKfid: message.open_kfid!,
         content: chunk,
         messageId: stableOutboundMessageId(kind, stableSource, index),
-      });
+      }));
     }
   }
 
@@ -436,6 +495,14 @@ export class WechatKfTextHandler implements WechatKfMessageSink {
     return rendered || presentation.emptyAnswer;
   }
 
+  private async send<T>(message: WechatKfMessage, operation: () => Promise<T>): Promise<T> {
+    const gate = this.options.spaceGate;
+    if (!gate) return operation();
+    if (message.open_kfid !== this.options.spaceOpenKfid) throw new Error('wxkf result account mismatch');
+    const scope = wechatKfScopeId(this.options.sessionHmacSecret, message.open_kfid!, message.external_userid!);
+    return gate.deliver(scope, operation);
+  }
+
   private async deliverPrepared(
     message: WechatKfMessage,
     prepared: WechatKfPreparedDelivery,
@@ -443,6 +510,7 @@ export class WechatKfTextHandler implements WechatKfMessageSink {
     for (const [index, chunk] of prepared.chunks.entries()) {
       if (chunk.deliveredAt !== undefined) continue;
       if (chunk.kind === 'image') {
+        if (this.options.spaceGate) throw new Error('team image output requires a bound asset materializer');
         let mediaId = chunk.mediaId;
         const now = (this.options.now ?? Date.now)();
         if (!mediaId || (chunk.mediaExpiresAt !== undefined && chunk.mediaExpiresAt <= now)) {
@@ -462,19 +530,19 @@ export class WechatKfTextHandler implements WechatKfMessageSink {
           );
           mediaId = materialized.mediaId;
         }
-        await this.options.api.sendImage({
+        await this.send(message, () => this.options.api.sendImage({
           externalUserId: message.external_userid!,
           openKfid: message.open_kfid!,
           mediaId,
           messageId: chunk.messageId,
-        });
+        }));
       } else {
-        await this.options.api.sendText({
+        await this.send(message, () => this.options.api.sendText({
           externalUserId: message.external_userid!,
           openKfid: message.open_kfid!,
           content: chunk.content,
           messageId: chunk.messageId,
-        });
+        }));
       }
       await this.options.deliveries.markDelivered(message.msgid, index);
     }
@@ -501,6 +569,12 @@ export class WechatKfTextHandler implements WechatKfMessageSink {
 export function messageReceiptKey(messageId: string): string {
   if (!messageId) throw new Error('wxkf message id is required');
   return createHash('sha256').update(`wxkf-receipt:v1:${messageId}`).digest('base64url');
+}
+
+function deduplicateMessages(messages: readonly WechatKfMessage[]): WechatKfMessage[] {
+  const unique = new Map<string, WechatKfMessage>();
+  for (const message of messages) unique.set(message.msgid, message);
+  return [...unique.values()];
 }
 
 export function stableOutboundMessageId(kind: string, source: string, part = 0): string {

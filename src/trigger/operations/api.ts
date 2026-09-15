@@ -36,6 +36,7 @@ export interface TriggerManagementApiOptions {
   now?: () => number;
   createId?: () => string;
   onApplied?: () => Promise<void>;
+  beforeDefinitionWrite?: (definition: TriggerDefinition) => Promise<void>;
   /** Internal governance adapters only. Direct agent writes fail closed by default. */
   allowAgentActor?: boolean;
 }
@@ -148,7 +149,11 @@ export class TriggerManagementApi {
   }
 
   private async executeCommand(command: TriggerManagementCommand, input: Record<string, unknown>) {
-    if (command === 'create') return { definition: await this.store.createDefinition(this.createDefinition(input)) };
+    if (command === 'create') {
+      const definition = this.createDefinition(input);
+      await this.options.beforeDefinitionWrite?.(definition);
+      return { definition: await this.store.createDefinition(definition) };
+    }
     if (command === 'retry' || command === 'ack') {
       const occurrenceId = requiredString(input.occurrenceId, 'occurrenceId');
       if (!await this.store.getOccurrence(occurrenceId)) {
@@ -173,9 +178,9 @@ export class TriggerManagementApi {
         advancedAt: at,
       })).occurrence };
     }
-    return { definition: await this.store.replaceDefinition(
-      this.updateDefinition(existing, command, input), existing.revision,
-    ) };
+    const definition = this.updateDefinition(existing, command, input);
+    await this.options.beforeDefinitionWrite?.(definition);
+    return { definition: await this.store.replaceDefinition(definition, existing.revision) };
   }
 
   private createDefinition(input: Record<string, unknown>): TriggerDefinition {

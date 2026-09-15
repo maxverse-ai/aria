@@ -6,11 +6,15 @@ import type { ProfileConversationHost } from '../../../src/conversation/profile-
 import { FileWechatKfOnboardingStore } from '../../../src/channel/wechat-kf/onboarding-store';
 import { FileWechatKfReceiptStore } from '../../../src/channel/wechat-kf/receipt-store';
 import { FileWechatKfDeliveryStore } from '../../../src/channel/wechat-kf/delivery-store';
-import { WechatKfTextHandler } from '../../../src/channel/wechat-kf/text-handler';
+import {
+  WechatKfTextHandler,
+  messageReceiptKey,
+} from '../../../src/channel/wechat-kf/text-handler';
 import { WechatKfMediaError } from '../../../src/channel/wechat-kf/client';
 import { createDefaultWechatKfPresentation } from '../../../src/channel/wechat-kf/presentation';
 import type { WechatKfMessage } from '../../../src/channel/wechat-kf/types';
 import { FileAttachmentStore } from '../../../src/media/file-store';
+import { gateFixture } from '../../helpers/space-gate';
 
 const roots: string[] = [];
 
@@ -19,6 +23,40 @@ afterEach(async () => {
 });
 
 describe('WechatKfTextHandler', () => {
+  it('X1/D2: verified team image input is staged into the owning space before the common host sees it', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'aria-wxkf-space-image-')); roots.push(root);
+    const f = await gateFixture(root);
+    try {
+      const h = await createHarness({ spaceGate: f.gate, spaceOpenKfid: 'wk123' });
+      await h.handler.accept(imageMessage('owned-image', 'provider-image'));
+      const input = h.host.run.mock.calls[0]?.[0];
+      expect(input.spaceContext).toBeDefined();
+      const paths = (await f.services.state.view(input.spaceContext)).paths;
+      expect(input.attachments[0].path.startsWith(paths.attachments + '/')).toBe(true);
+      expect((await readFile(input.attachments[0].path)).byteLength).toBe(8);
+    } finally { await f.services.close(); }
+  });
+
+  it('X1/X4: team answer retries preserve the original grant and cannot leak to another account or a revoked customer', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'aria-wxkf-space-')); roots.push(root);
+    const f = await gateFixture(root);
+    try {
+      const harness = await createHarness({ spaceGate: f.gate, spaceOpenKfid: 'wk123' });
+      const input = message('team-retry', 'question');
+      harness.api.sendText.mockResolvedValueOnce({ messageId: 'welcome' }).mockRejectedValueOnce(new Error('offline'));
+      await expect(harness.handler.accept(input)).rejects.toThrow('offline');
+      expect(harness.host.run).toHaveBeenCalledOnce();
+      expect(harness.host.run.mock.calls[0]?.[0].spaceContext).toBeDefined();
+      expect((await harness.deliveries.get(input.msgid))?.spaceCheckpoint?.schema).toBe('aria.space.operation.v1');
+      await expect(harness.handler.accept({ ...input, open_kfid: 'foreign' })).rejects.toThrow('account binding');
+      f.state.admitted = false;
+      await expect(harness.handler.accept(input)).rejects.toThrow('access-denied');
+      expect(harness.api.sendText).toHaveBeenCalledTimes(2);
+      expect(harness.host.run).toHaveBeenCalledOnce();
+      expect(await harness.deliveries.get(input.msgid)).toBeDefined();
+    } finally { await f.services.close(); }
+  });
+
   it('preserves the legacy text-only host contract when run is unavailable', async () => {
     const harness = await createHarness();
     delete (harness.host as Partial<typeof harness.host>).run;
@@ -48,6 +86,34 @@ describe('WechatKfTextHandler', () => {
     }));
     const attachmentPath = harness.host.runText.mock.calls[0]?.[0].attachments[0].path;
     await expect(readFile(attachmentPath)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('runs a mixed image and text batch as one multimodal turn', async () => {
+    const processingFeedback = {
+      begin: vi.fn(() => ({
+        beforeFinal: vi.fn().mockResolvedValue(undefined),
+        finish: vi.fn().mockResolvedValue(undefined),
+      })),
+    };
+    const harness = await createHarness({ processingFeedback });
+    const image = imageMessage('m-batch-image', 'media-batch');
+    const text = message('m-batch-text', '这张图片中有什么？');
+
+    await harness.handler.acceptTurn([image, text]);
+
+    expect(harness.host.run).toHaveBeenCalledOnce();
+    expect(harness.host.run).toHaveBeenCalledWith(expect.objectContaining({
+      prompt: '这张图片中有什么？',
+      sourceMessageId: 'm-batch-image',
+      attachments: [expect.objectContaining({
+        kind: 'image',
+        requiredness: 'required',
+        decision: 'accepted',
+      })],
+    }));
+    expect(processingFeedback.begin).toHaveBeenCalledOnce();
+    expect(harness.receipts.hasCompleted(messageReceiptKey(image.msgid))).toBe(true);
+    expect(harness.receipts.hasCompleted(messageReceiptKey(text.msgid))).toBe(true);
   });
 
   it('finishes an invalid inbound image with a user-visible answer without starting the agent', async () => {
@@ -479,6 +545,8 @@ describe('WechatKfTextHandler', () => {
 });
 
 async function createHarness(options: {
+  spaceGate?: import('../../../src/space/operation-gate').SpaceOperationGate;
+  spaceOpenKfid?: string;
   onWelcomeError?: (error: unknown) => void;
   onAnswerComposeError?: (error: unknown) => void;
   answerComposer?: import('../../../src/channel/wechat-kf/outbound').WechatKfAnswerComposer;
@@ -526,7 +594,7 @@ async function createHarness(options: {
     authorized: true,
     ...options,
   });
-  return { handler, host, api, deliveries };
+  return { handler, host, api, deliveries, receipts };
 }
 
 function imageMessage(msgid: string, mediaId: string): WechatKfMessage {

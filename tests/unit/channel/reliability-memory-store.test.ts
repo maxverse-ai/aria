@@ -20,6 +20,26 @@ describe('InMemoryChannelReliabilityStores', () => {
       intents: [first],
     });
     await expect(stores.answers.get(key)).resolves.toEqual({ key, createdAt: 1, intents: [first] });
+
+    const followerKey = reliabilityKeyFromEnvelope({
+      ...input,
+      sourceMessageId: 'message-b',
+    });
+    const batch = { key, createdAt: 3, keys: [key, followerKey] };
+    const createdBatch = await stores.batches.create(batch);
+    createdBatch.keys[1]!.sourceMessageId = 'mutated-by-caller';
+    await expect(stores.batches.create({ ...batch, createdAt: 4 })).resolves.toEqual(batch);
+    await expect(stores.batches.list()).resolves.toEqual([batch]);
+    await expect(stores.batches.findByMember(followerKey)).resolves.toEqual(batch);
+    await expect(stores.batches.create({
+      key: followerKey,
+      createdAt: 5,
+      keys: [followerKey, reliabilityKeyFromEnvelope({
+        ...input,
+        sourceMessageId: 'message-c',
+      })],
+    })).resolves.toEqual(batch);
+    await expect(stores.batches.list()).resolves.toEqual([batch]);
   });
 
   it('makes delivery and completion writes idempotent', async () => {

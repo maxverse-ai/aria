@@ -20,6 +20,19 @@ afterEach(() => {
 });
 
 describe('COT event mapping', () => {
+  it('honors hidden tools in detailed mode without suppressing assistant progress', async () => {
+    const client = new FakeCotClient();
+    const publisher = new CotPublisher({ client, chatId: 'group', originMessageId: 'origin', runId: 'hidden-tools', scope: 'group', inputPreview: 'task' });
+    await publisher.start();
+    await consumeCotEvents(iterate([
+      { type: 'tool_use', id: 'tool', name: 'exec', input: { command: 'private command' } },
+      { type: 'tool_result', id: 'tool', output: 'private tool result', isError: false },
+      { type: 'text', delta: 'working' }, { type: 'done', terminationReason: 'normal' },
+    ]), publisher, { detail: 'detailed', showToolCalls: false });
+    expect(JSON.stringify(client.events)).not.toContain('private');
+    expect(client.events.some(event => event.event_type.startsWith('TOOL_CALL'))).toBe(false);
+    expect(JSON.stringify(client.events)).toContain('working');
+  });
   it('preserves structured Feishu error details without logging an opaque body', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({
@@ -341,7 +354,8 @@ describe('COT event mapping', () => {
 
     expect(publisher.disabled).toBe(true);
     expect(publisher.degradedReason).toBe('field validation failed');
-    expect(client.completed).toEqual([]);
+    expect(client.completed).toEqual(['interrupted']);
+    expect(client.events).toEqual([]);
   });
 });
 

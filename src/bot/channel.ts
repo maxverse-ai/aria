@@ -1,9 +1,19 @@
+import { PersonalAgentGroups, type PersonalGroupPeers } from './personal-agent-group';
+import { fetchSpaceFreshnessHistory } from './space-freshness-history';
+import { COOPERATIVE_REPLY_INSTRUCTION, parseCooperativeReply } from '../conversation/cooperative-reply';
+import { LarkSdkCache } from './lark-sdk-cache';
+import { isSelfMentionPing, preserveMessageMentions } from './message-normalization';
+import { larkParticipantIdentity } from './participant-identity';
+import { spaceChannelContext } from './space-context';
+import type { SpaceOperationGate } from '../space/operation-gate';
+import { spaceLarkChannel } from '../outbound/space-lark-channel';
 import type {
   LarkChannel,
   LarkChannelOptions,
   NormalizedMessage,
 } from '@larksuite/channel';
 import { createLarkChannel } from '@larksuite/channel';
+import { ReadChatNames } from './read-chat-names';
 import { dirname, join } from 'node:path';
 import { capabilityFor, getEnginePlugin } from '../agent/plugin/registry';
 import { listEngineModels } from '../agent/model-catalog';
@@ -33,6 +43,18 @@ import {
 } from '../card/run-state';
 import { renderText } from '../card/text-renderer';
 import { tryHandleCommand, type Controls } from '../commands';
+import { FileTaskStore } from '../task/file-store';
+import {
+  isTaskCommandText,
+  TaskAdmissionService,
+  type TaskCommandRequest,
+} from '../task/admission';
+import type { TaskStore } from '../task/types';
+import { TaskRuntime } from '../task/runtime';
+import { parseTaskResult } from '../task/result-protocol';
+import type { TaskRunnerWakeInput } from '../task/runtime';
+import { TaskCoordinator } from '../task/coordinator';
+import { ConversationTaskRunner } from '../conversation/task-runner';
 import type { AppConfig } from '../config/schema';
 import {
   getAgentStopGraceMs,
@@ -85,6 +107,7 @@ import {
   messageTimestampMs,
   senderTypeOf,
   toConversationInput,
+  isAdmittedPeer,
   type ConversationInput,
 } from './conversation-input';
 import { ChatModeCache, type ChatMode } from './chat-mode-cache';
@@ -110,6 +133,13 @@ import { fetchQuotedContext, fetchTopicContext, type QuotedContext } from './quo
 import { addWorkingReaction, removeReaction } from './reaction';
 import { fetchKnownChats } from './lark-info';
 import type { AppPaths } from '../config/app-paths';
+import { BoundCotClient, completeInterrupted } from '../outbound/bound-cot';
+import { ProgressCard } from '../outbound/progress-card';
+import { interruptedProgressCard } from '../card/progress-card';
+import { resolvePresentation, presentationDescription } from '../outbound/presentation';
+import { checkProgress } from '../outbound/progress-policy';
+import { LarkSpaceIdentity } from './lark-space-identity';
+import type { ProgressReceipt } from '../space/resources';
 import {
   consumeCotEvents,
   CotClient,
@@ -135,10 +165,6 @@ const STREAM_TERMINAL_GRACE_MS = 3000;
 const SHUTDOWN_DRAIN_MS = 25_000;
 const REACTION_CLEANUP_GRACE_MS = 1000;
 const RUN_STATUS_SNAPSHOT_WAIT_MS = 1500;
-const FINAL_ONLY_AGENT_INSTRUCTION =
-  '当前部署启用了 final-only 出口策略：需要用户授权时，先执行 lark-cli auth login --no-wait，' +
-  '在本轮最终回复中给出 verification_url 并结束；用户完成授权后，下一轮再使用 device-code 继续。' +
-  '不要在同一轮阻塞等待授权。';
 
 function withOutboundPolicy<T>(
   policy: LoadedOutboundPolicy | undefined,
@@ -159,13 +185,6 @@ function withOutboundPolicy<T>(
     () => (policy ? policy.run(context, operation) : operation()),
   );
 }
-
-const BRIDGE_AGENT_INSTRUCTIONS = [
-  '你在 bridge 进程中运行，普通 lark-cli 会继承 LARK_CHANNEL=1 并进入 bridge-bound 模式。',
-  '不要 unset LARK_CHANNEL / LARK_CHANNEL_HOME / LARK_CHANNEL_PROFILE / LARKSUITE_CLI_CONFIG_DIR，也不要用 env -u LARK_CHANNEL 绕回本机普通配置。',
-  'Codex bridge 默认使用 danger-full-access 对齐 Claude bridge 的 bypassPermissions 行为，因此 lark-cli 应能像用户本机终端一样访问 keychain。',
-  '如果提示 lark-channel context detected but not bound，停止当前操作并请用户重启 bridge 或运行 bridge doctor/preflight；不要改用普通 profile，不要自行 bind，也不要直接读取 config.json 里的账号或密钥。',
-];
 
 // Lark SDK logs API errors at error level even when the caller catches them.
 // These specific codes are EXPECTED in our flow (wiki-node lookup that
@@ -215,7 +234,7 @@ export function shouldSuppressSdkErrorLog(args: unknown[]): boolean {
   return args.some(isSuppressedSdkMessage);
 }
 
-function buildQuietLogger(): {
+function buildQuietLogger(appId: string): {
   error: (...m: unknown[]) => void;
   warn: (...m: unknown[]) => void;
   info: (...m: unknown[]) => void;
@@ -229,7 +248,13 @@ function buildQuietLogger(): {
     },
     warn: (...args: unknown[]) => log.warn('sdk', 'warn', { args: stringifyArgs(args) }),
     info: (...args: unknown[]) => log.info('sdk', 'info', { args: stringifyArgs(args) }),
-    debug: () => {},
+    debug: (...args: unknown[]) => {
+      for (const value of args.flat(3)) {
+        if (typeof value !== 'string') continue;
+        const match = /^safety: drop (stale|duplicate|in-flight) message (\S+)$/.exec(value);
+        if (match) log.info('intake', 'sdk-drop', { appId, reason: match[1], messageId: match[2] });
+      }
+    },
     trace: () => {},
   };
 }
@@ -256,6 +281,10 @@ export interface BridgeChannel {
 }
 
 export interface StartChannelDeps {
+  personalGroupPeers?: PersonalGroupPeers;
+  cotClient?: Pick<CotClient, 'create' | 'update' | 'complete'>;
+  /** Explicit trusted composition; never inferred from a legacy mode flag. */
+  createSpaceGate?: (channel: LarkChannel) => Promise<SpaceOperationGate>;
   cfg: AppConfig;
   agent: AgentAdapter;
   sessions: SessionStore;
@@ -269,6 +298,10 @@ export interface StartChannelDeps {
   governanceAudit?: GovernanceAuditSink;
   /** Profile-owned runtime. Omit only for legacy standalone composition. */
   conversationRuntime?: ProfileConversationRuntimeOwner;
+  /** Optional durable task store; profile-local storage is used by default. */
+  taskStore?: TaskStore;
+  /** Optional supervisor-owned router for cross-profile task wakes. */
+  taskCoordinator?: TaskCoordinator;
 }
 
 export async function startChannel(deps: StartChannelDeps): Promise<BridgeChannel> {
@@ -289,6 +322,11 @@ export async function startChannel(deps: StartChannelDeps): Promise<BridgeChanne
     });
   const conversations = conversationRuntime.runtime;
   const { activeRuns, executor, processPool: pool } = conversations;
+  const taskStore = deps.taskStore ?? (deps.appPaths
+    ? new FileTaskStore(join(deps.appPaths.profileDir, 'tasks.json'))
+    : undefined);
+  let taskRuntime: TaskRuntime | undefined;
+  let unregisterTaskRuntime: (() => void) | undefined;
   // ChatModeCache stays per-bridge-instance — invalidated on restart along
   // with everything else. Topic-mode chats only need one chat.get() call ever.
   const chatModeCache = new ChatModeCache();
@@ -321,7 +359,7 @@ export async function startChannel(deps: StartChannelDeps): Promise<BridgeChanne
   // switch can inject a one-time "model changed" note into the next (resumed)
   // prompt. In-memory only: on restart the first run re-seeds silently.
   const lastRunModelByScope = new Map<string, string>();
-  const cotClient = new CotClient({
+  const cotClient = deps.cotClient ?? new CotClient({
     tenant: cfg.accounts.app.tenant,
     appId: cfg.accounts.app.id,
     appSecret,
@@ -331,7 +369,7 @@ export async function startChannel(deps: StartChannelDeps): Promise<BridgeChanne
   const cotStateFile = deps.appPaths
     ? join(deps.appPaths.profileDir, 'cot-active.json')
     : undefined;
-  if (cotStateFile) {
+  if (cotStateFile && !deps.createSpaceGate) {
     await sweepOrphanedCots(cotClient, cotStateFile).catch((err) =>
       log.warn('cot', 'orphan-sweep-error', { err: String(err) }),
     );
@@ -347,7 +385,10 @@ export async function startChannel(deps: StartChannelDeps): Promise<BridgeChanne
     log.warn('chat', 'mode-overridden-by-thread', fields);
   };
 
+  // One cache per logical SDK Channel; native WS reconnects reuse it.
+  const sdkCache = new LarkSdkCache();
   const opts: LarkChannelOptions = {
+    cache: sdkCache,
     appId: cfg.accounts.app.id,
     appSecret,
     domain:
@@ -355,7 +396,9 @@ export async function startChannel(deps: StartChannelDeps): Promise<BridgeChanne
         ? 'https://open.larksuite.com'
         : 'https://open.feishu.cn',
     source: 'aria',
-    logger: buildQuietLogger(),
+    logger: buildQuietLogger(cfg.accounts.app.id),
+    // Enable only selected diagnostics through the quiet logger above.
+    loggerLevel: 4,
     policy: {
       dmMode: 'open',
       requireMention: false,
@@ -369,6 +412,10 @@ export async function startChannel(deps: StartChannelDeps): Promise<BridgeChanne
     // Attach raw Feishu event body to normalized events so we can read fields
     // the normalizer drops (e.g. action.form_value on CardKit 2.0 form submits).
     includeRawEvent: true,
+    // Native Read and bridge_context consume the normalized sender snapshot.
+    // The SDK keeps this lookup cached per chat and degrades to an absent name
+    // when the roster cannot be resolved.
+    resolveSenderNames: true,
     outbound: {
       streamThrottleMs: 400,
     },
@@ -389,10 +436,30 @@ export async function startChannel(deps: StartChannelDeps): Promise<BridgeChanne
   };
 
   const rawChannel = createLarkChannel(opts);
-  const outboundGateway = createLarkOutboundGateway(rawChannel, {
+  const taskAdmission = taskStore
+    ? new TaskAdmissionService({
+      store: taskStore,
+      defaultTarget: () => {
+        const openId = rawChannel.botIdentity?.openId;
+        return openId ? { id: openId, role: 'agent' } : undefined;
+      },
+    })
+    : undefined;
+  const personalGroups = deps.personalGroupPeers && !deps.createSpaceGate
+    ? new PersonalAgentGroups({ channel: rawChannel, peers: deps.personalGroupPeers,
+      domain: cfg.accounts.app.tenant, profile: () => controls.profileConfig, controls })
+    : undefined;
+  if (personalGroups) controls.personalGroupStatus = (chatId) => personalGroups.status(chatId);
+  const readChatNames = new ReadChatNames(rawChannel);
+  const spaceGate = await deps.createSpaceGate?.(rawChannel);
+  if (spaceGate && !conversations.usesSpaces(spaceGate.services)) throw new Error('channel and execution host must share one space authority');
+  if (spaceGate && controls.profileConfig.meeting.enabled) throw new Error('team meetings require a verified resource audience adapter');
+  if (spaceGate) controls.spaceGate = spaceGate;
+  const messageRead = !spaceGate || deps.messageRead?.scope === 'space' ? deps.messageRead : undefined;
+  const outboundGateway = createLarkOutboundGateway(spaceGate ? spaceLarkChannel(rawChannel, spaceGate) : rawChannel, {
     profile: controls.profile,
     ...(deps.messageAudit ? { messageAudit: deps.messageAudit } : {}),
-    ...(deps.messageRead ? { messageRead: deps.messageRead } : {}),
+    ...(messageRead ? { messageRead } : {}),
   });
   const outboundPolicy = await loadOutboundPolicy(outboundGateway.channel, {
     profile: controls.profile,
@@ -404,6 +471,28 @@ export async function startChannel(deps: StartChannelDeps): Promise<BridgeChanne
   }
   const channel = outboundPolicy?.channel ?? outboundGateway.channel;
   controls.outboundPolicyStatus = () => outboundPolicyStatus(outboundPolicy);
+  controls.presentationStatus = () => resolvePresentation(controls.cfg, {
+    spaces: Boolean(spaceGate), policy: Boolean(outboundPolicy), checkedFormats: outboundPolicy?.progress?.formats,
+  });
+  const terminateProgress = async (receipt: ProgressReceipt): Promise<void> => {
+    if (!spaceGate) throw new Error('space progress cleanup requires its owner');
+    spaceGate.resources.assertProgressReceipt(receipt);
+    const content = receipt.format === 'cot' ? JSON.stringify({ reason: 'interrupted' }) : JSON.stringify(interruptedProgressCard());
+    await checkProgress(outboundPolicy?.progress, Boolean(outboundPolicy), {
+      format: receipt.format, phase: 'complete', content,
+      context: { source: 'system', senderOpenId: 'host-cleanup', sourceMessageId: receipt.messageId,
+        conversationId: 'owned-progress-cleanup', runId: receipt.messageId },
+    });
+    if (receipt.format === 'cot') await completeInterrupted(cotClient, receipt);
+    else await rawChannel.updateCardById(receipt.cardId!, interruptedProgressCard(),
+      await spaceGate.resources.nextProgressSequence(receipt));
+  };
+  if (spaceGate?.identity instanceof LarkSpaceIdentity) {
+    for (const receipt of spaceGate.resources.pendingProgress(spaceGate.identity.authorityId, spaceGate.identity.instanceId)) {
+      try { await terminateProgress(receipt); await spaceGate.resources.finishProgress(receipt); }
+      catch { log.warn('progress', 'recovery-pending'); }
+    }
+  }
   const outboundIdentity = outboundPolicy
     ? new OutboundIdentityObserver(channel, cfg.accounts.app.id)
     : undefined;
@@ -448,7 +537,7 @@ export async function startChannel(deps: StartChannelDeps): Promise<BridgeChanne
             threadId: firstMsg.threadId,
           });
         }
-        await withOutboundPolicy(
+        const runBatch = () => withOutboundPolicy(
           outboundPolicy,
           controls.profile,
           {
@@ -461,6 +550,9 @@ export async function startChannel(deps: StartChannelDeps): Promise<BridgeChanne
           () =>
             runAgentBatch({
               channel,
+              progressChannel: outboundGateway.channel,
+              outboundPolicy,
+              terminateProgress,
               conversations,
               media,
               inputs,
@@ -468,15 +560,22 @@ export async function startChannel(deps: StartChannelDeps): Promise<BridgeChanne
               cotClient,
               cotStateFile,
               callbackAuth,
-              messageRead: deps.messageRead,
+              messageRead,
               activePolicyFingerprints,
               lastRunModelByScope,
               scope,
               mode,
               outboundFinalOnly: outboundPolicy?.streamStrategy === 'final-only',
               finalReplyFreshness,
+              personalGroups,
             }),
         );
+        if (spaceGate) {
+          const operation = firstInput.spaceOperation;
+          if (!operation || inputs.some((input) => !input.spaceOperation || input.spaceOperation.bindingRef !== operation.bindingRef || input.spaceOperation.executionScope !== scope)) throw new Error('queued inputs changed space binding');
+          await spaceGate.batch(inputs.map(input => input.spaceOperation!));
+          await spaceGate.run(operation, runBatch);
+        } else await runBatch();
       } catch (err) {
         log.fail('flush', err);
       } finally {
@@ -489,13 +588,15 @@ export async function startChannel(deps: StartChannelDeps): Promise<BridgeChanne
     channel,
     chatTopology,
     pending,
+    ...(spaceGate ? { fetchHistory: (input) => fetchSpaceFreshnessHistory(spaceGate, { ...input, channel: rawChannel }) } : {}),
   });
   const activityTracker = new RuntimeActivityTracker(
     controls.profile,
     `${process.pid}:${controls.processId}`,
     [
-      { snapshot: () => activeRuns.activitySnapshot() },
+      { snapshot: () => conversationRuntime.runtime.activitySnapshot() },
       { snapshot: () => pending.activitySnapshot() },
+      { snapshot: () => ({ activeRuns: spaceGate?.services.runTools.activeWork?.() ?? 0 }) },
       {
         snapshot: () => {
           const current = pool.snapshot();
@@ -514,14 +615,16 @@ export async function startChannel(deps: StartChannelDeps): Promise<BridgeChanne
   // Counter for stdout reconnect escalation; reset on `reconnected`.
   let consecutiveReconnects = 0;
 
-  channel.on({
-    message: async (receivedMessage) => {
-      const conversation = await resolveMessageConversation(
+  const receiveMessage = async (receivedMessage: NormalizedMessage): Promise<void> => {
+      let conversation = await resolveMessageConversation(
         channel,
         receivedMessage,
         chatModeCache,
       );
+      const scoped = spaceGate ? await spaceChannelContext(controls, spaceGate) : undefined;
+      if (scoped) conversation = { ...conversation, key: scoped.operation.executionScope };
       const msg = conversation.message;
+      if (scoped) await spaceGate!.resources.record(scoped.operation.context, 'message', msg.messageId);
       if (conversation.threadIdBackfilled && conversation.threadId) {
         log.info('intake', 'thread-id-backfilled', {
           chatId: msg.chatId,
@@ -537,7 +640,8 @@ export async function startChannel(deps: StartChannelDeps): Promise<BridgeChanne
         });
       }
       outboundIdentity?.observeMessage(msg);
-      const occurredAt = new Date().toISOString();
+      const occurredAt = new Date(Number.isFinite(msg.createTime) && msg.createTime > 0 ? msg.createTime : Date.now()).toISOString();
+      const conversationName = messageRead && conversation.kind !== 'p2p' ? await readChatNames.get(msg.chatId) : undefined;
       await deps.messageAudit?.record({
         eventId: `inbound:${msg.messageId}`,
         direction: 'inbound',
@@ -547,7 +651,7 @@ export async function startChannel(deps: StartChannelDeps): Promise<BridgeChanne
         actorSourceId: msg.senderId,
         actorKind: senderTypeOf(msg) ?? 'unknown',
       }).catch((err) => log.warn('message', 'audit-write-failed', { err: String(err) }));
-      await deps.messageRead?.observe({
+      await messageRead?.observe({
         eventId: `inbound:${msg.messageId}`,
         sourceMessageId: msg.messageId,
         direction: 'inbound',
@@ -556,6 +660,8 @@ export async function startChannel(deps: StartChannelDeps): Promise<BridgeChanne
         occurredAt,
         actorSourceId: msg.senderId,
         actorKind: senderTypeOf(msg) ?? 'unknown',
+        ...(msg.senderName ? { actorDisplayName: msg.senderName } : {}),
+        ...(conversationName ? { conversationName } : {}),
         content: { format: 'plain-text', text: msg.content },
       }).catch((err) => log.warn('message', 'projection-failed', { err: String(err) }));
       await withOutboundPolicy(
@@ -578,28 +684,46 @@ export async function startChannel(deps: StartChannelDeps): Promise<BridgeChanne
               channel,
               conversations,
               agent,
-              sessions,
-              sessionCatalog,
-              workspaces,
+              sessions: scoped?.sessions ?? sessions,
+              sessionCatalog: scoped?.sessionCatalog ?? sessionCatalog,
+              workspaces: scoped?.workspaces ?? workspaces,
               activeRuns,
               pending,
               conversation,
-              controls,
+              controls: scoped?.controls ?? controls,
               chatTopology,
+              personalGroups,
               executor,
               pool,
               governanceAudit: deps.governanceAudit,
               deferOutbound: outboundPolicy?.defer,
               outboundFinalOnly: outboundPolicy?.streamStrategy === 'final-only',
               outboundControlChannel: outboundPolicy?.controlChannel,
+              taskAdmission,
+              taskRuntime,
+              taskCoordinator: deps.taskCoordinator,
             }),
           ),
       ).catch((err) => log.fail('intake', err));
-    },
+
+  };
+
+  channel.on({
+    message: (receivedMessage) => conversationRuntime.runtime.ingress.run(async () => {
+      receivedMessage = await preserveMessageMentions(receivedMessage);
+      if (!spaceGate) return receiveMessage(receivedMessage);
+      const resolved = await resolveMessageConversation(rawChannel, receivedMessage, chatModeCache);
+      if (resolved.kind === 'topic' && !resolved.threadId) throw new Error('team message topic is unavailable');
+      const kind = senderTypeOf(resolved.message);
+      if (!kind) throw new Error('authenticated sender kind is required');
+      const operation = await spaceGate.enter({ conversationId: resolved.message.chatId, senderId: resolved.message.senderId,
+        senderKind: kind === 'bot' ? 'agent' : 'user', kind: resolved.message.chatType === 'p2p' ? 'direct' : 'group' }, resolved.key);
+      return spaceGate.run(operation, () => receiveMessage(resolved.message));
+    }),
     reject: (evt) => {
       log.info('intake', 'reject', { chatId: evt.chatId, reason: evt.reason });
     },
-    cardAction: async (evt) => {
+    cardAction: (evt) => conversationRuntime.runtime.ingress.run(async () => {
       await withOutboundPolicy(
         outboundPolicy,
         controls.profile,
@@ -627,14 +751,19 @@ export async function startChannel(deps: StartChannelDeps): Promise<BridgeChanne
               chatModeCache,
               callbackAuth,
               callbackPolicyFingerprintForScope: (scope) => activePolicyFingerprints.get(scope),
-              deferOutbound: outboundPolicy?.defer,
+              deferOutbound: (operation) => {
+                const completion = conversationRuntime.runtime.ingress.continue(operation);
+                if (outboundPolicy?.defer) outboundPolicy.defer(() => completion);
+                else void completion.catch((err) => log.fail('cardAction', err));
+              },
               outboundFinalOnly: outboundPolicy?.streamStrategy === 'final-only',
               outboundControlChannel: outboundPolicy?.controlChannel,
             });
           }),
       ).catch((err) => log.fail('cardAction', err));
-    },
-    comment: async (evt) => {
+    }),
+    comment: (evt) => conversationRuntime.runtime.ingress.run(async () => {
+      if (spaceGate) { log.warn('comment', 'space-resource-audience-unavailable'); return; }
       await withOutboundPolicy(
         outboundPolicy,
         controls.profile,
@@ -661,7 +790,7 @@ export async function startChannel(deps: StartChannelDeps): Promise<BridgeChanne
             }).catch((err) => log.fail('comment', err));
           }),
       ).catch((err) => log.fail('comment', err));
-    },
+    }),
     reconnecting: () => {
       consecutiveReconnects++;
       log.warn('ws', 'reconnecting', { consecutive: consecutiveReconnects });
@@ -738,25 +867,83 @@ export async function startChannel(deps: StartChannelDeps): Promise<BridgeChanne
     controls.meeting = meetingManager;
   }
 
-  await channel.connect();
+  try {
+    await channel.connect();
+  } catch (error) {
+    sdkCache.close();
+    throw error;
+  }
+  const taskParticipantId = rawChannel.botIdentity?.openId;
+  if (taskStore && taskParticipantId && !spaceGate) {
+    const participant = { id: taskParticipantId, role: 'agent' as const };
+    const capability = capabilityFor(controls.profileConfig.agentKind, controls.profileConfig);
+    const taskRunner = new ConversationTaskRunner({
+      runtime: conversations,
+      createStartInput: (input: TaskRunnerWakeInput) => ({
+        identity: larkParticipantIdentity(controls.cfg.accounts.app.id, channel.botIdentity),
+        scopeId: `task:${input.task.taskId}`,
+        scope: {
+          source: 'im',
+          chatId: input.task.scope.chatId,
+          actorId: taskParticipantId,
+          actorKind: 'agent',
+          ...(input.task.scope.threadId ? { threadId: input.task.scope.threadId } : {}),
+        },
+        prompt: input.prompt,
+        attachments: [],
+        access: { ok: true, reason: 'allowed-team' },
+        capability,
+        profileConfig: controls.profileConfig,
+        now: Date.now(),
+        stopGraceMs: getAgentStopGraceMs(controls.cfg),
+        observability: {
+          profile: controls.profile,
+          agent: capability.agentId,
+          source: 'task',
+          stage: 'task-wake',
+        },
+      }),
+      onStarted: (input, result) => {
+        const subscribe = result.execution.subscribe
+          ? () => result.execution.subscribe!()
+          : undefined;
+        if (!subscribe || !taskRuntime) return;
+        void consumeTaskExecution({
+          channel,
+          taskRuntime,
+          taskInput: input,
+          subscribe,
+          coordinator: deps.taskCoordinator,
+        }).catch((error) => log.warn('task', 'execution-consume-failed', {
+          taskId: input.task.taskId,
+          error: error instanceof Error ? error.message : String(error),
+        }));
+      },
+    });
+    taskRuntime = new TaskRuntime({ store: taskStore, participant, runner: taskRunner });
+    if (deps.taskCoordinator) {
+      unregisterTaskRuntime = deps.taskCoordinator.register(participant, taskRuntime);
+      void deps.taskCoordinator.dispatchPending().catch((error) => log.warn('task', 'dispatch-pending-failed', {
+        error: error instanceof Error ? error.message : String(error),
+      }));
+    } else {
+      void taskRuntime.dispatchPending().catch((error) => log.warn('task', 'dispatch-pending-failed', {
+        error: error instanceof Error ? error.message : String(error),
+      }));
+    }
+  }
   const ownerRefresh = createOwnerRefreshController({
     controls,
     source: channel,
     appId: cfg.accounts.app.id,
   });
   await ownerRefresh.start();
-  const knownChatsRefresh = startKnownChatsRefreshTimer(channel, controls);
+  const unregisterPeer = rawChannel.botIdentity?.openId
+    ? deps.personalGroupPeers?.register(cfg.accounts.app.tenant, rawChannel.botIdentity.openId)
+    : undefined;
+  const knownChatsRefresh = spaceGate ? { stop() {} } : startKnownChatsRefreshTimer(channel, controls);
 
   const identity = channel.botIdentity;
-  // Late-bind the bot's own IM identity into the agent adapter so the system
-  // prompt can state "this open_id is you" with the real value. Covers both
-  // initial start and credential-swap reconnects (both go through here).
-  if (identity?.openId) {
-    agent.setBotIdentity?.({
-      openId: identity.openId,
-      ...(identity.name ? { name: identity.name } : {}),
-    });
-  }
   log.info('ws', 'connected', {
     bot: identity?.name ?? 'unknown',
     openId: identity?.openId ?? '-',
@@ -781,11 +968,15 @@ export async function startChannel(deps: StartChannelDeps): Promise<BridgeChanne
 
   return {
     channel,
-    activitySnapshot: () => activityTracker.snapshot(),
+    activitySnapshot: () => ({ ...activityTracker.snapshot(), presentation: controls.presentationStatus?.() }),
     quiesceAgentRuns: (reason: string) => conversationRuntime.quiesce(reason),
     disconnect: async () => {
+      unregisterPeer?.();
+      delete controls.personalGroupStatus;
       ownerRefresh.stop();
       knownChatsRefresh.stop();
+      unregisterTaskRuntime?.();
+      unregisterTaskRuntime = undefined;
       keepalive.stop();
       // Stop meeting timers but stay in the meetings: /reconnect tears the
       // channel down and rebuilds it, and auto-leaving every meeting on a
@@ -816,6 +1007,7 @@ export async function startChannel(deps: StartChannelDeps): Promise<BridgeChanne
         try {
           await channel.disconnect();
         } finally {
+          sdkCache.close();
           await outboundPolicy?.close();
         }
       };
@@ -836,6 +1028,50 @@ export async function startChannel(deps: StartChannelDeps): Promise<BridgeChanne
       }
     },
   };
+}
+
+async function consumeTaskExecution(input: {
+  channel: LarkChannel;
+  taskRuntime: TaskRuntime;
+  taskInput: TaskRunnerWakeInput;
+  subscribe: () => AsyncIterable<AgentEvent>;
+  coordinator?: TaskCoordinator;
+}): Promise<void> {
+  const leaseTimer = setInterval(() => {
+    void input.taskRuntime.renewClaim(input.taskInput.claim).catch(() => undefined);
+  }, 30_000);
+  let final = '';
+  try {
+    for await (const event of input.subscribe()) {
+      if (event.type === 'final_text') final = event.content;
+    }
+  } finally {
+    clearInterval(leaseTimer);
+  }
+
+  const completionInput = {
+    taskId: input.taskInput.task.taskId,
+    claim: input.taskInput.claim,
+    result: final,
+  } as const;
+  const completion = input.coordinator
+    ? await input.coordinator.complete(input.taskInput.claim.owner.id, completionInput)
+    : await input.taskRuntime.complete(completionInput);
+  const parsed = parseTaskResult(final);
+  if (parsed.kind === 'result' && completion.kind === 'updated') {
+    const task = completion.result.task;
+    const summary = parsed.result.summary
+      ?? (task.status === 'done' ? '任务已完成。' : task.status === 'blocked' ? '任务已阻塞，等待人工处理。' : undefined);
+    if (summary) {
+      await input.channel.send(task.scope.chatId, { text: summary }, {
+        replyTo: task.scope.rootMessageId,
+        ...(task.scope.threadId ? { replyInThread: true } : {}),
+      }).catch((error) => log.warn('task', 'summary-send-failed', {
+        taskId: task.taskId,
+        error: error instanceof Error ? error.message : String(error),
+      }));
+    }
+  }
 }
 
 function startKnownChatsRefreshTimer(
@@ -865,7 +1101,7 @@ async function sendNonAllowedGroupHint(
 ): Promise<void> {
   const text =
     '当前群尚未加入响应列表，所以 bot 不会处理消息。\n' +
-    'Bot owner/管理员可在本群发 /invite group 加入白名单。';
+    '符合条件的个人协作群会自动启用；owner／管理员可用 /status 查看条件，或用 /invite group 手动启用。';
   try {
     await channel.send(chatId, { text }, { replyTo: replyToMessageId });
   } catch {
@@ -919,12 +1155,16 @@ interface IntakeDeps {
   conversation: ResolvedMessageConversation;
   controls: Controls;
   chatTopology: ChatTopologyResolver;
+  personalGroups?: PersonalAgentGroups;
   executor: RunExecutor;
   pool: ProcessPool;
   governanceAudit?: GovernanceAuditSink;
   deferOutbound?: LoadedOutboundPolicy['defer'];
   outboundFinalOnly?: boolean;
   outboundControlChannel?: LarkChannel;
+  taskAdmission?: TaskAdmissionService;
+  taskRuntime?: TaskRuntime;
+  taskCoordinator?: TaskCoordinator;
 }
 
 type LogThreadModeOverride = (input: {
@@ -951,6 +1191,9 @@ async function intakeMessage(deps: IntakeDeps): Promise<void> {
     deferOutbound,
     outboundFinalOnly,
     outboundControlChannel,
+    taskAdmission,
+    taskRuntime,
+    taskCoordinator,
   } = deps;
   const {
     message: msg,
@@ -981,8 +1224,11 @@ async function intakeMessage(deps: IntakeDeps): Promise<void> {
     resources: msg.resources.length,
   });
 
-  const accessDecision =
-    msg.chatType === 'p2p'
+  const personalGroup = await deps.personalGroups?.admit(msg);
+  if (personalGroup) log.info('intake', 'personal-group-admitted', { scope, agents: personalGroup.agentIds.length });
+  const accessDecision = personalGroup
+    ? { ok: true as const, reason: 'personal-agent-group' as const }
+    : msg.chatType === 'p2p'
       ? canUseDm(controls.profileConfig, controls, msg.senderId)
       : canUseGroup(controls.profileConfig, controls, msg.chatId, msg.senderId);
   if (!accessDecision.ok) {
@@ -1036,7 +1282,8 @@ async function intakeMessage(deps: IntakeDeps): Promise<void> {
         err: err instanceof Error ? err.message : String(err),
       });
     }
-    if (shouldRequireMentionForGroup(mentionPolicy, addressing.addressedToAgent)) {
+    if (shouldRequireMentionForGroup(mentionPolicy, addressing.addressedToAgent)
+      && !isTaskCommandText(msg.content)) {
       log.info('intake', 'skip-no-mention', { scope, chatType: msg.chatType });
       return;
     }
@@ -1059,7 +1306,9 @@ async function intakeMessage(deps: IntakeDeps): Promise<void> {
     return;
   }
 
-  const conversationInput = toConversationInput(emsg, addressing);
+  const conversationInput = { ...toConversationInput(emsg, addressing),
+    ...(personalGroup ? { personalGroup } : {}),
+    ...(controls.spaceGate ? { spaceOperation: controls.spaceGate.active() } : {}) };
 
   let newTaskContent: string | undefined;
   const handled = await tryHandleCommand({
@@ -1090,6 +1339,29 @@ async function intakeMessage(deps: IntakeDeps): Promise<void> {
     onNewTask: (content) => {
       newTaskContent = content;
     },
+    onTask: taskAdmission
+      ? async (request: TaskCommandRequest) => {
+        if (controls.spaceGate) throw new Error('团队空间任务路由尚未启用');
+        const botOpenId = channel.botIdentity?.openId;
+        if (!taskRuntime) throw new Error('任务运行时尚未就绪，请稍后重试');
+        const created = await taskAdmission.create({
+          ...request,
+          scope: {
+            providerId: 'lark',
+            tenantKey: controls.cfg.accounts.app.tenant,
+            chatId: msg.chatId,
+            ...(msg.threadId ? { threadId: msg.threadId } : {}),
+            rootMessageId: msg.messageId,
+          },
+          ...(botOpenId && !request.target && request.participants.length === 0
+            ? { target: { id: botOpenId, role: 'agent' } }
+            : {}),
+        });
+        if (taskCoordinator) void taskCoordinator.wake(created.task.taskId);
+        else void taskRuntime.wake(created.task.taskId);
+        return { taskId: created.task.taskId };
+      }
+      : undefined,
   });
   if (handled) {
     const dropped = pending.cancel(scope);
@@ -1111,6 +1383,9 @@ async function intakeMessage(deps: IntakeDeps): Promise<void> {
 
   const size = pending.push(scope, conversationInput);
   log.info('intake', 'queued', { scope, queueSize: size, debounceMs: DEBOUNCE_MS });
+  // Keep dynamic audience proofs with their queued turn; do not inject into an
+  // existing run that may have a different publication boundary.
+  if (personalGroup) return;
   await tryMergeLiveFollowup({
     conversations,
     activeRuns,
@@ -1135,8 +1410,9 @@ async function tryMergeLiveFollowup(input: {
   const decision = decideLiveFollowup({
     ...(activeRun.steering ? { support: activeRun.steering } : {}),
     addressedToAgent: input.input.addressing.addressedToAgent,
+    admittedPeer: isAdmittedPeer(input.input),
     ...(input.input.senderType ? { senderType: input.input.senderType } : {}),
-    text: message.content,
+    text: isSelfMentionPing(message) ? '' : message.content,
     attachmentCount: message.resources.length,
     ...(message.rawContentType ? { rawContentType: message.rawContentType } : {}),
   });
@@ -1162,7 +1438,7 @@ async function tryMergeLiveFollowup(input: {
     requestId,
     inputId: message.messageId,
     prompt: buildLiveFollowupPrompt(message, input.botIdentity),
-  });
+  }, input.input.spaceOperation?.context);
   if (result.kind === 'accepted') {
     input.pending.acknowledge(claim);
     log.info('followup', 'accepted', { scope: input.scope, runId: result.runId });
@@ -1181,11 +1457,14 @@ async function tryMergeLiveFollowup(input: {
 
 interface RunBatchDeps {
   channel: LarkChannel;
+  progressChannel: LarkChannel;
+  outboundPolicy?: LoadedOutboundPolicy;
+  terminateProgress(receipt: ProgressReceipt): Promise<void>;
   conversations: ConversationRuntime;
   media: MediaCache;
   inputs: ConversationInput[];
   controls: Controls;
-  cotClient: CotClient;
+  cotClient: Pick<CotClient, 'create' | 'update' | 'complete'>;
   cotStateFile?: string;
   callbackAuth?: CallbackAuth;
   messageRead?: MessageResourceSink;
@@ -1195,9 +1474,24 @@ interface RunBatchDeps {
   mode: ChatMode;
   outboundFinalOnly?: boolean;
   finalReplyFreshness: FinalReplyFreshness;
+  personalGroups?: PersonalAgentGroups;
 }
 
 async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
+  const admissions = deps.inputs.flatMap(input => input.personalGroup ? [input.personalGroup] : []);
+  const refreshPersonalGroup = async () => {
+    for (const proof of admissions) {
+      if (!deps.personalGroups) throw new Error('personal group authority unavailable');
+      await deps.personalGroups.refresh(proof);
+    }
+    if (admissions.some(proof => proof.audienceKey !== admissions[0]?.audienceKey)) {
+      throw new Error('queued personal group audience changed');
+    }
+  };
+  await refreshPersonalGroup();
+  const gate = deps.controls.spaceGate;
+  const scoped = gate ? await spaceChannelContext(deps.controls, gate) : undefined;
+  if (scoped) deps = { ...deps, controls: scoped.controls };
   const {
     channel,
     conversations,
@@ -1223,11 +1517,19 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
 
   const chatId = firstMsg.chatId;
   const threadId = firstMsg.threadId;
+  const cooperative = admissions.length > 0 || firstMsg.chatType === 'group' && inputs.some(input =>
+    isAdmittedPeer(input) || (input.senderType === 'user' && input.addressing.addressedToAgent
+      && new Set(input.message.mentions.map(m => m.openId).filter(Boolean)).size > 1));
 
   const resourceItems = batch.flatMap((m) =>
     m.resources.map((r) => ({ messageId: m.messageId, resource: r })),
   );
-  const attachments = await media.resolve(resourceItems, controls.profileConfig.attachments);
+  let attachments = await media.resolve(resourceItems, controls.profileConfig.attachments);
+  if (gate) {
+    const staged = await gate.services.admitAttachments(gate.active().context, attachments.map(toPolicyAttachment));
+    attachments = attachments.map((attachment, index) => ({ ...attachment,
+      ...(staged[index]?.path ? { path: staged[index]!.path!, absPath: staged[index]!.path! } : {}) }));
+  }
   if (attachments.length > 0) {
     log.info('media', 'resolved', { count: attachments.length });
     for (const attachment of attachments) {
@@ -1255,6 +1557,7 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
   ];
   const quotes: QuotedContext[] = [];
   for (const targetId of quoteTargets) {
+    if (gate && !gate.resources.owns(gate.active().context, 'message', targetId)) continue;
     const q = await fetchQuotedContext(channel, targetId);
     if (q) {
       quotes.push(q);
@@ -1273,7 +1576,7 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
   // the user is pointing at. An already-engaged topic keeps that history in its
   // resumed session, so we skip the fetch there.
   let topicContext: QuotedContext[] = [];
-  if (mode === 'topic' && threadId && !conversations.hasStoredSession(scope)) {
+  if (!gate && mode === 'topic' && threadId && !conversations.hasStoredSession(scope)) {
     const exclude = new Set([...batchIds, ...quoteTargets]);
     topicContext = await fetchTopicContext(channel, threadId, {
       maxMessages: 40,
@@ -1314,6 +1617,7 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
       profileId: controls.profile,
       runtimeGeneration: controls.engineGeneration?.(),
       runtimeModels: controls.engineModels,
+      ...(controls.spaceGate ? { runtimeOnly: true, cacheScope: controls.spaceGate.services.authorization.inspect(controls.spaceGate.active().context).binding.spaceId } : {}),
     },
   ).catch((err) => {
     log.warn('reasoning', 'model-capability-unavailable', {
@@ -1329,13 +1633,13 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
   lastRunModelByScope.set(scope, modelSelection);
   const freshnessHandoff = finalReplyFreshness.handoff(scope);
   const extraInstructions = [
+    ...(cooperative ? [COOPERATIVE_REPLY_INSTRUCTION] : []),
     ...(modelSwitched
       ? [
         `用户刚把本会话使用的模型切换为「${modelLabel(agentKind, modelPref)}」。` +
           '之前的对话里可能提到别的模型,请以当前模型为准;若被问到你用的是什么模型,据此回答。',
         ]
       : []),
-    ...(outboundFinalOnly ? [FINAL_ONLY_AGENT_INSTRUCTION] : []),
     ...(freshnessHandoff ? [freshnessHandoffInstruction(freshnessHandoff)] : []),
   ];
 
@@ -1370,14 +1674,16 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
     replyInThread: sendOpts.replyInThread === true,
   });
 
-  const accessDecision =
-    firstMsg.chatType === 'p2p'
+  const accessDecision = inputs[0]?.personalGroup
+    ? { ok: true as const, reason: 'personal-agent-group' as const }
+    : firstMsg.chatType === 'p2p'
       ? canUseDm(controls.profileConfig, controls, firstMsg.senderId)
       : canUseGroup(controls.profileConfig, controls, firstMsg.chatId, firstMsg.senderId);
   const scopeContext: ScopeContext = {
     source: 'im',
     chatId,
     actorId: firstMsg.senderId,
+    actorKind: senderTypeOf(firstMsg) === 'bot' ? 'agent' : 'user',
     ...(threadId ? { threadId } : {}),
   };
   const capability = capabilityFor(
@@ -1421,7 +1727,10 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
       });
     }
   }
+  await refreshPersonalGroup();
   const flow = await conversations.start({
+    identity: larkParticipantIdentity(controls.cfg.accounts.app.id, channel.botIdentity),
+    ...(gate ? { spaceContext: gate.active().context } : {}),
     scopeId: scope,
     scope: scopeContext,
     prompt,
@@ -1534,7 +1843,7 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
 
   // Resolve idle-timeout for this run: scope override (on SessionEntry) wins
   // over global default (preferences). 0 / undefined = no watchdog.
-  const scopeOverride = conversations.idleTimeoutMinutes(scope);
+  const scopeOverride = scoped ? scoped.sessions.getIdleTimeoutMinutes(scope) : conversations.idleTimeoutMinutes(scope);
   const idleTimeoutMs =
     scopeOverride !== undefined
       ? scopeOverride > 0
@@ -1547,8 +1856,15 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
 
   const replyMode = getMessageReplyMode(controls.cfg);
   log.info('flush', 'reply-mode', { mode: replyMode });
-  const cotMessages = getCotMessages(controls.cfg);
+  const presentation = controls.presentationStatus?.() ?? resolvePresentation(controls.cfg,
+    { spaces: Boolean(gate), policy: Boolean(deps.outboundPolicy), checkedFormats: deps.outboundPolicy?.progress?.formats });
+  const cotMessages = presentation.effective.cotMessages;
   const cotEnabled = cotMessages !== 'off';
+  const progressContext: OutboundPolicyContext = { source: 'im', conversationId: scope,
+    sourceMessageId: firstMsg.messageId, senderOpenId: firstMsg.senderId, runId: `im:${firstMsg.messageId}` };
+  const boundCot = gate && cotEnabled ? new BoundCotClient({ client: cotClient, gate, operation: gate.active(),
+    policy: deps.outboundPolicy?.progress, policyRequired: Boolean(deps.outboundPolicy), context: progressContext }) : undefined;
+  let progressCard: ProgressCard | undefined;
 
   // Re-read prefs on every flush so toggling /config mid-stream takes
   // effect immediately. Cheap object lookups, no allocation when on.
@@ -1573,15 +1889,19 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
       }
     : { runStatusItems };
   const finalReplyCommit = new FinalReplyCommit({
+    beforePublish: refreshPersonalGroup,
     conversations,
     freshness: finalReplyFreshness,
     context: {
       scope,
       runId: execution.runId,
+      publicationKey: `${controls.cfg.accounts.app.tenant}:${chatId}:${threadId ?? ''}`,
+      cooperative,
+      requireCompleteHistory: cooperative,
       chatId,
       chatType: firstMsg.chatType,
       ...(threadId ? { threadId } : {}),
-      canAcceptRemote: (message) => (
+      canAcceptRemote: (message) => admissions.some(proof => deps.personalGroups?.accepts(proof, message)) || (
         message.chatType === 'p2p'
           ? canUseDm(controls.profileConfig, controls, message.senderId)
           : canUseGroup(
@@ -1605,9 +1925,17 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
 
   let replyFailed = false;
   try {
+    if (!admissions.length && presentation.reasons.length) await channel.send(chatId, { text: presentationDescription(presentation) }, sendOpts);
+    if (cooperative) {
+      const finalState = await processAgentStream(handle, eventStream, scope, idleTimeoutMs,
+        recordSession, async () => {}, runInitialState);
+      await sendFinalReply({ channel, chatId, scope, state: finalAnswerOnlyState(filterForPrefs(finalState)),
+        replyMode, sendOpts, cardRenderOptions, commit: finalReplyCommit });
+      return;
+    }
     if (cotEnabled) {
       const cotPublisher = new CotPublisher({
-        client: cotClient,
+        client: boundCot ?? cotClient,
         chatId,
         // The CoT bubble follows this origin message's thread. In a topic the
         // triggering message is itself in-topic, so the bubble lands in the
@@ -1617,12 +1945,13 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
         runId: execution.runId,
         scope,
         inputPreview: lastMsg.content,
-        stateFile: cotStateFile,
+        stateFile: gate ? undefined : cotStateFile,
       });
       await cotPublisher.start();
       if (!cotPublisher.disabled) {
         const cotDone = consumeCotEvents(execution.subscribe(), cotPublisher, {
           detail: cotMessages,
+          showToolCalls: getShowToolCalls(controls.cfg),
         });
         const finalState = await processAgentStream(
           handle,
@@ -1656,9 +1985,42 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
         return;
       }
       log.warn('cot', 'fallback-existing-reply', { reason: 'create-disabled' });
+      await sendCotDegradedNotice({ channel, chatId, scope, sendOpts, reason: 'create-disabled' });
     }
 
-    if (outboundFinalOnly && (replyMode === 'card' || replyMode === 'markdown')) {
+    if (gate && presentation.effective.progress === 'updates') {
+      progressCard = new ProgressCard({ channel: deps.progressChannel, gate, operation: gate.active(),
+        context: progressContext, policy: deps.outboundPolicy?.progress, policyRequired: Boolean(deps.outboundPolicy),
+        sendOptions: sendOpts, terminate: deps.terminateProgress });
+      let progressFailed = false;
+      const failProgress = async (): Promise<void> => {
+        await gate.refresh(scoped!.operation);
+        progressFailed = true;
+        await progressCard!.close().catch(() => log.warn('progress', 'card-cleanup-pending'));
+      };
+      const finalState = await processAgentStream(handle, eventStream, scope, idleTimeoutMs, recordSession,
+        async (state) => {
+          if (!progressFailed && (progressCard!.opened() || shouldOpenProgressStream(filterForPrefs(state)))) {
+            try { progressCard!.queue(renderCard(filterForPrefs(state), cardRenderOptions)); }
+            catch { await failProgress(); }
+          }
+        }, runInitialState);
+      let artifact: { messageId: string; cardId: string } | undefined;
+      if (!progressFailed) {
+        try { artifact = await progressCard.finish(); } catch { await failProgress(); }
+      }
+      if (progressFailed) await channel.send(chatId, { text: '过程消息更新失败，已停止展示过程；最终答案仍会继续发送。' }, sendOpts);
+      if (capability.finalReply !== 'separate' && artifact) {
+        await finalReplyCommit.reconcileExisting(renderText(filterForPrefs(finalState), { includeRunStatus: false }),
+          artifact);
+      } else {
+        await sendFinalReply({ channel, chatId, scope,
+          state: capability.finalReply === 'separate'
+            ? finalReplyState({ opened: () => Boolean(artifact), abandoned: () => progressFailed }, filterForPrefs(finalState))
+            : filterForPrefs(finalState),
+          replyMode, sendOpts, cardRenderOptions, commit: finalReplyCommit });
+      }
+    } else if ((outboundFinalOnly || gate) && (replyMode === 'card' || replyMode === 'markdown')) {
       const finalState = await processAgentStream(
         handle,
         eventStream,
@@ -1872,6 +2234,21 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
     replyFailed = true;
     log.fail('stream', err);
   } finally {
+    await boundCot?.close().catch(() => log.warn('progress', 'cot-cleanup-pending'));
+    await progressCard?.close().catch(() => log.warn('progress', 'card-cleanup-pending'));
+    if (gate && scoped) {
+      try {
+        const current = await gate.enter(scoped.operation.request, scoped.operation.scopeRef);
+        if (current.bindingRef !== scoped.operation.bindingRef) {
+          await gate.run(current, () => withOutboundPolicy(deps.outboundPolicy, controls.profile, {
+            source: 'im', conversationId: current.executionScope, senderOpenId: current.request.senderId,
+            sourceMessageId: lastMsg.messageId, runId: execution.runId,
+          }, () => channel.send(chatId, {
+            text: '会话成员或访问权限已变化，本次任务已中止。请重新发起群任务，原发起人可私聊使用 /resume 继续。',
+          })));
+        }
+      } catch { /* No current audience proof means no notification either. */ }
+    }
     await conversations.endTurn(scope, execution.runId);
     const replyFields = {
       ...observabilityFields(),
@@ -2002,7 +2379,7 @@ function hasDeliverableContent(state: RunState): boolean {
  *
  * Terminal notices are dropped for the same reason — the stream rendered them.
  */
-function finalReplyState(progress: LazyProgressStream, state: RunState): RunState {
+function finalReplyState(progress: Pick<LazyProgressStream, 'opened' | 'abandoned'>, state: RunState): RunState {
   if (!progress.opened() || progress.abandoned()) return finalAnswerOnlyState(state);
   return {
     ...state,
@@ -2104,6 +2481,33 @@ interface FinalReplyInput {
 
 async function sendFinalReply(input: FinalReplyInput): Promise<void> {
   const draftText = renderText(input.state, { includeRunStatus: false });
+  if (input.commit?.cooperative && input.state.terminal === 'done') {
+    const action = parseCooperativeReply(draftText);
+    if (action.action === 'wait' || action.action === 'invalid') {
+      log.info('outbound', action.action === 'wait' ? 'waiting' : 'invalid-cooperative-reply', { scope: input.scope });
+      return;
+    }
+    if (action.action === 'handoff' &&
+      (!/^ou_[a-zA-Z0-9]+$/.test(action.recipient) || action.recipient === input.channel.botIdentity?.openId)) {
+      log.warn('outbound', 'invalid-handoff-recipient', { scope: input.scope });
+      return;
+    }
+    const decision = await input.commit.publish(action.text, async () => {
+      const result = await input.channel.send(input.chatId, { text: action.text }, {
+        ...input.sendOpts,
+        ...(action.action === 'handoff' ? { mentions: [{ key: '@_aria_next', openId: action.recipient }] } : {}),
+      });
+      requireMessageReceipt(result, 'cooperative');
+      log.info('outbound', action.action === 'handoff' ? 'handoff-sent' : 'sent',
+        { scope: input.scope, messageId: result.messageId });
+      return { messageId: result.messageId };
+    });
+    if (decision.kind === 'withheld') {
+      await input.channel.send(input.chatId, { text: '协作回复已暂缓：无法完整核对最新消息。请检查该机器人的群历史读取权限或入口能力，恢复后重新发起。' }, input.sendOpts);
+    }
+    return;
+  }
+
   const operation = () => publishFinalReply(input);
   if (input.commit) {
     await input.commit.publish(draftText, operation);
@@ -2514,7 +2918,8 @@ function buildPrompt(
   const annotate = batch.length > 1;
   const texts = batch
     .map((m) => {
-      const text = stripAttachmentRefs(m.content, fileKeys).trim();
+      const body = stripAttachmentRefs(m.content, fileKeys).trim();
+      const text = isSelfMentionPing(m) ? `${body}\n（对方只 @ 了你，请简短回应。）` : body;
       if (!text) return '';
       return annotate ? `${senderAnnotation(m)} ${text}` : text;
     })
@@ -2542,10 +2947,7 @@ function buildPrompt(
       messageIds: batch.map((m) => m.messageId),
       source: 'im',
     },
-    instructions:
-      extraInstructions && extraInstructions.length > 0
-        ? [...BRIDGE_AGENT_INSTRUCTIONS, ...extraInstructions]
-        : BRIDGE_AGENT_INSTRUCTIONS,
+    instructions: extraInstructions,
     userInput: userPart,
     ...(topicContext.length > 0 ? { topicContext: topicContext.map(toPromptTopicMessage) } : {}),
     quotedMessages: quotes.map(toPromptQuote),

@@ -9,6 +9,7 @@ import {
   cardKitShell as shell,
 } from './cardkit';
 import { agentCatalogStatusLine } from './agent-catalog';
+import { presentationDescription, type PresentationState } from '../outbound/presentation';
 
 export function workspacesCard(current: string | undefined, named: Record<string, string>): object {
   const entries = Object.entries(named);
@@ -59,6 +60,7 @@ export interface StatusInfo {
   queue?: { active: number; waiting: number; cap: number };
   ownerState: string;
   outboundPolicy?: OutboundPolicyStatus;
+  presentation?: PresentationState;
   /** Session scope (= chatId or chatId:threadId in topic groups). */
   scope: string;
   /** Chat mode — used to label scope. */
@@ -102,6 +104,7 @@ export function statusCard(info: StatusInfo): object {
     `🚦 **queue**: ${queueLine}`,
     `👤 **owner API**: ${escapeMd(info.ownerState)}`,
     `🚪 **outbound**: ${escapeMd(formatOutboundPolicy(info.outboundPolicy))}`,
+    ...(info.presentation ? [presentationDescription(info.presentation)] : []),
   ];
   return shell('📊 当前状态', [
     divMd(lines.join('\n')),
@@ -411,8 +414,26 @@ export function fastModeCard(info: FastModeCardInfo): object {
   return shell('⚡ Fast 模式', elements);
 }
 
-export function helpCard(agentName = 'Agent'): object {
+export function helpCard(agentName = 'Agent', team = false): object {
   const escapedAgentName = escapeMd(agentName);
+  if (team) return shell('💡 Team 使用帮助', [
+    divMd([
+      '- `/new [任务]` — 在当前会话开始新的上下文',
+      '- `/resume [N]` — 查看并恢复当前授权范围内的会话',
+      '- `/status` — 查看当前会话状态',
+      '- `/models` — 查看当前可用模型',
+      '- `/stop` — 停止当前会话的任务',
+      '',
+      '只有你和 Bot 的群可以与私聊共享工作区，群聊仍不能发起用户授权。',
+      '运行模式、引擎、工作区边界和身份策略由管理入口设置。',
+      `其他内容直接交给 ${escapedAgentName}。`,
+    ].join('\n')),
+    actions([
+      { text: '📊 状态', value: { cmd: 'status' }, style: 'primary' },
+      { text: '🔁 恢复会话', value: { cmd: 'resume' } },
+      { text: '🆕 新会话', value: { cmd: 'new' } },
+    ]),
+  ]);
   return shell('💡 使用帮助', [
     divMd(
       [

@@ -16,12 +16,15 @@ import type {
 } from '../reliability/types';
 import { parseWechatKfCommand } from './commands';
 import type { FileWechatKfMessageInbox } from './message-inbox';
-import type { WechatKfMessageSink } from './processor';
+import type { WechatKfMessageSink, WechatKfTurnHandler } from './processor';
 import { wechatKfActorId, wechatKfScopeId } from './session';
+import { assembleWechatKfTurns } from './turn-assembler';
 import type { WechatKfMessage } from './types';
 
 export const WECHAT_KF_PLUGIN_ID = 'wechat-kf' as const;
 export const WECHAT_KF_DEFAULT_INSTANCE_ID = 'customer-service' as const;
+export const WECHAT_KF_DEFAULT_TURN_ASSEMBLY_WINDOW_MS = 750;
+export const WECHAT_KF_DEFAULT_TURN_MAX_GAP_MS = 5_000;
 
 type Timer = ReturnType<typeof setTimeout>;
 
@@ -31,9 +34,11 @@ export interface WechatKfReliableMessageSinkOptions {
   sessionHmacSecret: string;
   stores: ChannelReliabilityStores;
   compatibilityInbox: Pick<FileWechatKfMessageInbox, 'enqueue' | 'list' | 'remove'>;
-  handler: WechatKfMessageSink;
+  handler: WechatKfTurnHandler;
   retryPolicy?: ChannelRetryPolicy;
   leaseMs?: number;
+  turnAssemblyWindowMs?: number;
+  turnMaxGapMs?: number;
   now?: () => number;
   schedule?: (callback: () => void, delayMs: number) => Timer;
   cancel?: (timer: Timer) => void;
@@ -66,8 +71,18 @@ export class WechatKfReliableMessageSink implements WechatKfMessageSink {
   private readonly now: () => number;
   private readonly scheduleTimer: (callback: () => void, delayMs: number) => Timer;
   private readonly cancelTimer: (timer: Timer) => void;
+  private readonly turnAssemblyWindowMs: number;
+  private readonly turnMaxGapMs: number;
   private readonly inFlight = new Map<string, Promise<void>>();
-  private readonly retryTimers = new Map<string, Timer>();
+  private readonly retryBatches = new Map<
+    string,
+    { timer: Timer; envelopes: readonly ChannelInboundEnvelope[] }
+  >();
+  private readonly pendingOrdinary = new Map<
+    string,
+    Map<string, ChannelInboundEnvelope>
+  >();
+  private readonly assemblyTimers = new Map<string, Timer>();
   private readonly normalTails = new Map<string, Promise<void>>();
   private readonly controlTails = new Map<string, Promise<void>>();
   private acceptingInbound = true;
@@ -80,6 +95,15 @@ export class WechatKfReliableMessageSink implements WechatKfMessageSink {
     this.now = options.now ?? Date.now;
     this.scheduleTimer = options.schedule ?? setTimeout;
     this.cancelTimer = options.cancel ?? clearTimeout;
+    this.turnAssemblyWindowMs = options.turnAssemblyWindowMs
+      ?? WECHAT_KF_DEFAULT_TURN_ASSEMBLY_WINDOW_MS;
+    this.turnMaxGapMs = options.turnMaxGapMs ?? WECHAT_KF_DEFAULT_TURN_MAX_GAP_MS;
+    if (!Number.isSafeInteger(this.turnAssemblyWindowMs) || this.turnAssemblyWindowMs < 0) {
+      throw new TypeError('wxkf turnAssemblyWindowMs must be a non-negative integer');
+    }
+    if (!Number.isSafeInteger(this.turnMaxGapMs) || this.turnMaxGapMs < 0) {
+      throw new TypeError('wxkf turnMaxGapMs must be a non-negative integer');
+    }
     this.coordinator = new ChannelReliabilityCoordinator({
       stores: options.stores,
       retryPolicy: options.retryPolicy,
@@ -89,6 +113,19 @@ export class WechatKfReliableMessageSink implements WechatKfMessageSink {
         process: async (envelope) => {
           try {
             await options.handler.accept(messageFromEnvelope(envelope));
+          } catch (error) {
+            throw options.classifyError?.(error) ?? defaultWechatKfFailure(error);
+          }
+          return [];
+        },
+        processBatch: async (envelopes) => {
+          const messages = envelopes.map(messageFromEnvelope);
+          try {
+            if (options.handler.acceptTurn) {
+              await options.handler.acceptTurn(messages);
+            } else {
+              for (const message of messages) await options.handler.accept(message);
+            }
           } catch (error) {
             throw options.classifyError?.(error) ?? defaultWechatKfFailure(error);
           }
@@ -107,23 +144,30 @@ export class WechatKfReliableMessageSink implements WechatKfMessageSink {
   }
 
   async accept(message: WechatKfMessage): Promise<void> {
+    await this.acceptMany([message]);
+  }
+
+  async acceptMany(messages: readonly WechatKfMessage[]): Promise<void> {
     if (!this.acceptingInbound || this.closed) {
       throw new ChannelPluginError('wxkf reliable message sink is draining', {
         kind: 'transient',
         code: 'wechat-kf-channel-draining',
       });
     }
-    const envelope = wechatKfMessageEnvelope({
+    const envelopes = messages.map((message) => wechatKfMessageEnvelope({
       profileId: this.options.profileId,
       instanceId: this.instanceId,
       sessionHmacSecret: this.options.sessionHmacSecret,
       message,
-    });
+    }));
 
-    // Rollback safety: the prior runtime can consume this exact message file.
-    await this.options.compatibilityInbox.enqueue(message);
-    await this.coordinator.accept(envelope);
-    this.schedule(envelope);
+    // Persist the whole provider page before any assembly timer can fire.
+    // A partial failure leaves idempotent durable work for the next sync.
+    for (const [index, envelope] of envelopes.entries()) {
+      await this.options.compatibilityInbox.enqueue(messages[index]!);
+      await this.coordinator.accept(envelope);
+    }
+    for (const envelope of envelopes) this.schedule(envelope);
   }
 
   /** Imports legacy queued work and schedules all shared durable work. */
@@ -154,15 +198,46 @@ export class WechatKfReliableMessageSink implements WechatKfMessageSink {
       }
       pending.set(channelReliabilityKey(record.envelope), record.envelope);
     }
-    for (const envelope of pending.values()) this.schedule(envelope);
+    const reserved = new Set<string>();
+    const byReliabilityKey = new Map(
+      [...pending.values()].map((envelope) => [channelReliabilityKey(envelope), envelope]),
+    );
+    for (const checkpoint of await this.options.stores.batches.list()) {
+      if (checkpoint.key.profileId !== this.options.profileId
+        || checkpoint.key.pluginId !== WECHAT_KF_PLUGIN_ID
+        || checkpoint.key.instanceId !== this.instanceId) continue;
+      const stableKeys = checkpoint.keys.map(channelReliabilityKey);
+      if (!stableKeys.some((key) => byReliabilityKey.has(key))) continue;
+      const batch = stableKeys.map((key) => byReliabilityKey.get(key));
+      if (batch.some((item) => item === undefined)) {
+        throw new ChannelPluginError('wxkf batch checkpoint references unavailable input', {
+          kind: 'configuration',
+          code: 'invalid-wechat-kf-batch-checkpoint',
+        });
+      }
+      for (const item of batch) {
+        const stableKey = channelReliabilityKey(item!);
+        if (reserved.has(stableKey)) {
+          throw new ChannelPluginError('wxkf batch checkpoints overlap', {
+            kind: 'configuration',
+            code: 'invalid-wechat-kf-batch-checkpoint',
+          });
+        }
+        reserved.add(stableKey);
+      }
+      this.scheduleBatch(batch as readonly ChannelInboundEnvelope[], false);
+    }
+    for (const envelope of pending.values()) {
+      if (!reserved.has(channelReliabilityKey(envelope))) this.schedule(envelope);
+    }
     return pending.size;
   }
 
   snapshot(): WechatKfReliableMessageSinkSnapshot {
     return {
       acceptingInbound: this.acceptingInbound && !this.closed,
-      inFlightInbound: this.inFlight.size,
-      scheduledRetries: this.retryTimers.size,
+      inFlightInbound: this.inFlight.size + this.pendingMessageCount(),
+      scheduledRetries: this.retryBatches.size,
     };
   }
 
@@ -172,14 +247,20 @@ export class WechatKfReliableMessageSink implements WechatKfMessageSink {
     }
     this.acceptingInbound = false;
     this.cancelRetries();
+    this.flushPendingAssemblies();
     while (this.inFlight.size > 0 && this.now() < deadlineAt) {
-      await Promise.race([
-        Promise.allSettled([...this.inFlight.values()]),
-        new Promise<void>((resolve) => {
-          const remaining = Math.max(0, deadlineAt - this.now());
-          this.scheduleTimer(resolve, Math.min(remaining, 25));
-        }),
-      ]);
+      let pollTimer: Timer | undefined;
+      try {
+        await Promise.race([
+          Promise.allSettled([...this.inFlight.values()]),
+          new Promise<void>((resolve) => {
+            const remaining = Math.max(0, deadlineAt - this.now());
+            pollTimer = this.scheduleTimer(resolve, Math.min(remaining, 25));
+          }),
+        ]);
+      } finally {
+        if (pollTimer) this.cancelTimer(pollTimer);
+      }
     }
     const durable = (await this.options.stores.inbox.list()).filter((record) =>
       record.key.profileId === this.options.profileId
@@ -190,68 +271,149 @@ export class WechatKfReliableMessageSink implements WechatKfMessageSink {
   }
 
   async waitForIdle(): Promise<void> {
+    this.flushPendingAssemblies();
     while (this.inFlight.size > 0) {
       await Promise.allSettled([...this.inFlight.values()]);
+      this.flushPendingAssemblies();
     }
   }
 
   async close(): Promise<void> {
     if (this.closed) return;
     this.acceptingInbound = false;
-    this.closed = true;
     this.cancelRetries();
+    this.flushPendingAssemblies();
     await this.waitForIdle();
+    this.closed = true;
   }
 
   private schedule(envelope: ChannelInboundEnvelope): void {
-    const key = channelReliabilityKey(envelope);
-    if (this.closed || this.inFlight.has(key) || this.retryTimers.has(key)) return;
-    const tails = isControlEnvelope(envelope) ? this.controlTails : this.normalTails;
-    const previous = tails.get(envelope.scopeId) ?? Promise.resolve();
-    const operation = previous
-      .catch(() => undefined)
-      .then(() => this.run(envelope))
-      .finally(() => {
-        if (this.inFlight.get(key) === operation) this.inFlight.delete(key);
-        if (tails.get(envelope.scopeId) === operation) tails.delete(envelope.scopeId);
-      });
-    this.inFlight.set(key, operation);
-    tails.set(envelope.scopeId, operation);
+    if (isControlEnvelope(envelope)) {
+      this.scheduleBatch([envelope], true);
+      return;
+    }
+    this.queueOrdinary(envelope);
   }
 
-  private async run(envelope: ChannelInboundEnvelope): Promise<void> {
-    const key = reliabilityKeyFromEnvelope(envelope);
-    const result = await this.coordinator.run(key);
-    const context = {
-      reliabilityKey: channelReliabilityKey(key),
-      scopeId: envelope.scopeId,
-    };
-    this.options.onResult?.(result, context);
+  private queueOrdinary(envelope: ChannelInboundEnvelope): void {
+    const key = channelReliabilityKey(envelope);
+    if (this.closed || this.inFlight.has(key) || this.hasRetryKey(key)) return;
+    const pending = this.pendingOrdinary.get(envelope.scopeId) ?? new Map();
+    pending.set(key, envelope);
+    this.pendingOrdinary.set(envelope.scopeId, pending);
+    if (this.assemblyTimers.has(envelope.scopeId)) return;
+    const timer = this.scheduleTimer(() => {
+      this.assemblyTimers.delete(envelope.scopeId);
+      this.flushScope(envelope.scopeId);
+    }, this.turnAssemblyWindowMs);
+    this.assemblyTimers.set(envelope.scopeId, timer);
+  }
+
+  private flushScope(scopeId: string): void {
+    const pending = this.pendingOrdinary.get(scopeId);
+    if (!pending) return;
+    this.pendingOrdinary.delete(scopeId);
+    const timer = this.assemblyTimers.get(scopeId);
+    if (timer) {
+      this.cancelTimer(timer);
+      this.assemblyTimers.delete(scopeId);
+    }
+    for (const turn of assembleWechatKfTurns([...pending.values()], this.turnMaxGapMs)) {
+      this.scheduleBatch(turn, false);
+    }
+  }
+
+  private flushPendingAssemblies(): void {
+    for (const scopeId of [...this.pendingOrdinary.keys()]) this.flushScope(scopeId);
+  }
+
+  private scheduleBatch(
+    input: readonly ChannelInboundEnvelope[],
+    control: boolean,
+  ): void {
+    if (this.closed) return;
+    const envelopes = deduplicateEnvelopes(input).filter((envelope) => {
+      const key = channelReliabilityKey(envelope);
+      return !this.inFlight.has(key) && !this.hasRetryKey(key);
+    });
+    if (envelopes.length === 0) return;
+    const tails = control ? this.controlTails : this.normalTails;
+    const scopeId = envelopes[0]!.scopeId;
+    const previous = tails.get(scopeId) ?? Promise.resolve();
+    const operation = previous
+      .catch(() => undefined)
+      .then(() => this.run(envelopes, control))
+      .finally(() => {
+        for (const envelope of envelopes) {
+          const key = channelReliabilityKey(envelope);
+          if (this.inFlight.get(key) === operation) this.inFlight.delete(key);
+        }
+        if (tails.get(scopeId) === operation) tails.delete(scopeId);
+      });
+    for (const envelope of envelopes) {
+      this.inFlight.set(channelReliabilityKey(envelope), operation);
+    }
+    tails.set(scopeId, operation);
+  }
+
+  private async run(
+    envelopes: readonly ChannelInboundEnvelope[],
+    control: boolean,
+  ): Promise<void> {
+    const keys = envelopes.map(reliabilityKeyFromEnvelope);
+    const result = keys.length === 1
+      ? await this.coordinator.run(keys[0]!)
+      : await this.coordinator.runBatch(keys);
+    for (const [index, key] of keys.entries()) {
+      this.options.onResult?.(result, {
+        reliabilityKey: channelReliabilityKey(key),
+        scopeId: envelopes[index]!.scopeId,
+      });
+    }
     if (result.status === 'completed') {
-      await this.options.compatibilityInbox.remove(envelope.sourceMessageId);
+      for (const envelope of envelopes) {
+        await this.options.compatibilityInbox.remove(envelope.sourceMessageId);
+      }
       return;
     }
     if (result.status === 'waiting') {
-      this.scheduleRetry(envelope, Math.max(0, result.nextAttemptAt - this.now()));
+      this.scheduleRetry(envelopes, control, Math.max(0, result.nextAttemptAt - this.now()));
     } else if (result.status === 'busy') {
-      this.scheduleRetry(envelope, this.options.leaseMs ?? 30_000);
+      this.scheduleRetry(envelopes, control, this.options.leaseMs ?? 30_000);
     }
   }
 
-  private scheduleRetry(envelope: ChannelInboundEnvelope, delayMs: number): void {
-    if (this.closed) return;
-    const key = channelReliabilityKey(envelope);
-    if (this.retryTimers.has(key)) return;
+  private scheduleRetry(
+    envelopes: readonly ChannelInboundEnvelope[],
+    control: boolean,
+    delayMs: number,
+  ): void {
+    if (!this.acceptingInbound || this.closed) return;
+    const key = batchKey(envelopes);
+    if (this.retryBatches.has(key)) return;
     const timer = this.scheduleTimer(() => {
-      this.retryTimers.delete(key);
-      this.schedule(envelope);
+      this.retryBatches.delete(key);
+      this.scheduleBatch(envelopes, control);
     }, delayMs);
-    this.retryTimers.set(key, timer);
+    this.retryBatches.set(key, { timer, envelopes });
   }
 
   private cancelRetries(): void {
-    for (const timer of this.retryTimers.values()) this.cancelTimer(timer);
-    this.retryTimers.clear();
+    for (const { timer } of this.retryBatches.values()) this.cancelTimer(timer);
+    this.retryBatches.clear();
+  }
+
+  private hasRetryKey(key: string): boolean {
+    for (const { envelopes } of this.retryBatches.values()) {
+      if (envelopes.some((envelope) => channelReliabilityKey(envelope) === key)) return true;
+    }
+    return false;
+  }
+
+  private pendingMessageCount(): number {
+    let count = 0;
+    for (const pending of this.pendingOrdinary.values()) count += pending.size;
+    return count;
   }
 }
 
@@ -317,6 +479,9 @@ function serializableMessage(message: WechatKfMessage): Record<string, JsonValue
 }
 
 function wechatKfContent(message: WechatKfMessage): ChannelContent {
+  if (message.origin !== 3) {
+    return { kind: 'event', name: `wechat-kf.${message.msgtype}`, data: {} };
+  }
   if (message.msgtype === 'text' && message.text?.content) {
     return { kind: 'text', text: message.text.content };
   }
@@ -348,6 +513,18 @@ function normalizeWechatKfTimestamp(value: number): number {
 
 function isControlEnvelope(envelope: ChannelInboundEnvelope): boolean {
   return envelope.content.kind === 'text' && Boolean(parseWechatKfCommand(envelope.content.text));
+}
+
+function deduplicateEnvelopes(
+  envelopes: readonly ChannelInboundEnvelope[],
+): ChannelInboundEnvelope[] {
+  const unique = new Map<string, ChannelInboundEnvelope>();
+  for (const envelope of envelopes) unique.set(channelReliabilityKey(envelope), envelope);
+  return [...unique.values()];
+}
+
+function batchKey(envelopes: readonly ChannelInboundEnvelope[]): string {
+  return envelopes.map(channelReliabilityKey).join('\n');
 }
 
 function unroutableId(kind: 'actor' | 'scope', messageId: string): string {

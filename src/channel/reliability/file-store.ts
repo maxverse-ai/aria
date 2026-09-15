@@ -10,6 +10,7 @@ import {
 import { channelReliabilityKey } from './key';
 import type {
   ChannelAnswerCheckpoint,
+  ChannelBatchCheckpoint,
   ChannelCompletionReceipt,
   ChannelDeliveryLedgerEntry,
   ChannelInboxRecord,
@@ -26,6 +27,7 @@ interface FileReliabilityState {
   inbox: Record<string, ChannelInboxRecord>;
   receipts: Record<string, ChannelCompletionReceipt>;
   answers: Record<string, ChannelAnswerCheckpoint>;
+  batches: Record<string, ChannelBatchCheckpoint>;
   deliveries: Record<string, ChannelDeliveryLedgerEntry>;
   retries: Record<string, ChannelRetryRecord>;
 }
@@ -36,6 +38,7 @@ const EMPTY_STATE: FileReliabilityState = {
   inbox: {},
   receipts: {},
   answers: {},
+  batches: {},
   deliveries: {},
   retries: {},
 };
@@ -121,6 +124,33 @@ export class FileChannelReliabilityStores implements ChannelReliabilityStores {
     }),
   };
 
+  readonly batches = {
+    get: async (key: ChannelReliabilityKey) => this.read((state) =>
+      cloneOptional(state.batches[channelReliabilityKey(key)])),
+    findByMember: async (key: ChannelReliabilityKey) => this.read((state) => {
+      const stableKey = channelReliabilityKey(key);
+      return cloneOptional(Object.values(state.batches).find((batch) =>
+        batch.keys.some((member) => channelReliabilityKey(member) === stableKey)));
+    }),
+    list: async () => this.read((state) => Object.values(state.batches).map(clone)),
+    create: async (checkpoint: ChannelBatchCheckpoint) => this.mutate((state) => {
+      const key = channelReliabilityKey(checkpoint.key);
+      const existing = state.batches[key];
+      if (existing) return clone(existing);
+      const requested = new Set(checkpoint.keys.map(channelReliabilityKey));
+      const overlap = Object.values(state.batches).find((batch) =>
+        batch.keys.some((member) => requested.has(channelReliabilityKey(member))));
+      if (overlap) return clone(overlap);
+      state.batches[key] = clone(checkpoint);
+      return clone(checkpoint);
+    }),
+    remove: async (key: ChannelReliabilityKey) => {
+      await this.mutate((state) => {
+        delete state.batches[channelReliabilityKey(key)];
+      });
+    },
+  };
+
   readonly deliveries = {
     get: async (key: ChannelReliabilityKey, deliveryId: string) => this.read((state) =>
       cloneOptional(state.deliveries[deliveryKey(key, deliveryId)])),
@@ -186,6 +216,11 @@ export class FileChannelReliabilityStores implements ChannelReliabilityStores {
 
   private async readState(): Promise<FileReliabilityState> {
     const parsed = JSON.parse(await readFile(this.path, 'utf8')) as unknown;
+    if (isRecord(parsed) && parsed.schema === 'aria.channel-reliability.v1'
+      && parsed.version === FILE_CHANNEL_RELIABILITY_SCHEMA_VERSION
+      && parsed.batches === undefined) {
+      parsed.batches = {};
+    }
     assertFileReliabilityState(parsed);
     return parsed;
   }
@@ -198,6 +233,7 @@ function assertFileReliabilityState(value: unknown): asserts value is FileReliab
     || state.version !== FILE_CHANNEL_RELIABILITY_SCHEMA_VERSION
     || !isRecord(state.inbox)
     || !isRecord(state.receipts)
+    || !isRecord(state.batches)
     || !isRecord(state.answers)
     || !isRecord(state.deliveries)
     || !isRecord(state.retries)) invalidState();
@@ -223,6 +259,19 @@ function assertFileReliabilityState(value: unknown): asserts value is FileReliab
     for (const intent of answer.intents) {
       assertChannelOutboundIntent(intent, answer.key);
       if (intent.sourceMessageId !== answer.key.sourceMessageId) invalidState();
+    }
+  }
+  const batchMembers = new Set<string>();
+  for (const [stableKey, batch] of Object.entries(typed.batches)) {
+    if (!batch || stableKey !== checkedKey(batch.key)
+      || !isTimestamp(batch.createdAt)
+      || !Array.isArray(batch.keys)
+      || batch.keys.length < 2
+      || checkedKey(batch.keys[0]!) !== stableKey
+      || new Set(batch.keys.map(checkedKey)).size !== batch.keys.length) invalidState();
+    for (const member of batch.keys.map(checkedKey)) {
+      if (batchMembers.has(member)) invalidState();
+      batchMembers.add(member);
     }
   }
   for (const [stableKey, entry] of Object.entries(typed.deliveries)) {

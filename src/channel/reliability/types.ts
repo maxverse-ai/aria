@@ -32,6 +32,14 @@ export interface ChannelAnswerCheckpoint {
   intents: readonly ChannelOutboundIntent[];
 }
 
+export interface ChannelBatchCheckpoint {
+  /** Stable primary key. The primary remains incomplete until every follower completes. */
+  key: ChannelReliabilityKey;
+  createdAt: number;
+  /** Exact ordered logical-turn membership, persisted before answer processing starts. */
+  keys: readonly ChannelReliabilityKey[];
+}
+
 export interface ChannelDeliveryLedgerEntry {
   key: ChannelReliabilityKey;
   deliveryId: string;
@@ -78,6 +86,15 @@ export interface ChannelAnswerStore {
   create(checkpoint: ChannelAnswerCheckpoint): Promise<ChannelAnswerCheckpoint>;
 }
 
+export interface ChannelBatchStore {
+  get(key: ChannelReliabilityKey): Promise<ChannelBatchCheckpoint | undefined>;
+  findByMember(key: ChannelReliabilityKey): Promise<ChannelBatchCheckpoint | undefined>;
+  list(): Promise<readonly ChannelBatchCheckpoint[]>;
+  /** First checkpoint wins so a retry cannot change logical-turn membership. */
+  create(checkpoint: ChannelBatchCheckpoint): Promise<ChannelBatchCheckpoint>;
+  remove(key: ChannelReliabilityKey): Promise<void>;
+}
+
 export interface ChannelDeliveryStore {
   get(key: ChannelReliabilityKey, deliveryId: string): Promise<ChannelDeliveryLedgerEntry | undefined>;
   /** First ledger entry wins; implementations must make this operation idempotent. */
@@ -93,6 +110,7 @@ export interface ChannelRetryStore {
 export interface ChannelReliabilityStores {
   inbox: ChannelInboxStore;
   receipts: ChannelReceiptStore;
+  batches: ChannelBatchStore;
   answers: ChannelAnswerStore;
   deliveries: ChannelDeliveryStore;
   retries: ChannelRetryStore;
@@ -100,6 +118,16 @@ export interface ChannelReliabilityStores {
 
 export interface ChannelAnswerProcessor {
   process(envelope: ChannelInboundEnvelope): Promise<readonly ChannelOutboundIntent[]>;
+  /**
+   * Processes several durably accepted messages as one logical turn.
+   *
+   * The first envelope is the stable primary: outbound intents and the answer
+   * checkpoint are keyed to it. Implementations must treat the remaining
+   * envelopes as additional input, not independent reply targets.
+   */
+  processBatch?(
+    envelopes: readonly ChannelInboundEnvelope[],
+  ): Promise<readonly ChannelOutboundIntent[]>;
 }
 
 export interface ChannelIntentDeliverer {

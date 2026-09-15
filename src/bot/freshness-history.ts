@@ -1,5 +1,5 @@
+import { normalizeMessage } from './message-normalization';
 import {
-  normalize,
   type ApiMessageItem,
   type LarkChannel,
   type RawMessageEvent,
@@ -14,6 +14,7 @@ export type FreshnessHistoryStatus = 'complete' | 'truncated' | 'unavailable';
 export interface FreshnessHistoryResult {
   status: FreshnessHistoryStatus;
   inputs: ConversationInput[];
+  failure?: { code?: number; missingScope?: string };
 }
 
 const DEFAULT_MAX_MESSAGES = 100;
@@ -52,6 +53,10 @@ export async function fetchFreshnessHistory(input: {
           ...(pageToken ? { page_token: pageToken } : {}),
         },
       });
+      const api = res as { code?: number; msg?: string };
+      if (api.code !== undefined && api.code !== 0) {
+        throw Object.assign(new Error(api.msg ?? 'history request rejected'), { response: { data: api } });
+      }
       const data = (res as {
         data?: {
           items?: ApiMessageItem[];
@@ -72,12 +77,15 @@ export async function fetchFreshnessHistory(input: {
       }
     } while (pageToken && collected.length < maxMessages);
   } catch (error) {
+    const failure = historyFailure(error);
     log.warn('freshness', 'history-fetch-failed', {
+      ...failure,
+      selfId: input.channel.botIdentity?.openId,
       chatId: input.chatId,
       threadId: input.threadId,
       err: error instanceof Error ? error.message : String(error),
     });
-    return { status: 'unavailable', inputs: [] };
+    return { status: 'unavailable', inputs: [], failure };
   }
 
   const normalized: ConversationInput[] = [];
@@ -162,7 +170,7 @@ async function normalizeHistoryItem(
   if (!item.message_id) return undefined;
   const raw: RawMessageEvent = {
     sender: {
-      sender_id: { open_id: item.sender?.id },
+      sender_id: { open_id: (item.sender as { open_bot_id?: string } | undefined)?.open_bot_id ?? item.sender?.id },
       sender_type: item.sender?.sender_type,
     },
     message: {
@@ -177,10 +185,9 @@ async function normalizeHistoryItem(
     },
   };
   try {
-    return await normalize(raw, {
+    return await normalizeMessage(raw, {
       botIdentity: channel.botIdentity ?? { openId: '', name: '' },
       includeRaw: true,
-      stripBotMentions: true,
     });
   } catch (error) {
     log.warn('freshness', 'history-normalize-failed', {
@@ -189,4 +196,11 @@ async function normalizeHistoryItem(
     });
     return undefined;
   }
+}
+
+function historyFailure(error: unknown): { code?: number; missingScope?: string } {
+  const data = (error as { response?: { data?: { code?: unknown; msg?: unknown } } } | null)?.response?.data;
+  const message = typeof data?.msg === 'string' ? data.msg : error instanceof Error ? error.message : '';
+  const missingScope = /need scope:\s*([a-zA-Z0-9_:.-]+)/.exec(message)?.[1];
+  return { ...(typeof data?.code === 'number' ? { code: data.code } : {}), ...(missingScope ? { missingScope } : {}) };
 }

@@ -1,3 +1,4 @@
+import { larkParticipantIdentity } from './participant-identity';
 import { randomUUID } from 'node:crypto';
 import { mkdir } from 'node:fs/promises';
 import { dirname } from 'node:path';
@@ -270,6 +271,7 @@ export async function handleCommentMention(deps: CommentDeps): Promise<void> {
       });
 
       const execution = await deps.executor.submit({
+        identity: larkParticipantIdentity(controls.cfg.accounts.app.id, channel.botIdentity),
         scopeId: runScopeId,
         policy,
         sessionId,

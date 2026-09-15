@@ -1,3 +1,4 @@
+import { spaceChannelContext } from '../bot/space-context';
 import type { CardActionEvent, LarkChannel, NormalizedMessage } from '@larksuite/channel';
 import type { AgentAdapter } from '../agent/types';
 import type { ActiveRuns } from '../bot/active-runs';
@@ -27,6 +28,7 @@ import type { LoadedOutboundPolicy } from '../outbound/plugin';
 const BRIDGE_CALLBACK_MARKER = '__bridge_cb';
 
 export interface CardDispatchDeps {
+  spacePrepared?: boolean;
   channel: LarkChannel;
   evt: CardActionEvent;
   sessions: SessionStore;
@@ -56,7 +58,7 @@ export async function handleCardAction(deps: CardDispatchDeps): Promise<void> {
   if (!cmd && !(BRIDGE_CALLBACK_MARKER in payload)) return;
   const action = cmd || (BRIDGE_CALLBACK_MARKER in payload ? 'agent_callback' : 'unknown');
   await executeCardAction({
-    action,
+    action: deps.controls.spaceGate ? 'space_callback' : action,
     key: `${deps.evt.chatId}:${deps.evt.messageId}`,
     task: () => dispatchCardAction(deps, payload),
     defer: deps.deferOutbound,
@@ -67,6 +69,25 @@ async function dispatchCardAction(
   deps: CardDispatchDeps,
   payload: Record<string, unknown>,
 ): Promise<void> {
+
+  const gate = deps.controls.spaceGate;
+  if (gate && !deps.spacePrepared) {
+    const mode = await deps.chatModeCache.resolve(deps.channel, deps.evt.chatId);
+    // Verify the carrier before reading its topic metadata. No model-provided
+    // callback payload may choose a foreign carrier or conversation.
+    const carrier = await gate.enter({ conversationId: deps.evt.chatId, senderId: deps.evt.operator.openId,
+      senderKind: 'user', kind: mode === 'p2p' ? 'direct' : 'group' }, deps.evt.chatId);
+    gate.resources.assert(carrier.context, 'message', deps.evt.messageId);
+    const resolved = await gate.run(carrier, () => resolveScope(deps));
+    const operation = await gate.enter({ conversationId: deps.evt.chatId, senderId: deps.evt.operator.openId, senderKind: 'user',
+      kind: resolved.mode === 'p2p' ? 'direct' : 'group' }, resolved.scope);
+    gate.resources.assert(operation.context, 'message', deps.evt.messageId);
+    return gate.run(operation, async () => {
+      const scoped = await spaceChannelContext(deps.controls, gate);
+      return dispatchCardAction({ ...deps, controls: scoped.controls, sessions: scoped.sessions,
+        sessionCatalog: scoped.sessionCatalog, workspaces: scoped.workspaces, spacePrepared: true }, payload);
+    });
+  }
 
   const operatorId = deps.evt.operator.openId;
   const chatId = deps.evt.chatId;
@@ -84,7 +105,8 @@ async function dispatchCardAction(
   // session — look up the carrier message (the card lives on it) once.
   // Done before the access check so we know the chat mode (p2p vs group)
   // and can skip the chat allowlist for DMs.
-  const { scope, threadId, mode } = await resolveScope(deps);
+  const { scope: rawScope, threadId, mode } = await resolveScope(deps);
+  const scope = gate ? gate.active().executionScope : rawScope;
 
   const accessDecision =
     mode === 'p2p'
@@ -174,6 +196,7 @@ async function resolveScope(
   if (!threadId) {
     // Fall back to plain chatId. Better to land in the chat's "default"
     // scope than fail the click silently.
+    if (deps.controls.spaceGate) throw new Error('team callback topic is unavailable');
     return { scope: chatId, threadId: undefined, mode };
   }
   return { scope: `${chatId}:${threadId}`, threadId, mode };
@@ -213,10 +236,10 @@ function forwardToAgent(
     mentionedBot: false,
     createTime: Date.now(),
   };
-  deps.pending.push(scope, toConversationInput(synthetic, {
+  deps.pending.push(scope, { ...toConversationInput(synthetic, {
     addressedToAgent: true,
     kind: mode === 'p2p' ? 'direct-message' : 'interactive-callback',
-  }));
+  }), ...(deps.controls.spaceGate ? { spaceOperation: deps.controls.spaceGate.active() } : {}) });
 }
 
 function verifyBridgeToken(

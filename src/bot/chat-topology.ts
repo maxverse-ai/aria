@@ -68,8 +68,10 @@ export class ChatTopologyResolver {
       this.client.getChatBots(chatId, { force: true }),
     ]);
     const value = {
-      humanCount: humans.length,
-      botCount: bots.length,
+      // The roster API can repeat members, even within a single page.
+      // Count identities so duplicates cannot disable exclusive-group addressing.
+      humanCount: new Set(humans.map((member) => member.id)).size,
+      botCount: new Set(bots.map((member) => member.id)).size,
     };
     const ttlMs = isDmLikeTopology(value) ? this.dmLikeTtlMs : this.groupTtlMs;
     this.cache.set(chatId, { value, expiresAt: this.now() + ttlMs });

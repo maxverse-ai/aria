@@ -33,6 +33,7 @@ export function createTriggerRunIntent(
       requestId: occurrence.id,
       attributes: {
         triggerDefinitionId: definition.id,
+        triggerDefinitionRevision: String(definition.revision),
         triggerOccurrenceId: occurrence.id,
         scheduledFor: String(occurrence.scheduledFor),
         ...(occurrence.metadata.sourceEventId

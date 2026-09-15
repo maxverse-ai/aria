@@ -6,6 +6,15 @@ import type { WechatKfMessage } from './types';
 export interface WechatKfMessageSink {
   /** Must be idempotent for duplicate calls carrying the same msgid. */
   accept(message: WechatKfMessage): Promise<void>;
+  /** Optionally persists a provider page before any of its messages are scheduled. */
+  acceptMany?(messages: readonly WechatKfMessage[]): Promise<void>;
+}
+
+export interface WechatKfTurnHandler {
+  /** Processes one provider message as one logical user turn. */
+  accept(message: WechatKfMessage): Promise<void>;
+  /** Processes already-assembled adjacent messages as one logical user turn. */
+  acceptTurn?(messages: readonly WechatKfMessage[]): Promise<void>;
 }
 
 export interface WechatKfNotificationProcessorOptions {
@@ -52,9 +61,14 @@ export class WechatKfNotificationProcessor {
           ...(cursor ? { cursor } : {}),
           ...(this.options.pageSize !== undefined ? { limit: this.options.pageSize } : {}),
         });
-        for (const message of page.messages) {
-          await this.options.messages.accept(message);
-          delivered += 1;
+        if (this.options.messages.acceptMany) {
+          await this.options.messages.acceptMany(page.messages);
+          delivered += page.messages.length;
+        } else {
+          for (const message of page.messages) {
+            await this.options.messages.accept(message);
+            delivered += 1;
+          }
         }
         if (!page.nextCursor) throw new Error('wechat-kf sync_msg response is missing next_cursor');
         if (page.hasMore && page.nextCursor === cursor) {

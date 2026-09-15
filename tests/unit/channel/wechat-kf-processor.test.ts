@@ -77,6 +77,37 @@ describe('WechatKfNotificationProcessor', () => {
     expect(remove).not.toHaveBeenCalled();
   });
 
+  it('durably hands a provider page to a batch-capable sink before advancing the cursor', async () => {
+    const order: string[] = [];
+    const messages = [
+      { msgid: 'image', send_time: 1, origin: 3, msgtype: 'image' },
+      { msgid: 'question', send_time: 2, origin: 3, msgtype: 'text' },
+    ];
+    const acceptMany = vi.fn(async () => { order.push('batch'); });
+    const processor = new WechatKfNotificationProcessor({
+      inbox: {
+        list: vi.fn().mockResolvedValue([notification]),
+        remove: vi.fn(async () => { order.push('remove'); }),
+      },
+      cursors: {
+        get: vi.fn().mockResolvedValue(undefined),
+        set: vi.fn(async () => { order.push('cursor'); }),
+      },
+      api: {
+        syncMessages: vi.fn().mockResolvedValue({
+          nextCursor: 'next',
+          hasMore: false,
+          messages,
+        }),
+      },
+      messages: { accept: vi.fn(), acceptMany },
+    });
+
+    await expect(processor.processAvailable()).resolves.toBe(2);
+    expect(acceptMany).toHaveBeenCalledWith(messages);
+    expect(order).toEqual(['batch', 'cursor', 'remove']);
+  });
+
   it('coalesces concurrent callback wakeups', async () => {
     let release!: () => void;
     const waiting = new Promise<void>((resolve) => { release = resolve; });

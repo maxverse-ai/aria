@@ -93,7 +93,7 @@ describe('Card Action Executor', () => {
     }
 
     expect(Object.keys(CARD_ACTION_MODES).sort()).toEqual(
-      [...renderedCommands, 'agent_callback'].sort(),
+      [...renderedCommands, 'agent_callback', 'space_callback'].sort(),
     );
   });
 });

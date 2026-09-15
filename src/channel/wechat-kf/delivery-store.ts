@@ -1,3 +1,4 @@
+import type { SpaceOperationCheckpoint } from '../../space/operation-gate';
 import { createHash } from 'node:crypto';
 import { readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -28,7 +29,8 @@ export type WechatKfDeliveryChunkInput =
   | { content: string; messageId: string };
 
 export interface WechatKfPreparedDelivery {
-  schemaVersion: 2;
+  schemaVersion: 2 | 3;
+  spaceCheckpoint?: SpaceOperationCheckpoint;
   createdAt: number;
   chunks: WechatKfDeliveryChunk[];
 }
@@ -56,12 +58,14 @@ export class FileWechatKfDeliveryStore {
     sourceMessageId: string,
     chunks: ReadonlyArray<WechatKfDeliveryChunkInput>,
     createdAt = Date.now(),
+    spaceCheckpoint?: SpaceOperationCheckpoint,
   ): Promise<WechatKfPreparedDelivery> {
     assertSourceMessageId(sourceMessageId);
     const existing = await this.get(sourceMessageId);
     if (existing) return existing;
     const delivery = normalizePreparedDelivery({
-      schemaVersion: 2,
+      schemaVersion: spaceCheckpoint ? 3 : 2,
+      ...(spaceCheckpoint ? { spaceCheckpoint } : {}),
       createdAt,
       chunks: chunks.map((chunk) => (
         'kind' in chunk ? { ...chunk } : { kind: 'text', ...chunk }
@@ -131,14 +135,17 @@ function normalizePreparedDelivery(input: unknown): WechatKfPreparedDelivery | u
   if (!input || typeof input !== 'object' || Array.isArray(input)) return undefined;
   const raw = input as {
     schemaVersion?: unknown;
+    spaceCheckpoint?: SpaceOperationCheckpoint;
     createdAt?: unknown;
     chunks?: unknown;
   };
-  if ((raw.schemaVersion !== 1 && raw.schemaVersion !== 2)
+  if ((raw.schemaVersion !== 1 && raw.schemaVersion !== 2 && raw.schemaVersion !== 3)
     || typeof raw.createdAt !== 'number'
     || !Array.isArray(raw.chunks)) {
     return undefined;
   }
+  if (raw.schemaVersion === 3 && raw.spaceCheckpoint?.schema !== 'aria.space.operation.v1') return undefined;
+  if (raw.schemaVersion !== 3 && raw.spaceCheckpoint !== undefined) return undefined;
   const chunks: WechatKfDeliveryChunk[] = [];
   for (const chunk of raw.chunks) {
     if (!chunk || typeof chunk !== 'object') return undefined;
@@ -173,7 +180,8 @@ function normalizePreparedDelivery(input: unknown): WechatKfPreparedDelivery | u
     }
   }
   if (chunks.length === 0) return undefined;
-  return { schemaVersion: 2, createdAt: raw.createdAt, chunks };
+  return { schemaVersion: raw.schemaVersion === 3 ? 3 : 2, createdAt: raw.createdAt, chunks,
+    ...(raw.spaceCheckpoint ? { spaceCheckpoint: structuredClone(raw.spaceCheckpoint) } : {}) };
 }
 
 function isAssetRef(value: string): boolean {

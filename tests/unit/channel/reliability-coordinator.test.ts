@@ -167,6 +167,207 @@ describe('ChannelReliabilityCoordinator', () => {
     expect(deliver).toHaveBeenCalledOnce();
   });
 
+  it('checkpoints one batch and keeps the primary as the crash-recovery anchor', async () => {
+    let now = 1_000;
+    let failPrimaryCompletion = true;
+    const backing = new InMemoryChannelReliabilityStores();
+    const primary = envelope('batch-primary');
+    const follower = envelope('batch-follower');
+    const process = vi.fn(async () => [] as readonly ChannelOutboundIntent[]);
+    const processBatch = vi.fn(async () => [] as readonly ChannelOutboundIntent[]);
+    const stores = {
+      ...backing,
+      receipts: {
+        get: backing.receipts.get,
+        complete: async (receipt: Parameters<typeof backing.receipts.complete>[0]) => {
+          if (receipt.key.sourceMessageId === primary.sourceMessageId && failPrimaryCompletion) {
+            failPrimaryCompletion = false;
+            throw new Error('crash before primary completion');
+          }
+          return backing.receipts.complete(receipt);
+        },
+      },
+    };
+    const coordinator = new ChannelReliabilityCoordinator({
+      stores,
+      processor: { process, processBatch },
+      deliverer: { deliver: vi.fn() },
+      retryPolicy: { maxAttempts: 3, baseDelayMs: 10, maxDelayMs: 10, jitterRatio: 0 },
+      now: () => now,
+    });
+    await coordinator.accept(primary);
+    await coordinator.accept(follower);
+
+    await expect(coordinator.runBatch([
+      reliabilityKeyFromEnvelope(primary),
+      reliabilityKeyFromEnvelope(follower),
+    ])).resolves.toEqual({ status: 'waiting', nextAttemptAt: 1_010 });
+    expect(processBatch).toHaveBeenCalledOnce();
+    expect(processBatch).toHaveBeenCalledWith([primary, follower]);
+    expect(process).not.toHaveBeenCalled();
+    await expect(backing.batches.get(reliabilityKeyFromEnvelope(primary))).resolves.toMatchObject({
+      keys: [
+        expect.objectContaining({ sourceMessageId: 'batch-primary' }),
+        expect.objectContaining({ sourceMessageId: 'batch-follower' }),
+      ],
+    });
+    await expect(backing.receipts.get(reliabilityKeyFromEnvelope(follower))).resolves.toBeDefined();
+    await expect(backing.receipts.get(reliabilityKeyFromEnvelope(primary))).resolves.toBeUndefined();
+
+    now = 1_010;
+    const restarted = new ChannelReliabilityCoordinator({
+      stores,
+      processor: { process, processBatch },
+      deliverer: { deliver: vi.fn() },
+      retryPolicy: { maxAttempts: 3, baseDelayMs: 10, maxDelayMs: 10, jitterRatio: 0 },
+      now: () => now,
+    });
+    await expect(restarted.runBatch([
+      reliabilityKeyFromEnvelope(primary),
+      reliabilityKeyFromEnvelope(follower),
+    ])).resolves.toMatchObject({ status: 'completed' });
+    expect(processBatch).toHaveBeenCalledOnce();
+    await expect(backing.receipts.get(reliabilityKeyFromEnvelope(primary))).resolves.toBeDefined();
+    await expect(backing.inbox.list()).resolves.toEqual([]);
+  });
+
+  it('fails closed when recovery tries to change checkpointed batch membership', async () => {
+    let now = 1_000;
+    let failPrimaryCompletion = true;
+    const backing = new InMemoryChannelReliabilityStores();
+    const primary = envelope('stable-primary');
+    const follower = envelope('stable-follower');
+    const unrelated = envelope('new-unrelated');
+    const processBatch = vi.fn(async () => [] as readonly ChannelOutboundIntent[]);
+    const stores = {
+      ...backing,
+      receipts: {
+        get: backing.receipts.get,
+        complete: async (receipt: Parameters<typeof backing.receipts.complete>[0]) => {
+          if (receipt.key.sourceMessageId === primary.sourceMessageId && failPrimaryCompletion) {
+            failPrimaryCompletion = false;
+            throw new Error('crash before primary completion');
+          }
+          return backing.receipts.complete(receipt);
+        },
+      },
+    };
+    const coordinator = new ChannelReliabilityCoordinator({
+      stores,
+      processor: { process: vi.fn(async () => []), processBatch },
+      deliverer: { deliver: vi.fn() },
+      retryPolicy: { maxAttempts: 3, baseDelayMs: 10, maxDelayMs: 10, jitterRatio: 0 },
+      now: () => now,
+    });
+    await coordinator.accept(primary);
+    await coordinator.accept(follower);
+    await expect(coordinator.runBatch([
+      reliabilityKeyFromEnvelope(primary),
+      reliabilityKeyFromEnvelope(follower),
+    ])).resolves.toMatchObject({ status: 'waiting' });
+    await coordinator.accept(unrelated);
+
+    now = 1_010;
+    await expect(coordinator.runBatch([
+      reliabilityKeyFromEnvelope(primary),
+      reliabilityKeyFromEnvelope(follower),
+      reliabilityKeyFromEnvelope(unrelated),
+    ])).rejects.toMatchObject({
+      kind: 'configuration',
+      code: 'invalid-channel-contract',
+    });
+    expect(processBatch).toHaveBeenCalledOnce();
+    await expect(backing.receipts.get(reliabilityKeyFromEnvelope(unrelated))).resolves.toBeUndefined();
+    await expect(backing.inbox.get(reliabilityKeyFromEnvelope(unrelated))).resolves.toBeDefined();
+  });
+
+  it('persists batch membership before processing and recovers it through the generic entrypoint', async () => {
+    let now = 1_000;
+    const stores = new InMemoryChannelReliabilityStores();
+    const primary = envelope('early-primary');
+    const follower = envelope('early-follower');
+    const unrelated = envelope('later-single');
+    const process = vi.fn(async () => [] as readonly ChannelOutboundIntent[]);
+    let crashDuringProcessing = true;
+    const processBatch = vi.fn(async (inputs: readonly ChannelInboundEnvelope[]) => {
+      await expect(stores.batches.get(reliabilityKeyFromEnvelope(primary))).resolves.toMatchObject({
+        keys: [
+          expect.objectContaining({ sourceMessageId: 'early-primary' }),
+          expect.objectContaining({ sourceMessageId: 'early-follower' }),
+        ],
+      });
+      if (crashDuringProcessing) {
+        crashDuringProcessing = false;
+        throw new Error('process exited during batch processing');
+      }
+      return [] as readonly ChannelOutboundIntent[];
+    });
+    const coordinator = new ChannelReliabilityCoordinator({
+      stores,
+      processor: { process, processBatch },
+      deliverer: { deliver: vi.fn() },
+      retryPolicy: { maxAttempts: 3, baseDelayMs: 10, maxDelayMs: 10, jitterRatio: 0 },
+      now: () => now,
+    });
+
+    // The follower reaches durable storage first, so recovery cannot rely on
+    // inbox ordering to discover the primary.
+    await coordinator.accept(follower);
+    now = 1_001;
+    await coordinator.accept(primary);
+    now = 1_002;
+    await expect(coordinator.runBatch([
+      reliabilityKeyFromEnvelope(primary),
+      reliabilityKeyFromEnvelope(follower),
+    ])).resolves.toEqual({ status: 'waiting', nextAttemptAt: 1_012 });
+    now = 1_003;
+    await coordinator.accept(unrelated);
+
+    now = 1_012;
+    await expect(coordinator.recover()).resolves.toMatchObject([
+      { status: 'completed' },
+      { status: 'completed' },
+    ]);
+    expect(processBatch).toHaveBeenCalledTimes(2);
+    expect(processBatch.mock.calls.map(([inputs]) =>
+      inputs.map(({ sourceMessageId }) => sourceMessageId))).toEqual([
+      ['early-primary', 'early-follower'],
+      ['early-primary', 'early-follower'],
+    ]);
+    expect(process).toHaveBeenCalledOnce();
+    expect(process).toHaveBeenCalledWith(unrelated);
+  });
+
+  it('redirects a direct follower run to its checkpointed logical batch', async () => {
+    const stores = new InMemoryChannelReliabilityStores();
+    const primary = envelope('direct-primary');
+    const follower = envelope('direct-follower');
+    const primaryKey = reliabilityKeyFromEnvelope(primary);
+    const followerKey = reliabilityKeyFromEnvelope(follower);
+    const process = vi.fn(async () => [] as readonly ChannelOutboundIntent[]);
+    const processBatch = vi.fn(async () => [] as readonly ChannelOutboundIntent[]);
+    const coordinator = new ChannelReliabilityCoordinator({
+      stores,
+      processor: { process, processBatch },
+      deliverer: { deliver: vi.fn() },
+      now: () => 1_000,
+    });
+    await coordinator.accept(primary);
+    await coordinator.accept(follower);
+    await stores.batches.create({
+      key: primaryKey,
+      createdAt: 999,
+      keys: [primaryKey, followerKey],
+    });
+
+    await expect(coordinator.run(followerKey)).resolves.toMatchObject({ status: 'completed' });
+    expect(processBatch).toHaveBeenCalledOnce();
+    expect(processBatch).toHaveBeenCalledWith([primary, follower]);
+    expect(process).not.toHaveBeenCalled();
+    await expect(stores.receipts.get(primaryKey)).resolves.toBeDefined();
+    await expect(stores.receipts.get(followerKey)).resolves.toBeDefined();
+  });
+
   it('persists bounded retry attempts and provider delay hints', async () => {
     let now = 0;
     const stores = new InMemoryChannelReliabilityStores();

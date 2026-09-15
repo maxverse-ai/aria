@@ -4,6 +4,15 @@ import { ChatTopologyResolver } from '../../../src/bot/chat-topology.js';
 import { fetchFreshnessHistory } from '../../../src/bot/freshness-history.js';
 
 describe('fetchFreshnessHistory', () => {
+  it('recognizes a nonzero API response as unavailable and exposes the missing scope', async () => {
+    const list = vi.fn(async () => ({ code: 230027, msg: 'need scope: im:message.group_msg' }));
+    const { channel, topology } = harness(list, 2, 1);
+    const result = await fetchFreshnessHistory({ channel, chatTopology: topology, chatId: 'oc_group',
+      chatType: 'group', afterMs: 1, knownInputIds: new Set() });
+    expect(result).toMatchObject({ status: 'unavailable', inputs: [],
+      failure: { code: 230027, missingScope: 'im:message.group_msg' } });
+  });
+
   it('queries only the current topic and preserves structured addressing', async () => {
     const list = vi.fn(async () => ({
       data: {

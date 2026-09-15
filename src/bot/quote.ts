@@ -3,7 +3,7 @@ import type {
   LarkChannel,
   RawMessageEvent,
 } from '@larksuite/channel';
-import { normalize } from '@larksuite/channel';
+import { normalizeMessage } from './message-normalization';
 import { log } from '../core/logger';
 import { expandInteractiveCard } from './interactive-card';
 
@@ -133,11 +133,9 @@ async function normalizeItemToQuoted(
 
   const botIdentity = channel.botIdentity ?? { openId: '', name: '' };
   try {
-    const normalized = await normalize(fakeRaw, {
+    const normalized = await normalizeMessage(fakeRaw, {
       botIdentity,
       fetchSubMessages,
-      // We want the raw content here, not the trimmed @bot mention form.
-      stripBotMentions: false,
     });
     const createMs = parent.create_time
       ? Number.parseInt(String(parent.create_time), 10)

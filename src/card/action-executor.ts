@@ -8,6 +8,7 @@ export type CardActionMode = 'immediate' | 'background';
  * instead of relying on individual handlers to remember to detach themselves.
  */
 export const CARD_ACTION_MODES = {
+  space_callback: 'background',
   'account.cancel': 'background',
   'account.change': 'background',
   'account.submit': 'background',

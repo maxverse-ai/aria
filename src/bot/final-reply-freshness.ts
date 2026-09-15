@@ -1,3 +1,4 @@
+import { isSelfMentionPing } from './message-normalization';
 import type { LarkChannel, NormalizedMessage } from '@larksuite/channel';
 import type { TurnFinalizationContext } from '../conversation/turn-coordinator';
 import {
@@ -8,7 +9,7 @@ import {
 } from '../conversation/freshness-policy';
 import { log, reportMetric } from '../core/logger';
 import type { ChatTopologyResolver } from './chat-topology';
-import type { ConversationInput } from './conversation-input';
+import { isAdmittedPeer, type ConversationInput } from './conversation-input';
 import {
   fetchFreshnessHistory,
   type FreshnessHistoryResult,
@@ -27,6 +28,8 @@ export interface FinalReplyFreshnessInput {
   scope: string;
   turn: TurnFinalizationContext;
   draftText: string;
+  /** Cooperative replies cannot safely guess after a failed history check. */
+  requireCompleteHistory?: boolean;
   chatId: string;
   chatType: 'p2p' | 'group';
   threadId?: string;
@@ -76,7 +79,11 @@ export class FinalReplyFreshness {
     const remoteInputs = history.inputs.filter((entry) =>
       entry.senderType === 'bot' || !input.canAcceptRemote || input.canAcceptRemote(entry.message),
     );
-    const remote = remoteInputs.map((entry) => toCandidate(entry, 'remote'));
+    const remote = remoteInputs.map((entry) => ({
+      ...toCandidate(entry, 'remote'),
+      // Bot history may be compared for duplicates without granting it input authority.
+      admittedPeer: isAdmittedPeer(entry) && Boolean(input.canAcceptRemote?.(entry.message)),
+    }));
     const combinedDecision = this.evaluate(input, [...local, ...remote]);
 
     // A definite addressed input is actionable even when the bounded history
@@ -104,7 +111,7 @@ export class FinalReplyFreshness {
 
     if (history.status !== 'complete') {
       return this.finish(input, {
-        kind: 'fail-open',
+        kind: input.requireCompleteHistory ? 'withheld' : 'fail-open',
         reason: history.status === 'truncated' ? 'history-truncated' : 'history-unavailable',
       });
     }
@@ -175,11 +182,11 @@ export class FinalReplyFreshness {
       scope: input.scope,
       runId: input.turn.runId,
       ...(decision.kind === 'hold' ? { count: decision.messageIds.length } : {}),
-      ...(decision.kind === 'fail-open' ? { reason: decision.reason } : {}),
+      ...((decision.kind === 'fail-open' || decision.kind === 'withheld') ? { reason: decision.reason } : {}),
     });
     reportMetric('final_reply_freshness', 1, {
       outcome,
-      ...(decision.kind === 'fail-open' ? { reason: decision.reason } : {}),
+      ...((decision.kind === 'fail-open' || decision.kind === 'withheld') ? { reason: decision.reason } : {}),
     });
     return decision;
   }
@@ -195,7 +202,8 @@ function toCandidate(
     senderId: input.message.senderId,
     ...(input.senderType ? { senderType: input.senderType } : {}),
     addressedToAgent: input.addressing.addressedToAgent,
-    text: input.message.content,
+    admittedPeer: isAdmittedPeer(input),
+    text: isSelfMentionPing(input.message) ? '' : input.message.content,
     attachmentCount: input.message.resources.length,
     ...(input.message.rawContentType
       ? { rawContentType: input.message.rawContentType }

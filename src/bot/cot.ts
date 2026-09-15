@@ -249,7 +249,7 @@ export async function sweepOrphanedCots(
   }
 }
 
-interface CotEvent {
+export interface CotEvent {
   event_type: string;
   content: string;
   timestamp: number;
@@ -355,9 +355,9 @@ export class CotPublisher {
       this.timer = undefined;
     }
     await this.flush();
-    if (this.disabled || !this.ref) return;
+    if (!this.ref) return;
     try {
-      await this.client.complete(this.ref, reason);
+      await this.client.complete(this.ref, this.disabled ? 'interrupted' : reason);
       await clearActiveRef(this.stateFile, this.ref.cotId);
       log.info('cot', 'completed', { cotId: this.ref.cotId, reason });
     } catch (err) {
@@ -394,6 +394,7 @@ export class CotPublisher {
     this.flushing = this.client.update(this.ref, events)
       .catch((err) => {
         this.disabled = true;
+        this.buffer.length = 0;
         this.degradedReason = err instanceof Error ? err.message : String(err);
         log.warn('cot', 'update-failed', { err: this.degradedReason });
       })
@@ -444,7 +445,7 @@ export function finalAnswerOnlyState(state: RunState): RunState {
 export async function consumeCotEvents(
   events: AsyncIterable<AgentEvent>,
   publisher: CotPublisher,
-  opts: { detail: CotMessagesMode },
+  opts: { detail: CotMessagesMode; showToolCalls?: boolean },
 ): Promise<void> {
   let reasoningOpen = false;
   let textStepOpen = false;
@@ -457,6 +458,7 @@ export async function consumeCotEvents(
 
   try {
     for await (const evt of events) {
+      if (opts.showToolCalls === false && (evt.type === 'tool_use' || evt.type === 'tool_result')) continue;
       if (evt.type === 'system' || evt.type === 'usage' || evt.type === 'performance') continue;
       if (evt.type === 'thinking') {
         closeTextIfNeeded();

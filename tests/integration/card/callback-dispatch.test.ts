@@ -14,10 +14,32 @@ import { WorkspaceStore } from '../../../src/workspace/store.js';
 import { FakeAgentAdapter, type FakeAgentRun } from '../../helpers/fake-agent.js';
 import { createFakeChannel, type FakeChannel } from '../../helpers/fake-channel.js';
 import { createTmpProfile, type TmpProfile } from '../../helpers/tmp-profile.js';
+import { gateFixture, directRequest } from '../../helpers/space-gate';
+import { spaceLarkChannel } from '../../../src/outbound/space-lark-channel';
+import type { SpaceOperationGate } from '../../../src/space/operation-gate';
 
 const cleanups: Array<() => Promise<void>> = [];
 
 describe('signed card callback dispatch', () => {
+  it('E5/X4: a topic card uses its original space scope and a changed audience cannot stop another run', async () => {
+    const tmp = await createTmpProfile('space-callback-');
+    const f = await gateFixture(tmp.root); f.state.humans = ['ou_operator'];
+    try {
+      const h = await createHarness({ chatMode: 'topic', spaceGate: f.gate });
+      h.channel.rawThreadIds.set('om_card', 'th_topic');
+      const operation = await f.gate.enter({ ...directRequest('ou_operator', 'oc_group'), kind: 'group' }, 'oc_group:th_topic');
+      await f.resources.record(operation.context, 'message', 'om_card');
+      const run = h.agent.run({ runId: 'run-active', scopeId: operation.executionScope, prompt: 'running' }) as FakeAgentRun;
+      h.activeRuns.register(operation.executionScope, run);
+      await h.dispatch({ cmd: 'stop', __bridge_cb: true, bridge_token: h.token('stop', { scope: operation.executionScope }) });
+      expect(run.stopped).toBe(true);
+      const later = h.agent.run({ runId: 'run-active', scopeId: operation.executionScope, prompt: 'later' }) as FakeAgentRun;
+      h.activeRuns.register(operation.executionScope, later);
+      f.state.humans = ['ou_operator', 'another'];
+      await h.dispatch({ cmd: 'stop', __bridge_cb: true, bridge_token: h.token('stop', { scope: operation.executionScope, nonce: 'late' }) });
+      expect(later.stopped).toBe(false);
+    } finally { await f.services.close(); await tmp.cleanup(); }
+  });
   afterEach(async () => {
     await Promise.all(cleanups.splice(0).map((cleanup) => cleanup()));
   });
@@ -124,7 +146,7 @@ type Harness = {
 };
 
 async function createHarness(
-  opts: { callbackAuth?: boolean; chatMode?: 'p2p' | 'group' | 'topic' } = {},
+  opts: { callbackAuth?: boolean; chatMode?: 'p2p' | 'group' | 'topic'; spaceGate?: SpaceOperationGate } = {},
 ): Promise<Harness> {
   const tmp = await createTmpProfile('callback-dispatch-test-');
   const channel = createFakeChannel();
@@ -135,7 +157,8 @@ async function createHarness(
   const pending = new PendingQueue(60_000, () => {});
   const store = new CallbackNonceStore(`${tmp.profile}/callback-nonces.json`);
   const controls = {
-    profile: 'claude',
+    profile: opts.spaceGate ? 'profile' : 'claude',
+    ...(opts.spaceGate ? { spaceGate: opts.spaceGate } : {}),
     profileConfig: createDefaultProfileConfig({
       agentKind: 'claude',
       accounts: { app: { id: 'app-id', secret: 'secret', tenant: 'feishu' } },
@@ -194,7 +217,8 @@ async function createHarness(
     },
     dispatch: async (value, formValue) => {
       await handleCardAction({
-        channel: channel as unknown as Parameters<typeof handleCardAction>[0]['channel'],
+        channel: opts.spaceGate ? spaceLarkChannel(channel as unknown as Parameters<typeof handleCardAction>[0]['channel'], opts.spaceGate)
+          : channel as unknown as Parameters<typeof handleCardAction>[0]['channel'],
         evt: cardEvent(value, formValue),
         sessions,
         workspaces,
