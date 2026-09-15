@@ -39,11 +39,20 @@ export async function applyLarkCliIdentityPolicy(
   identityPreset: LarkCliIdentityPreset,
 ): Promise<boolean> {
   const env = buildChannelEnv(context);
-  const strictMode = identityPreset === 'user-default' ? 'off' : 'bot';
-  const defaultAs = identityPreset === 'user-default' ? 'auto' : 'bot';
-  const strictResult = await runQuiet('lark-cli', ['config', 'strict-mode', strictMode], env);
-  if (!strictResult) return false;
-  return runQuiet('lark-cli', ['config', 'default-as', defaultAs], env);
+  return runLarkCliIdentityPolicy(identityPreset,
+    (args) => runQuiet('lark-cli', args, env), (result) => result);
+}
+
+/** Share command ordering and preset mapping while callers retain their execution context. */
+export async function runLarkCliIdentityPolicy<T>(
+  identityPreset: LarkCliIdentityPreset,
+  run: (args: string[]) => Promise<T>,
+  succeeded: (result: T) => boolean,
+): Promise<T> {
+  const userAllowed = identityPreset === 'user-default';
+  const strictResult = await run(['config', 'strict-mode', userAllowed ? 'off' : 'bot']);
+  if (!succeeded(strictResult)) return strictResult;
+  return run(['config', 'default-as', userAllowed ? 'auto' : 'bot']);
 }
 
 async function runQuiet(

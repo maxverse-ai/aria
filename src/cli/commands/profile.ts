@@ -1,3 +1,4 @@
+import { startProfileOnHost } from '../profile-online';
 import { existsSync } from 'node:fs';
 import { resolveAppPaths } from '../../config/app-paths';
 import { paths } from '../../config/paths';
@@ -26,6 +27,8 @@ export interface ProfileCommandOptions {
 }
 
 export interface ProfileCreateOptions extends ProfileCommandOptions {
+  /** Defaults to start in an interactive terminal, configuration-only in scripts. */
+  start?: boolean;
   agent?: string;
   workspace?: string;
   appId?: string;
@@ -129,7 +132,26 @@ export async function runProfileCreate(
     tenant: opts.tenant,
     allowBootstrap: true,
   });
-  console.log(`已创建 profile: ${name}`);
+  console.log(`✓ profile「${name}」配置已保存。`);
+  const shouldStart = opts.start ?? Boolean(process.stdin.isTTY && process.stdout.isTTY);
+  if (shouldStart) {
+    try {
+      await runProfileStart(name, opts);
+    } catch (error) {
+      throw new Error(`配置已保存，但未确认上线：${error instanceof Error ? error.message : String(error)}\n无需重新创建；重试：aria profile start ${name}`);
+    }
+  } else {
+    console.log(`尚未启动，暂不能接收消息。上线：aria profile start ${name}`);
+  }
+}
+
+export async function runProfileStart(name: string, opts: ProfileCommandOptions = {}): Promise<void> {
+  const rootDir = opts.rootDir ?? paths.rootDir;
+  const root = await loadRootConfig(resolveAppPaths({ rootDir }).configFile);
+  if (!root?.profiles[name]) throw new Error(`profile not found: ${name}`);
+  console.log(`正在通过 Supervisor 启动 profile「${name}」…`);
+  await startProfileOnHost(name, rootDir);
+  console.log(`✓ profile「${name}」启动成功。请发送一条私聊消息验证实际回复。`);
 }
 
 export async function runProfileUse(

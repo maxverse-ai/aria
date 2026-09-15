@@ -41,6 +41,10 @@ export interface FileNativeReadRepositoryOptions {
   snapshotFile: string;
   journalFile: string;
   now?: () => string;
+  /** Offline observation must never repair or rewrite another owner's stores. */
+  readOnly?: boolean;
+  /** Derived indexes may checkpoint less often; every journal append stays durable. */
+  snapshotEvery?: number;
 }
 
 /**
@@ -54,6 +58,8 @@ export class FileNativeReadRepository implements NativeReadRepository {
   private readonly snapshotFile: string;
   private readonly journalFile: string;
   private readonly now: () => string;
+  private readonly readOnly: boolean;
+  private readonly snapshotEvery: number;
   private initialized = false;
   private sequence = 0;
   private readonly resources = new Map<string, NativeReadResource>();
@@ -70,6 +76,9 @@ export class FileNativeReadRepository implements NativeReadRepository {
     this.snapshotFile = options.snapshotFile;
     this.journalFile = options.journalFile;
     this.now = options.now ?? (() => new Date().toISOString());
+    this.readOnly = options.readOnly ?? false;
+    this.snapshotEvery = options.snapshotEvery ?? 1;
+    if (!Number.isSafeInteger(this.snapshotEvery) || this.snapshotEvery < 1) throw new Error('invalid snapshot interval');
   }
 
   async initialize(): Promise<void> {
@@ -169,6 +178,7 @@ export class FileNativeReadRepository implements NativeReadRepository {
   }
 
   private async mutate(eventId: string, operation: () => Promise<NativeReadChange>): Promise<NativeReadChange> {
+    if (this.readOnly) throw new NativeReadRepositoryError('INVALID_INPUT', 'read-only repository');
     let result: NativeReadChange | undefined;
     await this.enqueue(async () => {
       const existing = this.changesByEventId.get(eventId);
@@ -187,7 +197,7 @@ export class FileNativeReadRepository implements NativeReadRepository {
     };
     await appendDurably(this.journalFile, `${JSON.stringify(entry)}\n`);
     this.applyEntry(entry);
-    await this.writeSnapshot();
+    if (sequence % this.snapshotEvery === 0) await this.writeSnapshot();
   }
 
   private applyEntry(entry: NativeReadJournalEntry): void {
@@ -308,7 +318,7 @@ export class FileNativeReadRepository implements NativeReadRepository {
       this.changesByEventId.clear();
       for (const entry of entries) this.applyEntry(entry);
     }
-    if (repairedTrailingWrite) {
+    if (repairedTrailingWrite && !this.readOnly) {
       await writeFileAtomic(
         this.journalFile,
         entries.map((entry) => JSON.stringify(entry)).join('\n') + (entries.length > 0 ? '\n' : ''),
@@ -319,6 +329,7 @@ export class FileNativeReadRepository implements NativeReadRepository {
   }
 
   private async writeSnapshot(): Promise<void> {
+    if (this.readOnly) return;
     const snapshot: NativeReadSnapshot = {
       schema: SNAPSHOT_SCHEMA,
       profileId: this.profileId,

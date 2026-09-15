@@ -166,6 +166,7 @@ export async function getUserAuthStatus(
   exec: LarkCliExec = defaultExec,
 ): Promise<UserAuthStatus> {
   const r = await exec(['auth', 'status', '--json'], larkCliEnv(ctx), 15_000);
+  if (r.timedOut || r.code !== 0) throw new Error(cliError(r, '无法查询授权状态'));
   const json = parseJson(r.stdout);
   const user = isRecord(json) && isRecord(json.identities) ? json.identities.user : undefined;
   if (!isRecord(user)) return { loggedIn: false, scopes: [] };
@@ -202,6 +203,7 @@ export async function startDeviceLogin(
     30_000,
   );
   const json = parseJson(r.stdout);
+  if (r.timedOut || r.code !== 0) throw new Error(cliError(r, '无法开始授权'));
   // Prefer the known device-flow field names (both snake_case and camelCase),
   // then fall back to a fuzzy match so a minor lark-cli rename won't break it.
   const verificationUrl =
@@ -220,9 +222,7 @@ export async function startDeviceLogin(
   const deviceCode = pickString(json, ['device_code', 'deviceCode']) ?? findString(json, /device.?code/i) ?? '';
   const userCode = pickString(json, ['user_code', 'userCode']) ?? findString(json, /user.?code/i);
   if (!verificationUrl || !deviceCode) {
-    throw new Error(
-      `无法开始授权：${r.stderr.trim() || r.stdout.trim() || 'lark-cli auth login 未返回验证链接'}`,
-    );
+    throw new Error('无法开始授权：lark-cli auth login 未返回验证链接或设备码');
   }
   const expiresIn =
     isRecord(json) && typeof json.expiresIn === 'number'
@@ -244,13 +244,8 @@ export async function completeDeviceLogin(
     larkCliEnv(ctx),
     30_000,
   );
-  if (r.code === 0) return { ok: true };
-  const json = parseJson(r.stdout);
-  const message =
-    findString(json, /message|error|reason/i) ??
-    r.stderr.trim() ??
-    '授权尚未完成，请先在浏览器里确认授权后重试';
-  return { ok: false, message };
+  if (!r.timedOut && r.code === 0) return { ok: true };
+  return { ok: false, message: cliError(r, '无法完成授权') };
 }
 
 export interface UserChatsPage {
@@ -405,7 +400,13 @@ function cliError(r: ExecResult, prefix: string): string {
   if (r.timedOut) return `${prefix}：命令超时`;
   // lark-cli's error JSON can land on stdout OR stderr; parse whichever has it
   // and pull the nested error message rather than dumping the raw blob.
-  const json = parseJson(r.stdout) ?? parseJson(r.stderr);
+  const stderrJson = parseJson(r.stderr);
+  const stdoutJson = parseJson(r.stdout);
+  const json = isRecord(stderrJson) && isRecord(stderrJson.error)
+    ? stderrJson.error
+    : isRecord(stdoutJson) && isRecord(stdoutJson.error)
+      ? stdoutJson.error
+      : stdoutJson ?? stderrJson;
   const firstLine = (s: string): string | undefined => s.trim().split('\n')[0]?.trim() || undefined;
   const detail =
     findString(json, /message|reason/i) ?? firstLine(r.stderr) ?? firstLine(r.stdout) ?? `退出码 ${r.code}`;

@@ -2,8 +2,11 @@ import { randomUUID, timingSafeEqual } from 'node:crypto';
 import { chmod, mkdir, rm } from 'node:fs/promises';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { dirname } from 'node:path';
+import { log } from '../core/logger';
 import { setTimeout as delay } from 'node:timers/promises';
 import type { NativeReadRepository } from '../application/control/native-read-repository';
+import type { ManagementReadModel } from '../application/control/management-read-model';
+import { ManagementReadAuthority, MANAGEMENT_READ_HEADER } from './management-read-authority';
 import { NativeReadRepositoryError } from '../application/control/native-read-repository';
 import {
   NATIVE_READ_API_VERSION,
@@ -30,6 +33,12 @@ export interface NativeReadHttpServerOptions {
   token: string;
   scopes: readonly NativeReadScope[];
   repository: NativeReadRepository;
+  /** Trusted controller authentication resolves a confined repository per request. */
+  spaceRepository?: (request: IncomingMessage) => Promise<NativeReadRepository>;
+  /** Explicitly allow transport health/capabilities without private data access. */
+  allowUnscopedMetadata?: boolean;
+  management?: { publicKey: string; model: ManagementReadModel; available: () => boolean; recordReadAttempt?: () => Promise<void> };
+  managementAuthority?: ManagementReadAuthority;
   instanceId?: string;
   serverVersion: string;
   now?: () => Date;
@@ -45,6 +54,7 @@ export async function startNativeReadHttpServer(
   options: NativeReadHttpServerOptions,
 ): Promise<NativeReadHttpServerHandle> {
   if (!options.token) throw new Error('native read API token is required');
+  if (options.management) options = { ...options, managementAuthority: new ManagementReadAuthority(options.management.publicKey, options.repository.profileId) };
   await options.repository.initialize();
   const instanceId = options.instanceId ?? randomUUID();
   const startedAt = (options.now ?? (() => new Date()))().toISOString();
@@ -106,9 +116,60 @@ async function handleRequest(
     sendError(response, 400, 'INVALID_REQUEST', 'only GET is supported');
     return;
   }
+  const managementHeader = request.headers[MANAGEMENT_READ_HEADER];
+  if (request.headers['x-aria-management-token'] !== undefined) {
+    sendError(response, 403, 'FORBIDDEN', 'shared management bearer credentials are not supported'); return;
+  }
+  const management = managementHeader !== undefined;
+  if (management) {
+    // Never log credentials, request query strings, or message contents.
+    response.once('finish', () => log.info('native-read', 'management.read', {
+      profileId: options.repository.profileId, actor: 'host-management-client',
+      route: new URL(request.url ?? '/', 'http://localhost').pathname,
+      status: response.statusCode,
+    }));
+    if (!options.management || !options.managementAuthority?.authorize(managementHeader, request.method!, request.url ?? '/')
+      || request.headers['x-aria-space-read-token'] !== undefined) {
+      sendError(response, 403, 'FORBIDDEN', 'management read authority required'); return;
+    }
+    if (!options.management.available()) {
+      sendError(response, 503, 'RESOURCE_UNAVAILABLE', 'management read index unavailable'); return;
+    }
+    try { await options.management.recordReadAttempt?.(); }
+    catch { sendError(response, 503, 'RESOURCE_UNAVAILABLE', 'management read audit unavailable'); return; }
+    options = { ...options, repository: options.management.model.repository };
+    response.setHeader('X-Aria-Management-Read-Authorized', '1');
+  }
+  // A delegated request must never downgrade to the legacy profile reader
+  // after rollback or while querying another installation.
+  if (request.headers['x-aria-space-read-token'] !== undefined && !options.spaceRepository) {
+    sendError(response, 403, 'FORBIDDEN', 'delegated space reads require an active Team runtime');
+    return;
+  }
+  const metadataPath = new URL(request.url ?? '/', 'http://localhost').pathname;
+  const unscoped = options.allowUnscopedMetadata && ['/healthz', '/readyz', '/v1/meta', '/v1/capabilities'].includes(metadataPath);
+  if (options.spaceRepository && !unscoped && !management) {
+    try {
+      options = { ...options, repository: await options.spaceRepository(request) };
+      response.setHeader('X-Aria-Space-Read-Authorized', '1');
+    }
+    catch { sendError(response, 403, 'FORBIDDEN', 'space read authorization is unavailable'); return; }
+  }
   const url = new URL(request.url ?? '/', 'http://localhost');
   const path = url.pathname;
   const context = { options, response, instanceId };
+
+  if (path === '/v1/session-summaries') {
+    if (!management || !options.management) { sendError(response, 403, 'FORBIDDEN', 'management read authority required'); return; }
+    if (!requireScope(context, 'read:sessions')) return;
+    // Summaries contain names and snippets; honor the same field scopes as detail reads.
+    if (!requireScope(context, 'read:identities') || !requireScope(context, 'read:chats')
+      || !requireScope(context, 'read:messages') || !requireScope(context, 'read:message-content') || !requireScope(context, 'read:runs')) return;
+    try { sendJson(response, 200, { ...await options.management.model.page(Number(url.searchParams.get('limit') ?? 200),
+      url.searchParams.get('cursor') ?? undefined), instanceId }); }
+    catch (error) { sendRepositoryError(response, error); }
+    return;
+  }
 
   if (path === '/healthz' || path === '/readyz') {
     sendJson(response, 200, {
@@ -129,7 +190,7 @@ async function handleRequest(
     if (!requireScope(context, 'read:meta')) return;
     sendJson(response, 200, {
       schema: 'aria.read.capabilities.v1', apiVersion: NATIVE_READ_API_VERSION,
-      instanceId, capabilities: capabilities(options.scopes),
+      instanceId, capabilities: capabilities(options.scopes, management),
     });
     return;
   }
@@ -224,7 +285,7 @@ function scopeFor(type: NativeReadResourceType): NativeReadScope {
     identity: 'read:identities', chat: 'read:chats', 'chat-member': 'read:chats', 'audit-event': 'read:audit' } as const)[type];
 }
 
-function capabilities(scopes: readonly NativeReadScope[]): NativeReadCapability[] {
+function capabilities(scopes: readonly NativeReadScope[], management = false): NativeReadCapability[] {
   const definitions: NativeReadCapability[] = [
     { id: 'meta', method: 'GET', route: '/v1/meta', requiredScopes: ['read:meta'] },
     { id: 'capabilities', method: 'GET', route: '/v1/capabilities', requiredScopes: ['read:meta'] },
@@ -243,6 +304,8 @@ function capabilities(scopes: readonly NativeReadScope[]): NativeReadCapability[
     { id: 'audit.list', method: 'GET', route: '/v1/audit/events', requiredScopes: ['read:audit'], resourceType: 'audit-event' },
     { id: 'changes.list', method: 'GET', route: '/v1/changes', requiredScopes: ['read:changes'] },
   ];
+  if (management) definitions.push({ id: 'sessions.summaries', method: 'GET', route: '/v1/session-summaries',
+    requiredScopes: ['read:sessions', 'read:identities', 'read:chats', 'read:messages', 'read:message-content', 'read:runs'], resourceType: 'session' });
   return definitions.filter((item) => item.requiredScopes.every((scope) => hasScope(scopes, scope as NativeReadScope)));
 }
 

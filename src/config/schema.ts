@@ -249,7 +249,7 @@ export function getCotMessages(cfg: AppConfig): CotMessagesMode {
 }
 
 /** Resolve the max-concurrent-runs preference with default + sanity clamp. */
-export function getMaxConcurrentRuns(cfg: AppConfig): number {
+export function getMaxConcurrentRuns(cfg: Pick<AppConfig, 'preferences'>): number {
   const raw = cfg.preferences?.maxConcurrentRuns;
   if (typeof raw !== 'number' || !Number.isFinite(raw) || raw < 1) return 10;
   // Reasonable upper bound — at 50+ concurrent claudes the bot box is
@@ -287,7 +287,7 @@ export function getRequireMentionInGroup(cfg: AppConfig): boolean {
  * typo can't either make stop() effectively SIGKILL-immediate or hang for
  * minutes.
  */
-export function getAgentStopGraceMs(cfg: AppConfig): number {
+export function getAgentStopGraceMs(cfg: Pick<AppConfig, 'preferences'>): number {
   const raw = cfg.preferences?.agentStopGraceMs;
   if (typeof raw !== 'number' || !Number.isFinite(raw)) return 5000;
   return Math.min(30_000, Math.max(100, Math.floor(raw)));

@@ -1,3 +1,4 @@
+import { confineSpawn } from '../space/launch';
 import type {
   ChildProcess,
   ChildProcessByStdio,
@@ -12,7 +13,10 @@ export function spawnProcess(
   args: readonly string[] = [],
   options: SpawnOptions = {},
 ): ChildProcess {
-  return crossSpawn(command, [...args], options);
+  const launch = confineSpawn(command, args, options);
+  const child = crossSpawn(launch.command, [...launch.args], launch.options);
+  launch.onSpawn?.(child);
+  return child;
 }
 
 export function spawnProcessSync(
@@ -20,7 +24,10 @@ export function spawnProcessSync(
   args: readonly string[] = [],
   options: SpawnSyncOptions = {},
 ) {
-  return crossSpawn.sync(command, [...args], options);
+  const launch = confineSpawn(command, args, options);
+  const result = crossSpawn.sync(launch.command, [...launch.args], launch.options);
+  launch.onSyncExit?.(result);
+  return result;
 }
 
 export function mergeProcessEnv(

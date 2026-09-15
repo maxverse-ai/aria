@@ -139,6 +139,7 @@ async function runClassic(opts: StartOptions): Promise<void> {
     serverVersion: pkg.version,
   });
   const supervisor = new Supervisor({
+    persistRunningIntent: false,
     configPath,
     rootDir: appPaths.rootDir,
     triggerRuntimeEnabled: process.env.ARIA_TRIGGER_RUNTIME === 'enabled',
@@ -227,15 +228,12 @@ async function runSupervisorConsole(opts: StartOptions): Promise<void> {
     log.warn('ui', 'server-start-failed', { err: String(err) });
   }
 
-  // Auto-start only the active profile; others start on demand from the console.
+  // Restore explicit running intent; migrate the old active-only behavior once.
   try {
-    await supervisor.startProfile(appPaths.profile);
-    console.log(`✓ profile「${appPaths.profile}」已上线`);
-  } catch (err) {
-    console.warn(
-      `⚠️ active profile「${appPaths.profile}」启动失败：${err instanceof Error ? err.message : String(err)}`,
-    );
-    log.warn('supervisor', 'active-start-failed', { profile: appPaths.profile, err: String(err) });
+    await supervisor.restoreProfiles(appPaths.profile);
+  } catch (error) {
+    console.warn(`⚠️ 无法恢复 profile 运行状态：${error instanceof Error ? error.message : String(error)}`);
+    log.warn('supervisor', 'restore-state-failed', {});
   }
 
   await parkWithShutdown(supervisor, appPaths, uiServer, hostLock);

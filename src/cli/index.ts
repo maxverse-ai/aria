@@ -10,6 +10,7 @@ import {
 } from './commands/secrets';
 import {
   runProfileCreate,
+  runProfileStart,
   runProfileExport,
   runProfileList,
   runProfileRemove,
@@ -61,6 +62,8 @@ import {
   runTriggerPreview,
   runTriggerSchema,
 } from './commands/trigger';
+import { runWorker } from './commands/worker';
+import { runSpaceCommand, type SpaceCliOptions } from './commands/space';
 
 const program = new Command();
 
@@ -118,13 +121,16 @@ profile
 
 profile
   .command('create <name>')
-  .description('Create a profile from QR registration or existing app credentials')
+  .description('Create a profile; interactive terminals also start it on the existing Supervisor')
+  .option('--start', 'start on the existing Supervisor after creation (also in scripts)')
+  .option('--no-start', 'save configuration only; do not start the profile')
   .option('--agent <kind>', 'engine plugin id (claude, codex, ...)')
   .option('--workspace <path>', 'initial working directory for this profile')
   .option('--app-id <id>', 'use an existing Lark/Feishu app instead of QR app creation')
   .option('--app-secret <secret>', 'App Secret for --app-id; prefer interactive input on shared machines')
   .option('--tenant <tenant>', 'tenant for --app-id (feishu or lark; default feishu)')
   .action(async (name: string, opts: {
+    start?: boolean;
     agent?: string;
     workspace?: string;
     appId?: string;
@@ -133,6 +139,11 @@ profile
   }) => {
     await runProfileCreate(name, opts);
   });
+
+profile
+  .command('start <name>')
+  .description('Start an existing profile on the running Supervisor')
+  .action(async (name: string) => { await runProfileStart(name); });
 
 profile
   .command('use <name>')
@@ -372,6 +383,28 @@ config
     await runConfigApply(planId, opts);
   });
 
+const space = program.command('space').description('Prepare, activate and roll back execution spaces');
+for (const action of ['status', 'rollback'] as const) {
+  space.command(action).option('--profile <name>', 'profile name')
+    .option('--json', 'print machine-readable metadata')
+    .action(async (opts: SpaceCliOptions) => runSpaceCommand(action, undefined, opts));
+}
+space.command('prepare <deployment-file>').description('Stage and verify an offline profile; legacy data stays sealed unless imported by a trusted adapter')
+  .option('--profile <name>', 'profile name').option('--id <id>', 'resume an exact preparation id')
+  .option('--json', 'print preparation selection')
+  .action(async (file: string, opts: SpaceCliOptions) => runSpaceCommand('prepare', file, opts));
+space.command('activate <selection-file>').description('Activate an immutable preparation while the profile is stopped')
+  .option('--accept-sealed-history', 'acknowledge that unmapped legacy history stays sealed')
+  .option('--profile <name>', 'profile name').option('--json', 'print machine-readable metadata')
+  .action(async (file: string, opts: SpaceCliOptions) => runSpaceCommand('activate', file, opts));
+space.command('prepare-upgrade <deployment-file>').description('Back up and verify an offline prepared profile while preserving its data and credential paths')
+  .option('--profile <name>', 'profile name').option('--id <id>', 'resume an exact upgrade preparation id')
+  .option('--json', 'print preparation selection')
+  .action(async (file: string, opts: SpaceCliOptions) => runSpaceCommand('prepare-upgrade', file, opts));
+space.command('inspect <selection-file>').description('Review a preparation without exposing private files or changing state')
+  .option('--profile <name>', 'profile name').option('--json', 'print machine-readable metadata')
+  .action(async (file: string, opts: SpaceCliOptions) => runSpaceCommand('inspect', file, opts));
+
 const runtime = program
   .command('runtime')
   .description('Inspect managed runtime state');
@@ -383,6 +416,29 @@ runtime
   .option('--json', 'print stable machine-readable JSON')
   .action(async (opts: { profile?: string; json?: boolean }) => {
     await runRuntimeStatus(opts);
+  });
+
+const worker = program
+  .command('worker')
+  .description('Run Aria as a channel-free managed worker');
+
+worker
+  .command('discover')
+  .description('List configured worker identities as secret-free JSON')
+  .requiredOption('--config <path>', 'path to the Aria root config')
+  .action(async (opts: { config: string }) => {
+    const { discoverWorkerProfiles } = await import('../worker/discovery');
+    process.stdout.write(`${JSON.stringify(await discoverWorkerProfiles(opts.config))}\n`);
+  });
+
+worker
+  .command('serve')
+  .description('Serve newline-delimited JSON-RPC over stdin/stdout')
+  .requiredOption('--config <path>', 'path to the Aria root config')
+  .requiredOption('--profile <name>', 'profile whose engine and local policy are used')
+  .requiredOption('--state-dir <path>', 'isolated worker session and log state')
+  .action(async (opts: { config?: string; profile?: string; stateDir?: string }) => {
+    await runWorker(opts);
   });
 
 const preflight = program

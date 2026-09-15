@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { executionSpaceMode } from '../space/capabilities';
 import { dirname } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import type { LarkChannel } from '@larksuite/channel';
@@ -77,6 +78,7 @@ export class ApiError extends HttpError {}
 
 /** The settings payload the SPA reads and writes. */
 export interface ConfigView {
+  executionMode: 'personal' | 'legacy-team' | 'team';
   profile: string;
   agentKind: string;
   mode: ProfileMode;
@@ -107,6 +109,7 @@ export function buildConfigView(state: MutableProfileState, live = false): Confi
   const ms = getRunIdleTimeoutMs(state.cfg);
   return {
     profile: state.profile,
+    executionMode: executionSpaceMode(state.profileConfig),
     agentKind,
     mode: state.profileConfig.mode,
     model: normalizeModelSelection(agentKind, state.cfg.preferences?.model),
@@ -311,6 +314,7 @@ function parseConfigBody(state: MutableProfileState, body: unknown): ParsedConfi
  */
 export async function applyConfig(rt: UiRuntime, body: unknown): Promise<ConfigView> {
   const p = parseConfigBody(rt, body);
+  if (rt.profileConfig.executionSpaces && p.mode !== rt.profileConfig.mode) throw new ApiError(409, '请先通过 aria space rollback 停用已准备的执行空间');
   let identityApplied = false;
   try {
     if (p.identityChanged) {
@@ -345,6 +349,7 @@ export async function applyConfigToDisk(
   body: unknown,
 ): Promise<ConfigView> {
   const p = parseConfigBody(state, body);
+  if (state.profileConfig.executionSpaces && p.mode !== state.profileConfig.mode) throw new ApiError(409, '请先通过 aria space rollback 停用已准备的执行空间');
   try {
     await commitProfileSettings(state, p);
   } catch (err) {

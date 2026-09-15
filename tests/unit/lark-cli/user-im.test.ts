@@ -95,6 +95,36 @@ describe('user-im lark-cli helpers', () => {
     expect(r.message).toContain('authorization_pending');
   });
 
+  it.each([
+    'strict mode is "bot", only bot-identity commands are available',
+    'lark-channel context detected but lark-cli is not bound to it',
+    'need_user_authorization',
+  ])('preserves CLI failure: %s', async (message) => {
+    const exec = stub(() => ({
+      code: 2,
+      stdout: JSON.stringify({ _notice: { message: 'new version available' } }),
+      stderr: JSON.stringify({ ok: false, error: { message } }),
+    }));
+    await expect(getUserAuthStatus(ctx, exec)).rejects.toThrow(message);
+    await expect(startDeviceLogin(ctx, [], exec)).rejects.toThrow(message);
+    expect(await completeDeviceLogin(ctx, 'dev-123', exec)).toEqual({
+      ok: false, message: `无法完成授权：${message}`,
+    });
+  });
+
+  it('rejects a failed start even if stdout contains a URL and device code', async () => {
+    const exec = stub(() => ({ code: 2,
+      stdout: JSON.stringify({ verification_url: 'https://example.test', device_code: 'stale' }),
+      stderr: JSON.stringify({ error: { message: 'expired' } }),
+    }));
+    await expect(startDeviceLogin(ctx, [], exec)).rejects.toThrow('expired');
+  });
+
+  it('does not treat a timed-out poll as successful or pending authorization', async () => {
+    const exec: LarkCliExec = vi.fn(async () => ({ code: 0, stdout: '', stderr: '', timedOut: true }));
+    expect(await completeDeviceLogin(ctx, 'dev-123', exec)).toEqual({ ok: false, message: '无法完成授权：命令超时' });
+  });
+
   it('lists the user chats (page of 8) with pagination token from data.has_more/page_token', async () => {
     const exec = stub((args) => {
       expect(args).toContain('--as');

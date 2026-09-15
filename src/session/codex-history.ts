@@ -215,7 +215,7 @@ function listRequest(options: ListCodexThreadHistoryOptions) {
   };
 }
 
-function parseThreadListResponse(
+export function parseThreadListResponse(
   input: unknown,
 ): { ok: true; entries: CodexThreadHistoryEntry[] } | { ok: false; error: CodexHistoryError } {
   const raw = recordValue(input);

@@ -31,6 +31,17 @@ describe('native read local HTTP server', () => {
     expect(meta.body).toMatchObject({ schema: 'aria.read.meta.v1', instanceId: 'instance-1' });
   });
 
+  it('rejects delegated capabilities on the legacy reader after rollback', async () => {
+    const server = await setup(['read:sessions', 'read:messages', 'read:message-content']);
+    await upsert(server.repository, message());
+    for (const path of ['/v1/sessions', '/v1/messages', '/readyz']) {
+      const result = await get(server.endpoint, path, 'secret', { 'x-aria-space-read-token': 'a'.repeat(64) });
+      expect(result.status).toBe(403);
+      expect(JSON.stringify(result.body)).not.toContain('private prompt');
+    }
+    expect((await get(server.endpoint, '/v1/messages', 'secret')).status).toBe(200);
+  });
+
   it('serves normalized lists/details and redacts message content without content scope', async () => {
     const server = await setup(['read:sessions', 'read:messages', 'read:chats']);
     await upsert(server.repository, session());
@@ -114,9 +125,9 @@ function chat(): NativeReadResourceDraft {
   return { ...base('chat', 'chat_1'), kind: 'group', name: 'Team', resolutionStatus: 'resolved' };
 }
 
-function get(socketPath: string, path: string, token?: string): Promise<{ status: number; body: unknown }> {
+function get(socketPath: string, path: string, token?: string, headers: Record<string, string> = {}): Promise<{ status: number; body: unknown }> {
   return new Promise((resolve, reject) => {
-    const req = request({ socketPath, path, method: 'GET', headers: token ? { authorization: `Bearer ${token}` } : {} }, (res) => {
+    const req = request({ socketPath, path, method: 'GET', headers: { ...(token ? { authorization: `Bearer ${token}` } : {}), ...headers } }, (res) => {
       const chunks: Buffer[] = [];
       res.on('data', (chunk: Buffer) => chunks.push(chunk));
       res.on('end', () => resolve({ status: res.statusCode ?? 0, body: JSON.parse(Buffer.concat(chunks).toString('utf8')) }));

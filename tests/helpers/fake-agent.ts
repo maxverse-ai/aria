@@ -1,6 +1,5 @@
 import type {
   AgentAdapter,
-  AgentBotIdentity,
   AgentEvent,
   AgentRun,
   AgentRunOptions,
@@ -65,7 +64,6 @@ export class FakeAgentAdapter implements AgentAdapter {
   readonly displayName: string;
   readonly runs: FakeAgentRun[] = [];
   readonly runOptions: AgentRunOptions[] = [];
-  botIdentity: AgentBotIdentity | undefined;
   #available: boolean;
   #eventRuns: AgentEvent[][];
   #waitForExitResults: boolean[];
@@ -86,10 +84,6 @@ export class FakeAgentAdapter implements AgentAdapter {
 
   async isAvailable(): Promise<boolean> {
     return this.#available;
-  }
-
-  setBotIdentity(identity: AgentBotIdentity): void {
-    this.botIdentity = identity;
   }
 
   run(opts: AgentRunOptions): AgentRun {

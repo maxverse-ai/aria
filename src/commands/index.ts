@@ -1,3 +1,9 @@
+import { messageCommandText } from '../bot/message-normalization';
+import {
+  parseTaskCommand,
+  type TaskCommandRequest,
+} from '../task/admission';
+import { larkParticipantIdentity } from '../bot/participant-identity';
 import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
@@ -163,6 +169,12 @@ function runDetachedOutbound(
 }
 
 export interface Controls {
+  personalGroupStatus?(chatId: string): Promise<string>;
+  presentationStatus?(): import('../outbound/presentation').PresentationState;
+  /** Trusted prepared-space entry; absent for personal and legacy team. */
+  spaceGate?: import('../space/operation-gate').SpaceOperationGate;
+  issueSpaceReadAccess?(conversationId?: string): Promise<{ token: string; expiresAt: number }>;
+  engineHistory?(cwd: string, limit: number): Promise<EngineHistoryEntry[]>;
   profile: string;
   profileConfig: ProfileConfig;
   botOwnerId?: string;
@@ -253,6 +265,8 @@ export interface CommandContext {
   fromCardAction?: boolean;
   /** Intake hook used by `/new <task>` after the old session is cleared. */
   onNewTask?: (content: string) => void;
+  /** Explicit task admission hook. Ordinary messages never call this. */
+  onTask?: (request: TaskCommandRequest) => Promise<{ taskId: string }>;
 }
 
 type Handler = (args: string, ctx: CommandContext) => Promise<void>;
@@ -275,6 +289,7 @@ const RESUME_APPLIED_REPLY = '已完成，请继续发送下一条消息。';
 const handlers: Record<string, Handler> = {
   '/new': handleNew,
   '/reset': handleNew,
+  '/task': handleTask,
   '/cd': handleCd,
   '/ws': handleWs,
   '/resume': handleResume,
@@ -326,13 +341,20 @@ function isAdminCommand(cmd: string): boolean {
 }
 
 export async function tryHandleCommand(ctx: CommandContext): Promise<boolean> {
-  const trimmed = ctx.msg.content.trim();
+  const trimmed = await messageCommandText(ctx.msg);
   if (!trimmed.startsWith('/')) return false;
   const parts = trimmed.split(/\s+/);
   const cmd = parts[0] ?? '';
   const args = parts.slice(1).join(' ');
   const h = handlers[cmd];
   if (!h) return false;
+  if (ctx.controls.spaceGate) {
+    ctx.controls.spaceGate.active();
+    if (!spaceCommandSupported(cmd, args)) {
+      await reply(ctx, '此团队入口暂不支持该管理操作，请使用本机管理入口。');
+      return true;
+    }
+  }
   if (
     isAdminCommand(cmd) &&
     !canRunAdminCommand(ctx.controls.profileConfig, ctx.controls, ctx.msg.senderId).ok
@@ -361,6 +383,10 @@ export async function runCommandHandler(
 ): Promise<boolean> {
   const h = handlers[`/${name}`];
   if (!h) return false;
+  if (ctx.controls.spaceGate) {
+    ctx.controls.spaceGate.active();
+    if (!spaceCommandSupported(`/${name}`, args)) return true;
+  }
   if (
     isAdminCommand(name) &&
     !canRunAdminCommand(ctx.controls.profileConfig, ctx.controls, ctx.msg.senderId).ok
@@ -523,6 +549,29 @@ async function handleNew(args: string, ctx: CommandContext): Promise<void> {
         ? '已中断当前任务并开始新会话。'
         : '已开始新会话。',
   );
+}
+
+async function handleTask(args: string, ctx: CommandContext): Promise<void> {
+  if (!ctx.onTask) {
+    await reply(ctx, '当前运行时未启用任务入口。');
+    return;
+  }
+  const parsed = parseTaskCommand(args, {
+    mentionParticipantIds: (ctx.msg.mentions ?? [])
+      .map((mention) => mention.openId)
+      .filter((id): id is string => Boolean(id)),
+  });
+  if (!parsed.ok) {
+    await reply(ctx, '用法：`/task <目标> [--target agent_id] [--participants id1,id2] [--max-rounds N]`');
+    return;
+  }
+  try {
+    const created = await ctx.onTask(parsed.request);
+    await reply(ctx, `任务已创建：\`${created.taskId}\`，已进入任务线程。`);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    await reply(ctx, `❌ 创建任务失败：${message}`);
+  }
 }
 
 async function handleNewChat(rawName: string, ctx: CommandContext): Promise<void> {
@@ -1000,6 +1049,7 @@ function listModelsForContext(ctx: CommandContext, force = false): Promise<Model
       profileId: ctx.controls.profile,
       runtimeGeneration: ctx.controls.engineGeneration?.(),
       runtimeModels: ctx.controls.engineModels,
+      ...(ctx.controls.spaceGate ? { runtimeOnly: true, cacheScope: ctx.controls.spaceGate.services.authorization.inspect(ctx.controls.spaceGate.active().context).binding.spaceId } : {}),
     },
   );
 }
@@ -1083,6 +1133,7 @@ async function reasoningStateForContext(ctx: CommandContext, force = false) {
       profileId: ctx.controls.profile,
       runtimeGeneration: ctx.controls.engineGeneration?.(),
       runtimeModels: ctx.controls.engineModels,
+      ...(ctx.controls.spaceGate ? { runtimeOnly: true, cacheScope: ctx.controls.spaceGate.services.authorization.inspect(ctx.controls.spaceGate.active().context).binding.spaceId } : {}),
     },
   );
   const modelResolution = resolveReasoning(models, model, DEFAULT_MODEL);
@@ -1252,6 +1303,7 @@ async function fastStateForContext(ctx: CommandContext, force = false) {
       profileId: ctx.controls.profile,
       runtimeGeneration: ctx.controls.engineGeneration?.(),
       runtimeModels: ctx.controls.engineModels,
+      ...(ctx.controls.spaceGate ? { runtimeOnly: true, cacheScope: ctx.controls.spaceGate.services.authorization.inspect(ctx.controls.spaceGate.active().context).binding.spaceId } : {}),
     },
   );
   const resolution = resolveServiceTier(
@@ -1360,7 +1412,7 @@ async function showResumeHistory(parts: string[], ctx: CommandContext): Promise<
     return;
   }
 
-  if (ctx.chatMode !== 'p2p') {
+  if (ctx.chatMode !== 'p2p' && !ctx.controls.spaceGate) {
     await presentCardFailureOrReply(
       ctx,
       '🔁 恢复历史会话',
@@ -1429,6 +1481,7 @@ async function showResumeHistory(parts: string[], ctx: CommandContext): Promise<
 }
 
 async function applyResume(sessionId: string, ctx: CommandContext): Promise<void> {
+  if (ctx.controls.spaceGate && (!ctx.sessionCatalog || !ctx.sessionCatalogIdentity)) throw new Error('space resume requires an owned catalog');
   if (ctx.sessionCatalog && ctx.sessionCatalogIdentity) {
     const entry = ctx.sessionCatalog.activeFor(ctx.sessionCatalogIdentity);
     const resolved = consumeResumeCandidate(sessionId, ctx.sessionCatalogIdentity);
@@ -1549,6 +1602,8 @@ async function listEngineResumeHistory(
   cwd: string,
   limit: number,
 ): Promise<EngineHistoryEntry[]> {
+  if (ctx.controls.engineHistory) return ctx.controls.engineHistory(cwd, limit);
+  if (ctx.controls.spaceGate) throw new Error('space history query is unavailable');
   const agentKind = ctx.controls.profileConfig.agentKind;
   const plugin = requireEnginePlugin(agentKind);
   const override = resumeProviderOverrides(ctx)[agentKind];
@@ -1578,6 +1633,12 @@ async function listEngineResumeHistory(
     });
     return [];
   }
+}
+
+function spaceCommandSupported(command: string, args: string): boolean {
+  if (command === '/new' && (args.trim() === 'chat' || args.trim().startsWith('chat '))) return false;
+  return ['/help', '/new', '/task', '/stop', '/resume', '/status'].includes(command)
+    || (command === '/models' && (!args.trim() || args.trim() === 'refresh'));
 }
 
 /** Test seams: allow harnesses to inject fake histories per engine id. */
@@ -1702,10 +1763,14 @@ async function renderStatus(ctx: CommandContext): Promise<void> {
     queue: ctx.processPool?.snapshot(),
     ownerState: formatOwnerState(ctx),
     outboundPolicy: ctx.controls.outboundPolicyStatus?.(),
+    presentation: ctx.controls.presentationStatus?.(),
     scope: ctx.scope,
     chatMode: ctx.chatMode,
   });
   await presentCommandCard(ctx, card);
+  if (ctx.chatMode !== 'p2p' && ctx.controls.personalGroupStatus) {
+    await reply(ctx, await ctx.controls.personalGroupStatus(ctx.msg.chatId));
+  }
 }
 
 function formatOwnerState(ctx: CommandContext): string {
@@ -2061,6 +2126,7 @@ async function handleDoctor(args: string, ctx: CommandContext): Promise<void> {
   let execution: Awaited<ReturnType<RunExecutor['submit']>>;
   try {
     execution = await ctx.runExecutor.submit({
+      identity: larkParticipantIdentity(ctx.controls.cfg.accounts.app.id, ctx.channel.botIdentity),
       scopeId: `${ctx.scope}:doctor`,
       policy,
       nowait: true,
@@ -2221,7 +2287,7 @@ function formatDoctorEchoStatus(echoText: string, state: RunState): string {
 }
 
 async function handleHelp(_args: string, ctx: CommandContext): Promise<void> {
-  const card = helpCard(ctx.agent.displayName);
+  const card = helpCard(ctx.agent.displayName, Boolean(ctx.controls.spaceGate));
   await presentCommandCard(ctx, card);
 }
 
@@ -2951,8 +3017,13 @@ async function submitConfig(ctx: CommandContext): Promise<void> {
 
     let failureStep = 'config.save';
     let larkCliPolicyApplied = false;
+    let larkCliIdentityAttempted = false;
     try {
+      if (ctx.controls.profileConfig.executionSpaces && mode !== ctx.controls.profileConfig.mode) {
+        throw new Error('请先通过 aria space rollback 停用已准备的执行空间');
+      }
       if (larkCliIdentityChanged) {
+        larkCliIdentityAttempted = true;
         failureStep = 'config.lark-cli-policy';
         const applied = await applyConfigLarkCliIdentityPolicy(ctx, nextEffectiveIdentity);
         if (!applied) {
@@ -2971,7 +3042,7 @@ async function submitConfig(ctx: CommandContext): Promise<void> {
       );
     } catch (err) {
       let rollbackFailed = false;
-      if (larkCliIdentityChanged) {
+      if (larkCliIdentityAttempted) {
         const rolledBack = await applyConfigLarkCliIdentityPolicy(ctx, previousEffectiveIdentity);
         if (!rolledBack) {
           rollbackFailed = true;

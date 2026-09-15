@@ -16,6 +16,7 @@ import {
 import type { AppConfig } from '../config/schema';
 import { log } from '../core/logger';
 import {
+  runLarkCliIdentityPolicy,
   hasLarkCliUserAuth,
   hasStructuredLarkCliUserAuth,
 } from '../lark-cli/identity-policy';
@@ -498,20 +499,10 @@ async function switchLarkCliIdentityPolicy(
   ariaChannelEnv: NodeJS.ProcessEnv | undefined,
   identityPreset: LarkCliIdentityPreset,
 ): Promise<RunResult> {
-  const strictMode = identityPreset === 'user-default' ? 'off' : 'bot';
-  const defaultAs = identityPreset === 'user-default' ? 'auto' : 'bot';
-  const strictResult = await runCapture(
-    'lark-cli',
-    [...profileArgs, 'config', 'strict-mode', strictMode],
-    BIND_TIMEOUT_MS,
-    ariaChannelEnv,
-  );
-  if (!strictResult.success) return strictResult;
-  return runCapture(
-    'lark-cli',
-    [...profileArgs, 'config', 'default-as', defaultAs],
-    BIND_TIMEOUT_MS,
-    ariaChannelEnv,
+  return runLarkCliIdentityPolicy(
+    identityPreset,
+    (args) => runCapture('lark-cli', [...profileArgs, ...args], BIND_TIMEOUT_MS, ariaChannelEnv),
+    (result) => result.success,
   );
 }
 

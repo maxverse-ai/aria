@@ -15,6 +15,7 @@ import { secretKeyForApp } from '../../../src/config/schema';
 import { writeVersionExecutable } from '../../helpers/fake-executable';
 
 const auth = vi.hoisted(() => ({
+  startProfile: vi.fn(async () => {}),
   validateAppCredentials: vi.fn(async () => ({ ok: true, botName: 'Claude Regression' })),
 }));
 
@@ -22,10 +23,13 @@ vi.mock('../../../src/utils/feishu-auth', () => ({
   validateAppCredentials: auth.validateAppCredentials,
 }));
 
+vi.mock('../../../src/cli/profile-online', () => ({ startProfileOnHost: auth.startProfile }));
+
 const roots: string[] = [];
 
 afterEach(async () => {
   vi.restoreAllMocks();
+  auth.startProfile.mockReset();
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
 
@@ -102,6 +106,59 @@ describe('profile create command', () => {
       defaultMode: 'danger-full-access',
       maxMode: 'danger-full-access',
     });
+  });
+
+  it('starts through the host only after configuration has been committed', async () => {
+    const root = await makeRoot();
+    await writeProfiles(root, 'codex-dev', ['codex-dev']);
+    auth.startProfile.mockImplementationOnce(async () => {
+      expect((await loadRootConfig(join(root, 'config.json')))?.profiles.alice).toBeDefined();
+    });
+    await runProfileCreate('alice', {
+      rootDir: root, agent: 'claude', appId: 'cli_alice', appSecret: 'manual-secret', start: true,
+    });
+    expect(auth.startProfile).toHaveBeenCalledWith('alice', root);
+  });
+
+  it('automatically starts after interactive creation without an explicit flag', async () => {
+    const root = await makeRoot();
+    await writeProfiles(root, 'codex-dev', ['codex-dev']);
+    const inputTTY = Object.getOwnPropertyDescriptor(process.stdin, 'isTTY');
+    const outputTTY = Object.getOwnPropertyDescriptor(process.stdout, 'isTTY');
+    try {
+      Object.defineProperty(process.stdin, 'isTTY', { value: true, configurable: true });
+      Object.defineProperty(process.stdout, 'isTTY', { value: true, configurable: true });
+      await runProfileCreate('alice', {
+        rootDir: root, agent: 'claude', appId: 'cli_alice', appSecret: 'manual-secret',
+      });
+      expect(auth.startProfile).toHaveBeenCalledWith('alice', root);
+    } finally {
+      if (inputTTY) Object.defineProperty(process.stdin, 'isTTY', inputTTY);
+      else Reflect.deleteProperty(process.stdin, 'isTTY');
+      if (outputTTY) Object.defineProperty(process.stdout, 'isTTY', outputTTY);
+      else Reflect.deleteProperty(process.stdout, 'isTTY');
+    }
+  });
+
+  it('preserves configuration and gives a start-only retry when startup fails', async () => {
+    const root = await makeRoot();
+    await writeProfiles(root, 'codex-dev', ['codex-dev']);
+    auth.startProfile.mockRejectedValueOnce(new Error('engine unavailable'));
+    await expect(runProfileCreate('alice', {
+      rootDir: root, agent: 'claude', appId: 'cli_alice', appSecret: 'manual-secret', start: true,
+    })).rejects.toThrow('aria profile start alice');
+    expect((await loadRootConfig(join(root, 'config.json')))?.profiles.alice).toBeDefined();
+  });
+
+  it('supports explicitly saving without bringing a bot online', async () => {
+    const root = await makeRoot();
+    await writeProfiles(root, 'codex-dev', ['codex-dev']);
+    const output = vi.spyOn(console, 'log').mockImplementation(() => {});
+    await runProfileCreate('alice', {
+      rootDir: root, agent: 'claude', appId: 'cli_alice', appSecret: 'manual-secret', start: false,
+    });
+    expect(auth.startProfile).not.toHaveBeenCalled();
+    expect(output).toHaveBeenCalledWith(expect.stringContaining('尚未启动'));
   });
 
   it('refuses to overwrite an existing profile', async () => {

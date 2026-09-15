@@ -1,13 +1,12 @@
+import { evaluateEffectivePolicy } from './effective-policy';
+import { legacyEnginePermissions } from '../agent/permission-policy';
 import type { AgentCapability } from '../agent/capability';
 import {
-  accessToClaudePermissionMode,
-  accessToCodexSandbox,
-  clampAccess,
   type AccessMode,
   type ClaudePermissionMode,
   type CodexSandboxMode,
 } from '../config/permissions';
-import type { ProfileConfig } from '../config/profile-schema';
+import type { EngineProfileConfig } from '../config/profile-schema';
 import type { ConversationSource } from '../conversation/types';
 import type { AccessDecision } from './access';
 import {
@@ -22,6 +21,7 @@ export interface ScopeContext {
   chatId?: string;
   threadId?: string;
   actorId: string;
+  actorKind?: 'user' | 'system' | 'agent';
   commentScopeId?: string;
   resourceBindings?: ResourceBinding[];
 }
@@ -51,7 +51,7 @@ export interface RunPolicyInput {
   cwdRealpath: string;
   access: AccessDecision;
   capability: AgentCapability;
-  profileConfig: ProfileConfig;
+  profileConfig: EngineProfileConfig;
   now: number;
   codexHome?: string;
   inheritCodexHome?: boolean;
@@ -85,36 +85,32 @@ export interface RunPolicyReject {
 
 export type RunPolicyResult = RunPolicyAllow | RunPolicyReject;
 
-const DEFAULT_TTL_MS = 5 * 60 * 1000;
-
+/** Compatibility facade preserving v1 run fields and persisted fingerprints. */
 export function evaluateRunPolicy(input: RunPolicyInput): RunPolicyResult {
-  if (!input.access.ok) {
-    return reject('access-denied', '当前用户无权发起运行。');
+  const decision = evaluateEffectivePolicy({
+    admitted: input.access,
+    defaultAccess: input.profileConfig.permissions.defaultAccess,
+    profileCeiling: input.profileConfig.permissions.maxAccess,
+    engineCeiling: input.capability.permissions.maxAccess,
+    hasUnverifiedFolder: input.scope.resourceBindings?.some(
+      (binding) => binding.kind === 'folder' && !binding.verified,
+    ) ?? false,
+    hasRejectedRequiredAttachment: input.attachments.some(
+      (attachment) => attachment.requiredness === 'required' && attachment.decision !== 'accepted',
+    ),
+    now: input.now,
+    ttlMs: input.ttlMs,
+  });
+  if (!decision.ok) {
+    const messages = {
+      'access-denied': '当前用户无权发起运行。',
+      'folder-allowlist-unverified': '暂不支持 folder allowlist，已拒绝运行。',
+      'required-attachment-rejected': '必需附件未通过校验，已拒绝运行。',
+    };
+    return reject(decision.code, messages[decision.code]);
   }
-
-  if (input.scope.resourceBindings?.some((binding) => binding.kind === 'folder' && !binding.verified)) {
-    return reject('folder-allowlist-unverified', '暂不支持 folder allowlist，已拒绝运行。');
-  }
-
-  if (
-    input.attachments.some(
-      (attachment) =>
-        attachment.requiredness === 'required' && attachment.decision !== 'accepted',
-    )
-  ) {
-    return reject('required-attachment-rejected', '必需附件未通过校验，已拒绝运行。');
-  }
-
-  const accessMode = clampAccess(
-    input.profileConfig.permissions.defaultAccess,
-    input.profileConfig.permissions.maxAccess,
-    input.capability.permissions.maxAccess,
-  );
-  const sandbox = accessToCodexSandbox(accessMode);
-  const permissionMode = accessToClaudePermissionMode(
-    accessMode,
-    input.profileConfig.permissions,
-  );
+  const { accessMode, expiresAt } = decision.policy;
+  const { sandbox, permissionMode } = legacyEnginePermissions(decision.policy, input.profileConfig.permissions);
   const resourceDigest = resourceScopeDigest({
     source: input.scope.source,
     chatId: input.scope.chatId,
@@ -138,7 +134,7 @@ export function evaluateRunPolicy(input: RunPolicyInput): RunPolicyResult {
     permissionMode,
     access: input.access,
     attachments: input.attachments,
-    expiresAt: input.now + (input.ttlMs ?? DEFAULT_TTL_MS),
+    expiresAt,
     policyFingerprint: policyFingerprint({
       cwdRealpath: input.cwdRealpath,
       sandbox,

@@ -1,3 +1,4 @@
+import { listEnginePlugins } from '../../../src/agent/plugin/registry.js';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { CardActionEvent, NormalizedMessage } from '@larksuite/channel';
@@ -50,6 +51,7 @@ const cleanups: Array<() => Promise<void>> = [];
 
 describe('agent-aware resume commands', () => {
   afterEach(async () => {
+    vi.unstubAllEnvs();
     await Promise.all(cleanups.splice(0).map((cleanup) => cleanup()));
   });
 
@@ -187,6 +189,13 @@ describe('agent-aware resume commands', () => {
 
   it('lists engine status through /agent', async () => {
     const h = await createHarness('claude');
+    // Keep command rendering independent of the host's installed engine CLIs.
+    const fakeBin = await writeVersionExecutable(h.tmp.root, 'fake-engine-version', '1.0.0');
+    for (const plugin of listEnginePlugins()) {
+      const envKey = plugin.probes[0]?.envKey;
+      expect(envKey).toBeTruthy();
+      vi.stubEnv(envKey!, fakeBin);
+    }
 
     await expect(h.run('/agent')).resolves.toBe(true);
 

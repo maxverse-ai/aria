@@ -97,6 +97,7 @@ function formatBlocker(blocker: RestartBlocker): string {
     ACTIVE_RUNS: 'Agent runs',
     PREPARING_RUNS: 'Preparing runs',
     PENDING_MESSAGES: 'Pending messages',
+    BLOCKED_SCOPES: 'Accepted batches finishing',
     OUTBOUND_IN_FLIGHT: 'Outbound operations',
     STREAMING_REPLIES: 'Streaming replies',
     ACTIVE_MEETINGS: 'Active meetings',

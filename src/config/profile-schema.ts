@@ -6,6 +6,7 @@ import type {
   SecretsConfig,
 } from './schema';
 import type { ChannelConfig } from '../channel/plugin/types';
+import { normalizeExecutionSpaceSelection } from './execution-spaces';
 import {
   assertCanonicalChannelPluginId,
   assertChannelInstanceRef,
@@ -232,6 +233,8 @@ export interface ProfileConfig {
   agentKind: AgentKind;
   /** Deployment mode switch. Default 'personal'. See {@link ProfileMode}. */
   mode: ProfileMode;
+  /** Explicit prepared execution, independent from personal/legacy team defaults. */
+  executionSpaces?: import('./execution-spaces').ExecutionSpaceSelection;
   accounts: {
     app: AppCredentials;
     /** Secret-free revision marker for the external app credential binding. */
@@ -315,7 +318,16 @@ export function createDefaultProfileConfig(
   });
 }
 
+/** Engine and policy settings shared by channel-backed and standalone workers. */
+export type EngineProfileConfig = Omit<ProfileConfig, 'accounts'>;
+
 export function normalizeProfileConfig(input: unknown): ProfileConfig {
+  const core = normalizeEngineProfileConfig(input);
+  const accounts = normalizeAccounts((input as { accounts?: unknown }).accounts);
+  return { ...core, accounts };
+}
+
+export function normalizeEngineProfileConfig(input: unknown): EngineProfileConfig {
   if (!input || typeof input !== 'object') {
     throw new Error('profile config must be an object');
   }
@@ -323,6 +335,7 @@ export function normalizeProfileConfig(input: unknown): ProfileConfig {
     schemaVersion?: unknown;
     agentKind?: unknown;
     mode?: unknown;
+    executionSpaces?: unknown;
     accounts?: unknown;
     secrets?: SecretsConfig;
     preferences?: (AppPreferences & { access?: Partial<ProfileAccess> }) | undefined;
@@ -359,7 +372,6 @@ export function normalizeProfileConfig(input: unknown): ProfileConfig {
   if (typeof raw.agentKind !== 'string' || raw.agentKind.trim().length === 0) {
     throw new Error('agentKind must be a registered engine id');
   }
-  const accounts = normalizeAccounts(raw.accounts);
   const enginePlugin = getEnginePlugin(raw.agentKind);
   if (enginePlugin?.configField && !(raw as Record<string, unknown>)[enginePlugin.configField]) {
     throw new Error(
@@ -384,12 +396,14 @@ export function normalizeProfileConfig(input: unknown): ProfileConfig {
   const channels = raw.schemaVersion === 3
     ? normalizeProfileChannels(raw.channels)
     : undefined;
+  const executionSpaces = normalizeExecutionSpaceSelection(raw.executionSpaces);
+  if (executionSpaces && raw.mode !== 'team') throw new Error('prepared execution spaces require team mode');
 
   return {
     schemaVersion: raw.schemaVersion,
     agentKind: raw.agentKind,
     mode: raw.mode === 'team' ? 'team' : 'personal',
-    accounts,
+    ...(executionSpaces ? { executionSpaces } : {}),
     ...(raw.secrets ? { secrets: raw.secrets } : {}),
     preferences,
     access,

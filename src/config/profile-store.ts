@@ -58,6 +58,7 @@ type StoredProfileConfig = Pick<
   | 'schemaVersion'
   | 'agentKind'
   | 'mode'
+  | 'executionSpaces'
   | 'accounts'
   | 'secrets'
   | 'preferences'
@@ -102,6 +103,7 @@ function serializeProfileConfig(profile: ProfileConfig): StoredProfileConfig {
     schemaVersion: profile.schemaVersion,
     agentKind: profile.agentKind,
     mode: profile.mode,
+    ...(profile.executionSpaces ? { executionSpaces: profile.executionSpaces } : {}),
     accounts: profile.accounts,
     ...(profile.secrets ? { secrets: profile.secrets } : {}),
     preferences: profile.preferences,

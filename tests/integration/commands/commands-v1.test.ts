@@ -1,3 +1,5 @@
+import { writeVersionExecutable } from '../../helpers/fake-executable.js';
+import { listEnginePlugins } from '../../../src/agent/plugin/registry.js';
 import { mkdir, realpath, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -35,6 +37,7 @@ const cleanups: Array<() => Promise<void>> = [];
 
 describe('Bridge command contracts', () => {
   afterEach(async () => {
+    vi.unstubAllEnvs();
     await Promise.all(cleanups.splice(0).map((cleanup) => cleanup()));
   });
 
@@ -265,6 +268,13 @@ describe('Bridge command contracts', () => {
 
   it('does not expose access allowlists through the Lark /config form', async () => {
     const h = await createHarness();
+    // Keep command rendering independent of the host's installed engine CLIs.
+    const fakeBin = await writeVersionExecutable(h.tmp.root, 'fake-engine-version', '1.0.0');
+    for (const plugin of listEnginePlugins()) {
+      const envKey = plugin.probes[0]?.envKey;
+      expect(envKey).toBeTruthy();
+      vi.stubEnv(envKey!, fakeBin);
+    }
 
     await expect(h.run('/config')).resolves.toBe(true);
 
