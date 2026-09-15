@@ -612,5 +612,3 @@ Aria was forked from
 ## License
 
 [MIT](./LICENSE)
-
-<img src="./assets/***REMOVED***.png" alt="***REMOVED***" width="360">

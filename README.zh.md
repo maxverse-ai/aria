@@ -593,5 +593,3 @@ Aria fork 自
 ## 许可
 
 [MIT](./LICENSE)
-
-<img src="./assets/***REMOVED***.png" alt="***REMOVED***" width="360">
