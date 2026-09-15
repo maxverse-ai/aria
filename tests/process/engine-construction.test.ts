@@ -9,10 +9,14 @@ import { prepareProfileEngineRuntime } from '../../src/runtime/agent-runtime';
 
 const allEngines = ['claude', 'codex', 'grok', 'opencode', 'dsh', 'kimi', 'pi'] as const;
 type Engine = typeof allEngines[number];
+// Two engines cannot be exercised through this file's Windows fixture:
 // `dsh` reports progress over an extra stdio descriptor, which Node only
-// supports on POSIX hosts, so its launch cases do not apply on Windows.
+// supports on POSIX hosts, and `pi` receives its prompt as an argv element while
+// the fixture reaches Windows through a `.cmd` shim, which re-parses arguments
+// through cmd.exe and cannot carry a multi-line prompt. Both keep full coverage
+// on POSIX hosts.
 const engines: readonly Engine[] = process.platform === 'win32'
-  ? allEngines.filter((engine) => engine !== 'dsh')
+  ? allEngines.filter((engine) => engine !== 'dsh' && engine !== 'pi')
   : allEngines;
 const roots: string[] = [];
 const envKeys = [
