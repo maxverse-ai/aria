@@ -1,7 +1,10 @@
 # Archived: User Agent Space proposal
 
-> Status: never implemented, not on the active roadmap, and not a dependency of
-> the management control plane or workspace layout.
+> Status: historical proposal, never implemented. Its design direction is
+> superseded by the channel- and engine-neutral
+> [Execution space architecture](EXECUTION_SPACE_ARCHITECTURE.md).
+> [Phase 1](EXECUTION_SPACE_DELIVERY_PLAN.md) delivers the new architecture and
+> implementation plan only; user-space routing is not shipped.
 
 Aria currently owns one engine runtime per profile. Group and direct-message
 traffic for that profile use the same profile runtime; there is no
@@ -13,10 +16,14 @@ runtime per direct-message user. It was archived because it introduced a new
 identity, process, storage, and credential-isolation boundary unrelated to the
 configuration-management work that actually shipped.
 
-Reconsidering per-user runtimes requires a new architecture decision covering
-trusted routing, process ownership, state and OAuth isolation, session keys,
-resource limits, migration, and rollout. It must not be inferred from
-[`CONTROL_PLANE.md`](CONTROL_PLANE.md) or
-[`WORKSPACE_AND_STATE_LAYOUT.md`](WORKSPACE_AND_STATE_LAYOUT.md).
+The replacement decision covers trusted routing, exclusive human-agent groups,
+runtime ownership across all engines, state and credential isolation, session
+keys, resource limits, migration, and rollback. It preserves personal mode as
+the default and makes the new team behavior an explicit adoption.
+
+The current management control plane and workspace layout do not themselves
+implement this decision. Use the replacement architecture for target semantics
+and its delivery plan for implementation status; do not resume the historical
+App-Server-only phases independently.
 
 The full historical proposal remains available in Git history.

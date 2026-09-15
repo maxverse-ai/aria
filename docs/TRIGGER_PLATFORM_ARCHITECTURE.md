@@ -42,6 +42,33 @@ Production activation remains behind
 the explicit `ARIA_TRIGGER_RUNTIME=enabled` rollout switch and is off by
 default.
 
+## Execution-space integration target
+
+The [Execution space architecture](EXECUTION_SPACE_ARCHITECTURE.md) preserves
+this platform's one execution universe per profile. It adds trusted space
+selection and space-bound engine runtimes behind the existing RunIntent and
+profile execution path. [Implementation through E5.3](EXECUTION_SPACE_IMPLEMENTATION.md)
+adds a host-owned binding sidecar and dispatch/result hooks while retaining
+RunIntent v1, the scheduler and the existing result ledger. Activation remains
+explicit and requires the subsequent management/migration workflow.
+
+Prepared-space trigger definitions and grants bind their principal, space, scope,
+authorization ceiling and result destinations. Dispatch, recovery and retry
+revalidate that binding against current policy; they cannot inherit the most
+recent chat's user or treat a scheduled system event as unrestricted owner
+authority. Preserve existing upstream grant checks when replacing the current
+Supervisor dispatch access projection.
+
+Conversation anchors and answer/delivery checkpoints retain the original space
+and audience epoch. A revoked or changed destination suspends delivery without
+rerunning completed agent work or moving its personal result to a shared space.
+Version stored/public additions explicitly and keep occurrence, deduplication,
+lease and result-ledger ownership in the existing services.
+
+Standalone and non-Lark execution must use the same contracts without inventing
+a Lark chat or user. Deterministic actions remain a separate proposal; execution
+spaces do not introduce a new scheduler or require all work to use an LLM.
+
 ## Decision
 
 Aria should support scheduled work, but scheduling is one trigger source rather

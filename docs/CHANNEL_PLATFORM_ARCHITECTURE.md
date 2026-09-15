@@ -89,7 +89,10 @@ seams are not contracts to reproduce for a new channel.
 
 - the versioned Channel ABI and runtime validation;
 - plugin discovery, compatibility checks, instance resolution, and lifecycle;
-- one shared `ConversationRuntime` and `EngineRuntime` slot per profile;
+- one shared execution coordinator per profile: currently a
+  `ConversationRuntime` and one `EngineRuntime` slot; the
+  [execution-space target](EXECUTION_SPACE_ARCHITECTURE.md) adds space-owned
+  runtimes behind that same coordinator;
 - concurrency, interruption, session catalog, workspace selection, access
   decisions, audit, and redaction;
 - generic durable acceptance, idempotency receipts, answer checkpoints,
@@ -115,6 +118,33 @@ seams are not contracts to reproduce for a new channel.
 A plugin cannot import Supervisor internals, construct an `EngineRuntime`, write
 profile configuration directly, or expose raw provider credentials and user ids
 through logs or public read models.
+
+## Execution-space integration target
+
+[Execution space delivery](EXECUTION_SPACE_DELIVERY_PLAN.md) is a separate
+incremental change. Implementation through E5.3 adds an internal versioned
+identity/audience companion and binds source operations, callbacks and delivery.
+It does not change Channel ABI v1, activate providers, or complete the remaining
+Channel Platform stages. See [evidence and limits](EXECUTION_SPACE_IMPLEMENTATION.md).
+
+Channel adapters supply authenticated, instance-namespaced actor and conversation
+facts. The prepared-space identity/audience boundary supplies verified participant
+evidence and invalidation information. Core policy determines space routing;
+plugins neither select personal credentials nor construct an engine.
+Addressing remains separate from private-space authorization, including when a
+structured mention already makes addressing unambiguous.
+
+Personal mode keeps one default execution space. Team private conversations and
+verified exclusive human-agent groups use user spaces; ordinary groups share a
+space within their explicit account/trust domain. Different channels/accounts
+do not implicitly link users, histories or credentials. A provider without
+complete audience evidence cannot claim exclusive-group personal execution.
+
+The target profile execution host can operate without Lark credentials.
+Provider configuration, preflight and connection ownership remain with their
+channel instances; standard Supervisor and standalone execution reuse core
+execution assembly. This target does not claim that current Supervisor bootstrap
+has already lost its Lark dependency.
 
 ## Channel ABI direction
 

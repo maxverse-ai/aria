@@ -37,9 +37,10 @@ from, or coupled to the runtime data of the repository used to develop Aria.
 - Initializing Git repositories, Git identities, remotes, or credentials.
 - Copying an existing project into a managed workspace.
 - Pre-populating sessions, logs, caches, OAuth state, or runtime sidecars.
-- Introducing user-specific runtime spaces. The archived proposal in
-  `USER_AGENT_SPACE_ARCHITECTURE.md` is not an active dependency of this
-  layout.
+- Defining execution-space routing. Its separate owner is
+  [Execution space architecture](EXECUTION_SPACE_ARCHITECTURE.md);
+  [implementation through Phase 5](EXECUTION_SPACE_IMPLEMENTATION.md) composes
+  this layout under an explicit prepared host without migrating existing paths.
 - Adopting platform-specific XDG directories in the first implementation. The
   logical boundaries in this document can be mapped to platform-specific roots
   later.
@@ -279,9 +280,21 @@ The core gives the plugin a confined root such as
 `profiles/<profile>/engines/<engine-id>/`. The plugin owns everything below
 that root and cannot redirect other profile state implicitly.
 
-The archived user-agent-space proposal does not affect this layout. Any future
-user-specific runtime isolation requires a new architecture decision and must
-compose these lifecycle categories without changing their ownership.
+The [execution-space decision](EXECUTION_SPACE_ARCHITECTURE.md#state-and-paths)
+composes these lifecycle categories beneath a resolved space root. The profile
+continues to own configuration and lifecycle; each space receives confined
+identity/state/engine/cache/log/run paths and a separately resolved working area.
+Engine plugins consume their assigned paths instead of deriving them from a
+global profile or host home.
+
+Default-space compatibility initially maps the current physical paths without
+creating or moving a new tree. Per-user space paths and metadata are future
+resolver/migration work tracked in the
+[execution-space delivery plan](EXECUTION_SPACE_DELIVERY_PLAN.md). Personal
+startup, layout reads and this documentation change do not migrate user data.
+Layout migration and team-mode migration must share an explicit revision-bound
+plan and recovery manifest when they affect the same state; neither may discover
+and import private data as a side effect of the other.
 
 ## Security requirements
 

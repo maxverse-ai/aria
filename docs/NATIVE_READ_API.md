@@ -140,6 +140,10 @@ classify the conversation, and an `unknown`-role `chat-member` edge between
 them. This is an identity index, not an authorization decision. It contains no
 source user/chat ID or fabricated display name, and later authoritative channel
 resolution can enrich it without a subsequent message downgrading that data.
+When a channel receipt already includes a sender display name, Aria stores that
+value as a display-only snapshot on the opaque identity. A receipt without a
+name remains pending and cannot erase a newer resolved name; names never become
+authorization evidence or public source identifiers.
 When a message is bound to a session, its actor identity is added to the
 session's deduplicated `participantIdentityIds`; catalog refreshes preserve
 those observed participants and do not move session activity timestamps
@@ -189,3 +193,66 @@ resource rather than a synthesized UI-only record.
 4. Unix-socket application adapter and capability discovery.
 5. Source-side audit instrumentation.
 6. Control Plane dual-read validation and eventual parser removal.
+
+## Host management read view
+
+Management review is distinct from user execution and delegated Space reads.
+The `/read-access` user command is removed; no browser needs a personal Space
+grant. Existing Space repository authorization and revocation remain intact.
+
+- Opt in with `ARIA_NATIVE_READ_MANAGEMENT_PUBLIC_KEY_FILE` (SPKI Ed25519 public
+  PEM) and `ARIA_NATIVE_READ_MANAGEMENT_PROFILES` (explicit profile allowlist).
+  Aria receives **only the public key**, mounted read-only by the deployment.
+  The administrator service keeps its PKCS8 signing key outside all agent
+  containers and writable mounts. A shared management bearer is not supported.
+- In addition to the existing transport bearer, each GET carries
+  `X-Aria-Management-Authorization` with
+  `aria-management-v1:<unix-ms>:<32-lowercase-hex-nonce>:<base64url-signature>`.
+  The signed UTF-8 payload is six newline-joined fields, with no trailing LF:
+  scheme, profile ID, HTTP method, complete request target including query,
+  Unix milliseconds, nonce. Use Ed25519 (no prehash), unpadded base64url.
+- Proofs allow at most 5 seconds of clock lead and 30 seconds of age. A bounded
+  nonce cache rejects reuse within the running instance and validity window.
+  Different profile, method, route, query, expired or invalid signature, or a
+  simultaneous personal grant fails closed. Valid responses include
+  `X-Aria-Management-Read-Authorized: 1`; consumers must require this ACK so a
+  rolled-back server cannot silently return its old ambient view.
+- The derived view namespaces IDs and every cross-reference by profile and
+  physical source partition. `aria.management.origin` identifies legacy or
+  Space provenance without creating ownership/migration grants. Startup reads
+  source snapshots/journals read-only, including torn-tail observation; only
+  the derivative is reconciled. Source projectors remain the single writers.
+- Reconciliation runs independently of Bot readiness. Until complete, or after
+  a failed/overflowed mirror, management requests return 503, never false empty
+  success. Mirrors are bounded asynchronous side effects. Source operations
+  and running agents do not wait for management I/O. Restart replays sources.
+  Derived checkpoints occur every 250 entries; each journal append is durable.
+- `GET /v1/session-summaries?limit=1..200&cursor=...` is advertised only to a
+  verified management caller. `aria.read.session-summaries.v1` returns `total`,
+  `items` and optional `nextCursor`. Each item has a full `session`, optional
+  `lastUser`, `chat`, `owner`, counts and an optional 500-character preview.
+  Required scopes: sessions, messages, message-content, runs, identities, chats.
+  All pages in one traversal use an immutable snapshot (60-second TTL, at most
+  eight retained snapshots per profile). Invalid/expired cursors require a
+  fresh traversal; never append a replacement first page to partial results.
+- Sessions sort by actual `lastActivityAt` descending and opaque ID for ties.
+  Message occurrence and run start/completion can advance activity; display
+  metadata cannot. Choose the most recent observed human sender; only a sole
+  observed human is a fallback. Do not select arbitrary group participants.
+- Lark names come from authenticated inbound sender metadata and a bounded,
+  per-channel chat-info cache (5-minute positive, 1-minute failed lookup TTL,
+  800-ms caller deadline). Preserve last known names on transient failures.
+  Names are display evidence, not identity or access-control keys. Historical
+  opaque records without recorded names cannot be reverse-resolved by hashing;
+  show missing metadata explicitly, never use an AI title as a group name.
+- Authorized read attempts produce `read.performed`, outcome `unknown`, in a
+  separate private `access-audit.journal.jsonl` via `NativeAuditRecorder` before
+  reading. It records admission, not a claim of successful delivery. Failure
+  to record denies this management read. HTTP completion/denial status is
+  separate sanitized operational telemetry. Neither signatures, private keys,
+  message contents nor query strings enter the audit. The audit is not mirrored
+  into the feed it observes, avoiding a self-triggering polling loop.
+
+The application-level Space fence is not an OS sandbox: `trusted-process`
+retains host access by design. Do not place a management signing key beside
+the transport token in a same-UID agent container and assume 0600 isolates it.

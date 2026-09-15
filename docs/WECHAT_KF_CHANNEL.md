@@ -17,6 +17,7 @@ WeChat user
   -> durable notification inbox
   -> sync_msg processor + durable cursor
   -> durable customer-message inbox
+  -> bounded same-customer turn assembly
   -> control lane or per-user normal lane
   -> wxkf text handler
   -> ConversationRuntime
@@ -37,10 +38,17 @@ on the page have been accepted downstream.
   response is sent only after its atomic file is fsynced.
 - `WechatKfNotificationProcessor` owns serial pulling and cursor advancement.
 - The channel message sink owns `msgid` idempotency and normalization into Aria.
-- `WechatKfDurableMessageSink` durably accepts pulled messages before the sync
-  cursor advances. Deployments must call `recover()` during startup. Normal
-  questions remain serial per customer; exact commands use a separate control
-  lane so `/stop` and `/new` are not trapped behind a long agent run.
+- `WechatKfReliableMessageSink` durably accepts each pulled `msgid` before the
+  sync cursor advances. Deployments must call `recover()` during startup. It
+  holds ordinary messages for one bounded 750 ms arrival window per customer.
+  Within that window, only messages whose provider occurrence timestamps span
+  at most five seconds and contain exactly one text plus one or more images
+  become a multimodal turn, regardless of provider return order. Historical
+  gaps, multiple questions, text-only traffic, and unsupported kinds retain
+  their individual message boundaries.
+  Normal turns remain serial per customer. Exact commands bypass assembly and
+  use a separate control lane so `/stop` and `/new` are not trapped behind a
+  long agent run.
 - `WechatKfTextHandler` owns the wxkf-only command table and onboarding text.
   Commands are intercepted before `ProfileConversationHost.runText()` and do
   not enter agent context. This does not register commands on the Lark channel.
@@ -52,6 +60,15 @@ If message handling fails, the cursor and notification remain unchanged. This is
 at-least-once delivery; downstream consumers must treat `msgid` as an idempotency
 key. An empty page with `has_more=1` is not terminal. A non-advancing cursor is
 treated as an upstream protocol error rather than an infinite loop.
+
+For an assembled turn, every provider message keeps its own acceptance and
+completion receipt. The earliest stable message is the batch recovery anchor
+and completes last. A dedicated batch checkpoint persists the exact ordered
+membership before agent processing starts; retries and both channel-specific
+and generic coordinator recovery reconstruct only that batch, so a crash
+cannot absorb a newer message or turn the remaining image or text into a second
+agent run. Page-level durable intake (`acceptMany`) and logical-turn handling
+(`acceptTurn`) are separate capabilities.
 
 ## Security defaults
 

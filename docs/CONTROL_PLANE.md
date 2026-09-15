@@ -164,7 +164,32 @@ lark-cli identity side effect and a shared mutable runtime-projection type.
 - Adapters parse and render; they do not implement policy or persistence.
 - Management commands, Runtime Admin, and Native Read keep separate contracts.
 - Stored profile schema and public JSON contracts evolve independently.
-- Aria continues to run one engine runtime per profile.
+- Personal and legacy team profiles run one default execution runtime. The
+  [prepared execution-space path](EXECUTION_SPACE_ARCHITECTURE.md) keeps one
+  profile coordinator while making runtime ownership space-bound.
+
+## Execution-space integration target
+
+[Execution space implementation through Phase 5](EXECUTION_SPACE_IMPLEMENTATION.md)
+adds host-issued authority and physically scoped Native Read repositories, including
+cursor fencing. It does not activate prepared spaces through the shipped management
+commands or migrate existing profiles; those operations belong to Phase 6.
+
+Space adoption requires a privileged, versioned mode-transition operation over
+this same Management API and Runtime Admin boundary. Current mode changes inside
+`profile.preferences.update` have a low-risk live effect; they must not silently
+become process and credential migrations. CLI, cards and Web delegate to the
+new operation when that later implementation is ready.
+
+Migration records source revisions, space ownership and an exact rollback
+manifest, then coordinates quiescence, staged state changes, desired-state
+commit and runtime activation as recoverable steps. Configuration commit and
+runtime reconciliation remain separately observable outcomes.
+
+Native Read and management views apply authenticated profile/space visibility
+to list, search, history, diagnostics and result records. Ordinary team usage
+does not grant profile administration. Default personal behavior and legacy
+team bot-only behavior persist until their explicit, supported transition.
 
 ## Remaining work
 
@@ -178,6 +203,8 @@ lark-cli identity side effect and a shared mutable runtime-projection type.
 4. Remove legacy operation/DTO inputs and compatibility projections through an
    explicit compatibility decision.
 
-AgentSpace, per-user App Servers, runtime pooling, delegated credentials,
-cross-machine scheduling, and a generic credential broker are not part of this
-architecture. Any future work in those areas requires a separate decision.
+Execution spaces are a separate, now documented architecture decision and are
+not an implemented consequence of control-plane convergence. Their delivery
+plan owns runtime/state/identity adoption. Cross-user process pooling, delegated
+credentials, cross-machine scheduling and a generic credential-broker service
+remain outside this control-plane work.

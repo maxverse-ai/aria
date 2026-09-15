@@ -21,8 +21,10 @@ operations after the relevant code is merged and validated.
 
 These rules apply to every remaining stage:
 
-- Aria owns one profile runtime, one conversation runtime, one engine slot, and
-  channel-neutral lifecycle and reliability semantics. A plugin does not build
+- Aria owns one profile execution coordinator and channel-neutral lifecycle
+  and reliability semantics. The current/default path has one engine slot.
+  The [execution-space target](EXECUTION_SPACE_ARCHITECTURE.md) places
+  space-owned runtimes behind that coordinator; a channel plugin never builds
   a competing bridge or agent runtime.
 - `lark`, `wechat-kf`, and `weixin-ilink` are separate canonical identities.
   State, cursors, credentials, sessions, metrics, and raw provider identities
@@ -49,6 +51,12 @@ These rules apply to every remaining stage:
   and protocol coupling are not copied into Aria.
 
 ## Current baseline
+
+Execution-space Phase 1 is documentation only and does not change the stage
+statuses below. Its [delivery plan](EXECUTION_SPACE_DELIVERY_PLAN.md) owns the
+default-space compatibility refactor, trusted audience/identity extension and
+later profile composition change. Do not infer team isolation or provider
+activation from that separate plan.
 
 | Stage | State | Shipped boundary |
 | --- | --- | --- |
@@ -265,4 +273,3 @@ At the end of every increment, update this document in the same pull request:
 - identify the exact next independently reviewable increment;
 - preserve rollback instructions and remove a temporary flag only in its
   declared removal stage.
-
