@@ -1,5 +1,7 @@
 # Cooperative replies
 
+> Status: current
+
 Aria preserves the complete incoming message and each run's own identity. A group
 input explicitly addressing multiple participants, or an access-admitted bot
 mention, enables a terminal reply protocol for that run. This is a transport

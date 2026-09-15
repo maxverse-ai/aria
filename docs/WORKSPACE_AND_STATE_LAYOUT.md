@@ -1,9 +1,6 @@
 # Workspace and state layout architecture
 
-> Status: implementation in progress. The independent-root resolver, typed
-> target path contracts, and identity-neutral managed-workspace scaffold are
-> implemented. Existing state still uses the compatibility layout; physical
-> migration remains an explicit later phase.
+> Status: current — implementation in progress. The independent-root resolver, typed target path contracts, and identity-neutral managed-workspace scaffold are implemented. Existing state still uses the compatibility layout; physical migration remains an explicit later phase.
 
 ## Purpose
 

@@ -1,7 +1,6 @@
 # Channel reliability primitives
 
-Status: Stage 6 contracts and the Stage 7 `wechat-kf` file adapter are complete.
-Production ownership remains behind a bounded rollout switch.
+> Status: current — Stage 6 contracts and the Stage 7 `wechat-kf` file adapter are complete. Production ownership remains behind a bounded rollout switch.
 
 ## Boundary
 

@@ -1,5 +1,7 @@
 # Aria release policy
 
+> Status: current
+
 Aria uses Semantic Versioning. Humans authorize a release line; automation may
 advance only the patch component on that line.
 

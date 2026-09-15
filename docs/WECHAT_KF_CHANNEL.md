@@ -1,5 +1,7 @@
 # WeChat Customer Service Channel
 
+> Status: current
+
 ## Purpose
 
 Expose an Aria profile, such as the ***REMOVED*** PM bot, to ordinary WeChat users through

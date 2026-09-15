@@ -1,5 +1,7 @@
 # Aria toolchain
 
+> Status: current
+
 Aria's toolchain has two goals: make local and CI validation reproducible, and
 ensure that the package being inspected is the exact package later consumed by
 release or deployment automation.

@@ -1,5 +1,7 @@
 # Deployment public capabilities
 
+> Status: current
+
 Common capability assets are additive: matching `common` bundles, then the
 explicit/default business bundle, with pre-existing user edits preserved by
 the existing workspace receipt/journal. `assignments[].bundle: null` opts out

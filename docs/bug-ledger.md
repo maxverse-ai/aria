@@ -1,5 +1,7 @@
 # Aria bug ledger
 
+> Status: current — append-only ledger; entries are never rewritten.
+
 ## ARIA-TOOLS-003 — Historical socket arguments broke current native tool calls
 
 - Evidence: on 2026-09-09, a retained ***REMOVED*** Codex conversation repeatedly used

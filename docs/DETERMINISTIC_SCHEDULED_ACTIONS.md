@@ -1,8 +1,9 @@
 # Deterministic scheduled actions
 
-Status: proposed extension to the
-[Trigger Platform](TRIGGER_PLATFORM_ARCHITECTURE.md). This document defines a
-product and contract direction; it does not enable new runtime behavior.
+> Status: current — the schedule runtime ships under `src/trigger/schedule` and
+> is gated behind `ARIA_TRIGGER_RUNTIME=enabled`. This document defines the
+> contract; the [Trigger Platform](TRIGGER_PLATFORM_ARCHITECTURE.md) owns the
+> surrounding architecture.
 
 ## Decision
 

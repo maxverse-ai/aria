@@ -1,5 +1,7 @@
 # Console development preview
 
+> Status: current
+
 The browser console can run independently from the production Supervisor so
 frontend iteration never restarts the Lark bridge or interrupts agent runs.
 The preview and packaged console use the same source under `web/`.

@@ -1,5 +1,7 @@
 # Space 一对一 Podman 容器、个人授权与历史数据迁移方案
 
+> Status: historical — design record for the control-side execution architecture, superseded by the direct-CLI plan.
+
 > 2026-09-11 新方向：见 [Space 内直接运行 CLI 的实施计划](SPACE_DIRECT_CLI_PLAN.md)。以下保留为原控制侧代执行架构的设计记录；新方案尚未上线，不能将计划视为运行事实。
 
 - 更新日期：2026-09-10。

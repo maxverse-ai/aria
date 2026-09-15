@@ -1,5 +1,7 @@
 # Aria CLI distribution architecture
 
+> Status: current
+
 Aria's current consumer channel is a private GitHub repository. GitHub Releases
 is the package authority; npm is used only to resolve Aria's public runtime
 dependencies while installing a verified release tarball. The Aria package is

@@ -1,5 +1,7 @@
 # Grok Agent stdio runtime
 
+> Status: current
+
 Aria's Grok engine owns one `grok agent stdio` process per profile. The process
 speaks ACP version 1 as newline-delimited JSON-RPC over stdin and stdout. ACP
 method names and xAI extensions remain private to the Grok runtime; the rest of

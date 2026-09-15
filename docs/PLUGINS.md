@@ -1,5 +1,7 @@
 # Aria Engine Plugins
 
+> Status: current
+
 Aria drives local coding-agent CLIs through a plugin registry. Seven engines ship
 in the current build:
 

@@ -1,5 +1,7 @@
 # Deployment-selected Space navigation
 
+> Status: current
+
 Additive deployment-wide capabilities and versioned host adapters are described
 in [space-public-capabilities.md](space-public-capabilities.md). Common rules
 preserve existing business selection, opt-outs, user edits and native history.

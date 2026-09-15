@@ -1,6 +1,6 @@
 # Agent Runtime architecture
 
-Status: accepted foundation. Native runtime migrations remain incremental.
+> Status: current — accepted foundation. Native runtime migrations remain incremental.
 
 The current v1 runtime contract is described below. The target ownership change
 is defined in [Execution space architecture](EXECUTION_SPACE_ARCHITECTURE.md)

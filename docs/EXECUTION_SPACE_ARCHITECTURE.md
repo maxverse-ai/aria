@@ -1,9 +1,7 @@
 # Execution space architecture
 
-> Status: target semantics below are implemented through E5.3 behind an
-> explicitly prepared host composition. Personal and legacy team behavior remain
-> compatible. Management activation/migration (E6) and deployment certification
-> (E7) are still pending; implementation is not live deployment acceptance.
+> Status: current — target semantics below are implemented through E5.3 behind an explicitly prepared host composition. Personal and legacy team behavior remain compatible. Management activation/migration (E6) and deployment certification (E7) are still pending; implementation is not live deployment acceptance.
+
 >
 > Original design baseline: local main at `d8cd9a1fb242d6bfaaa0e89c290e02c53e7f0b83`,
 > reviewed on 2026-09-07. Implementation progress and the next bounded task are

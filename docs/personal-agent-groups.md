@@ -1,5 +1,7 @@
 # Personal agent groups
 
+> Status: current
+
 A personal profile managed by an Aria Supervisor automatically admits explicitly
 mentioned messages in a group with exactly one human and at least two agents when:
 

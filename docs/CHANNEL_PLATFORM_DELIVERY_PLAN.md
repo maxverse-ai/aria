@@ -1,10 +1,6 @@
 # Channel platform delivery plan
 
-> Status: active delivery handoff. Last reviewed on 2026-09-03 against the
-> internal 0.2 line. The accepted architecture remains
-> [Channel platform architecture](./CHANNEL_PLATFORM_ARCHITECTURE.md); this
-> document records implementation status, dependency order, and the next
-> independently reviewable increments.
+> Status: in progress — active delivery handoff. Last reviewed on 2026-09-03 against the internal 0.2 line. The accepted architecture remains [Channel platform architecture](./CHANNEL_PLATFORM_ARCHITECTURE.md); this document records implementation status, dependency order, and the next independently reviewable increments.
 
 ## Purpose
 

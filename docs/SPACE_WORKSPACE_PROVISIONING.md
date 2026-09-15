@@ -1,5 +1,7 @@
 # Business workspace provisioning
 
+> Status: current
+
 Business projects own navigation, rules and skills. The deployment selects a
 bundle for an exact SpaceKey and admits its resources. Aria owns validated
 installation, reconciliation, per-run navigation and native discovery. Aria's

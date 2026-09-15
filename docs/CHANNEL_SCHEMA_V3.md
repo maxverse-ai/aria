@@ -1,8 +1,6 @@
 # Channel profile schema v3
 
-Status: implemented as an explicit opt-in migration. Schema v2 remains the
-fresh-install default until deployment evidence authorizes a separate default
-cutover.
+> Status: current — implemented as an explicit opt-in migration. Schema v2 remains the fresh-install default until deployment evidence authorizes a separate default cutover.
 
 ## Purpose and ownership
 

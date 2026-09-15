@@ -43,3 +43,10 @@
   [agent-skills/private-fork-intake/SKILL.md](agent-skills/private-fork-intake/SKILL.md).
   Read it before absorbing private changes, syncing `vendor/aria`, or
   re-attributing commit history.
+
+## Documentation
+
+- [docs/DOCUMENTATION_POLICY.md](docs/DOCUMENTATION_POLICY.md) owns how documents
+  are classified and maintained. Read it before adding, moving, or restructuring
+  a document, and keep the status header it requires accurate.
+- Do not restate a fact that already has a single source of truth; reference it.

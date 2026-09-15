@@ -1,7 +1,6 @@
 # Archived: CLI control-plane design
 
-> Status: superseded after the Management API, adapter migration, runtime
-> reconciliation, model/engine management, and profile lifecycle shipped.
+> Status: archived — superseded after the Management API, adapter migration, runtime reconciliation, model/engine management, and profile lifecycle shipped.
 
 The control plane is no longer CLI-centric and no longer needs a separate
 target-architecture document. Current behavior, invariants, command coverage,

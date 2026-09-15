@@ -1,9 +1,6 @@
 # Native read API architecture
 
-> Status: v1 contract, per-profile file repository, source projectors,
-> authenticated Unix-socket HTTP adapter and explicit runtime opt-in are
-> implemented. No route listed here is considered available until the running
-> instance advertises it.
+> Status: current — v1 contract, per-profile file repository, source projectors, authenticated Unix-socket HTTP adapter and explicit runtime opt-in are implemented. No route listed here is considered available until the running instance advertises it.
 
 Aria's native read API gives control-plane consumers one agent-neutral view of
 profiles, sessions, messages, runs, identities, chats and audit evidence. It

@@ -1,9 +1,6 @@
 # Management control plane
 
-> Status: functional convergence is shipped. Public configuration changes from
-> the CLI, Feishu cards, and the local web console use the same versioned
-> `ManagementApi`. Remaining work is lifecycle housekeeping, durable management
-> audit, advanced actor verification, and removal of compatibility types.
+> Status: current — functional convergence is shipped. Public configuration changes from the CLI, Feishu cards, and the local web console use the same versioned `ManagementApi`. Remaining work is lifecycle housekeeping, durable management audit, advanced actor verification, and removal of compatibility types.
 
 For an independently authenticated path-prefix deployment of the full local
 console, see [Supervisor console behind a reverse proxy](CONSOLE_REVERSE_PROXY.md).

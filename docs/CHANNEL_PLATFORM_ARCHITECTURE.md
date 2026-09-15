@@ -1,7 +1,6 @@
 # Channel platform architecture
 
-Status: accepted direction. Delivery remains incremental and every stage must
-leave the currently supported channels runnable.
+> Status: current — accepted direction. Delivery remains incremental and every stage must leave the currently supported channels runnable.
 
 For the current implementation boundary, PR-sized remaining increments, and
 handoff checklist, see

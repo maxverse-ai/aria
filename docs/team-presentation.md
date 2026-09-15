@@ -1,5 +1,7 @@
 # Team presentation and changing audiences
 
+> Status: current
+
 Prepared execution spaces reuse the profile's presentation preferences:
 `cotMessages`, `showToolCalls`, and `messageReply`. A space owns execution data
 and authorization, not a copy of these preferences. Personal mode remains the

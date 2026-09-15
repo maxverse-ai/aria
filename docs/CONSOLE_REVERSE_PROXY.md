@@ -1,5 +1,7 @@
 # Supervisor console behind a reverse proxy
 
+> Status: current
+
 Aria's supervisor console is local-only by default: it binds to loopback on an
 ephemeral port, creates a random token for every process, and accepts only
 localhost origins. Keep those defaults unless a separately authenticated edge

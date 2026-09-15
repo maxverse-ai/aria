@@ -1,10 +1,6 @@
 # Archived: User Agent Space proposal
 
-> Status: historical proposal, never implemented. Its design direction is
-> superseded by the channel- and engine-neutral
-> [Execution space architecture](EXECUTION_SPACE_ARCHITECTURE.md).
-> [Phase 1](EXECUTION_SPACE_DELIVERY_PLAN.md) delivers the new architecture and
-> implementation plan only; user-space routing is not shipped.
+> Status: archived — historical proposal, never implemented. Its design direction is superseded by the channel- and engine-neutral [Execution space architecture](EXECUTION_SPACE_ARCHITECTURE.md). [Phase 1](EXECUTION_SPACE_DELIVERY_PLAN.md) delivers the new architecture and implementation plan only; user-space routing is not shipped.
 
 Aria currently owns one engine runtime per profile. Group and direct-message
 traffic for that profile use the same profile runtime; there is no

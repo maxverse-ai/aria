@@ -1,6 +1,8 @@
 # Space 内直接运行 CLI：实施与迁移计划
 
-日期：2026-09-11。状态：已授权实施，开发中，未集成、未上线。
+> Status: in progress — the native tool transport is in `main`
+> (`src/space/native-tools.ts`, `src/lark-cli/space-tool.ts`); container
+> networking, login recovery and rollout remain unverified. Started 2026-09-11.
 
 ## 目标和边界
 

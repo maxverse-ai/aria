@@ -1,5 +1,7 @@
 # Codex App Server runtime
 
+> Status: current
+
 Aria's Codex engine uses one managed `codex app-server --stdio` process per
 profile. The App Server is the only supported Codex execution transport.
 Its runtime descriptor advertises `profile-daemon` topology and only the

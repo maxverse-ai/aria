@@ -1,7 +1,6 @@
 # Execution space activation and migration
 
-Status: core implemented and repository checks passed, based on Aria `0a299a4`. Work is owned by lease
-`01M1XVVCAX6YK27ZS43GKHJ04W`. This document is not a deployment receipt.
+> Status: historical — core implemented and repository checks passed, based on Aria `0a299a4`. Work is owned by lease `01M1XVVCAX6YK27ZS43GKHJ04W`. This document is not a deployment receipt.
 
 The authorized increment completes explicit management activation, recoverable
 migration and a ***REMOVED*** `codex-bot` functional acceptance. Personal remains default;

@@ -541,6 +541,26 @@ grep '"event":"enter"' ~/.aria/profiles/<profile>/logs/bridge-$(date +%Y%m%d).js
 | 贡献者工具链与必跑门禁 | [工具链](docs/TOOLCHAIN.md) |
 | 版本与发布策略 | [发布策略](docs/RELEASE_POLICY.md) |
 
+### 完整索引
+
+每个主题一份文档，按角色分组。[文档政策](docs/DOCUMENTATION_POLICY.md) 定义了角色划分，以及每份文档都要带的状态行。文档标题保留英文原名。
+
+**现行规范** —— 描述当下的真相。
+
+[Agent Runtime architecture](docs/AGENT_RUNTIME_ARCHITECTURE.md) · [Channel platform architecture](docs/CHANNEL_PLATFORM_ARCHITECTURE.md) · [Channel Plugin ABI v1](docs/CHANNEL_PLUGIN_ABI_V1.md) · [Channel reliability primitives](docs/CHANNEL_RELIABILITY.md) · [Channel profile schema v3](docs/CHANNEL_SCHEMA_V3.md) · [Codex App Server runtime](docs/CODEX_APP_SERVER.md) · [Console development preview](docs/CONSOLE_DEVELOPMENT.md) · [Supervisor console behind a reverse proxy](docs/CONSOLE_REVERSE_PROXY.md) · [Management control plane](docs/CONTROL_PLANE.md) · [Conversation coordination](docs/COORDINATION.md) · [Deterministic scheduled actions](docs/DETERMINISTIC_SCHEDULED_ACTIONS.md) · [Aria CLI distribution architecture](docs/DISTRIBUTION.md) · [Documentation policy](docs/DOCUMENTATION_POLICY.md) · [Execution space architecture](docs/EXECUTION_SPACE_ARCHITECTURE.md) · [Grok Agent stdio runtime](docs/GROK_AGENT_STDIO.md) · [Lark / Feishu Channel](docs/LARK_CHANNEL.md) · [Lark CLI argument ownership](docs/LARK_CLI_ARGUMENT_POLICY.md) · [Native read API architecture](docs/NATIVE_READ_API.md) · [Aria Engine Plugins](docs/PLUGINS.md) · [Aria release policy](docs/RELEASE_POLICY.md) · [Business workspace provisioning](docs/SPACE_WORKSPACE_PROVISIONING.md) · [Aria toolchain](docs/TOOLCHAIN.md) · [Trigger platform architecture](docs/TRIGGER_PLATFORM_ARCHITECTURE.md) · [WeChat Customer Service Channel](docs/WECHAT_KF_CHANNEL.md) · [Workspace and state layout architecture](docs/WORKSPACE_AND_STATE_LAYOUT.md) · [Cooperative replies](docs/agent-cooperation.md) · [Aria bug ledger](docs/bug-ledger.md) · [Personal agent groups](docs/personal-agent-groups.md) · [Deployment public capabilities](docs/space-public-capabilities.md) · [Deployment-selected Space navigation](docs/space-workspaces.md) · [Team presentation and changing audiences](docs/team-presentation.md)
+
+**执行手册** —— 仍有未完成项的在办工作。
+
+[Channel platform delivery plan](docs/CHANNEL_PLATFORM_DELIVERY_PLAN.md) · [Space direct CLI plan](docs/SPACE_DIRECT_CLI_PLAN.md) · [Trigger Platform delivery handoff](docs/TRIGGER_PLATFORM_DELIVERY_HANDOFF.md)
+
+**历史记录** —— 已冻结，不随现状回改。
+
+[Team completion delivery](docs/EXECUTION_SPACE_COMPLETION.md) · [Execution space delivery plan](docs/EXECUTION_SPACE_DELIVERY_PLAN.md) · [Execution space implementation through Phase 5](docs/EXECUTION_SPACE_IMPLEMENTATION.md) · [Execution space activation and migration](docs/EXECUTION_SPACE_PHASE6.md) · [Space Podman container and personal authorization plan](docs/space-linux-user-personal-auth-plan.md)
+
+**归档** —— 已被取代，仅作溯源保留。
+
+[CLI control-plane design](docs/CLI_CONTROL_PLANE_DESIGN.md) · [User Agent Space proposal](docs/USER_AGENT_SPACE_ARCHITECTURE.md)
+
 ## 测试与 CI
 
 本地检查：

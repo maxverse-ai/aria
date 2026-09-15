@@ -1,5 +1,7 @@
 # Lark / Feishu Channel
 
+> Status: current
+
 ## Purpose
 
 Expose an Aria profile to Lark / Feishu as addressed conversation input. The

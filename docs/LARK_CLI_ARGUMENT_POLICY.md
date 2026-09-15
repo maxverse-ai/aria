@@ -1,5 +1,7 @@
 # Lark CLI argument ownership
 
+> Status: current
+
 Aria selects the authorized space, account, credential slot and effective
 identity. The CLI defines business arguments; Feishu decides API scopes and
 resource access. An adapter must not infer credential mutation from words such

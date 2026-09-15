@@ -1,5 +1,7 @@
 # Conversation coordination
 
+> Status: current
+
 Aria treats follow-ups as normal conversation behavior, not as a mode users
 must configure. When an eligible message arrives during a supported active run,
 Aria automatically offers it to that run. If the engine cannot accept it, the

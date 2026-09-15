@@ -1,8 +1,6 @@
 # Trigger platform architecture
 
-Status: proposed direction. This document defines the target architecture and
-progressive delivery plan; no scheduled execution behavior is shipped by this
-document.
+> Status: current — proposed direction. This document defines the target architecture and progressive delivery plan; no scheduled execution behavior is shipped by this document.
 
 Implementation status: Stages 0 through 11 are implemented and integrated into
 `origin/main`; live release deployment and host acceptance are tracked in the
