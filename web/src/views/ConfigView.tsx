@@ -8,16 +8,18 @@ import { Dialog, DialogHeader } from "@astryxdesign/core/Dialog";
 import { Divider } from "@astryxdesign/core/Divider";
 import { EmptyState } from "@astryxdesign/core/EmptyState";
 import { Grid } from "@astryxdesign/core/Grid";
+import { useMediaQuery } from "@astryxdesign/core/hooks";
 import { Icon } from "@astryxdesign/core/Icon";
 import {
   Layout,
   LayoutContent,
   LayoutFooter,
-  LayoutHeader,
+  LayoutPanel,
 } from "@astryxdesign/core/Layout";
 import { Link } from "@astryxdesign/core/Link";
 import { List, ListItem } from "@astryxdesign/core/List";
 import { NumberInput } from "@astryxdesign/core/NumberInput";
+import { Section } from "@astryxdesign/core/Section";
 import { Selector } from "@astryxdesign/core/Selector";
 import { Spinner } from "@astryxdesign/core/Spinner";
 import { HStack, VStack } from "@astryxdesign/core/Stack";
@@ -53,12 +55,37 @@ import type {
   UserChat,
 } from "@/lib/types";
 
+type SettingsSection = "behavior" | "access" | "meeting";
+
+const SETTINGS_SECTIONS = [
+  {
+    value: "behavior" as const,
+    label: "行为与运行",
+    description: "模型、回复与进程策略",
+    icon: Cog6ToothIcon,
+  },
+  {
+    value: "access" as const,
+    label: "访问边界",
+    description: "用户、群与管理员",
+    icon: ShieldCheckIcon,
+  },
+  {
+    value: "meeting" as const,
+    label: "会议能力",
+    description: "权限检查与实时会议",
+    icon: VideoCameraIcon,
+  },
+];
+
 export function ConfigView({ profile }: { profile: string }) {
   const [cfg, setCfg] = useState<ConfigData | null>(null);
   const [saving, setSaving] = useState(false);
   const [modelRefreshing, setModelRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [chatNames, setChatNames] = useState<Record<string, string>>({});
+  const [section, setSection] = useState<SettingsSection>("behavior");
+  const isNarrow = useMediaQuery("(max-width: 900px)");
   const showToast = useToast();
 
   const load = () =>
@@ -186,8 +213,58 @@ export function ConfigView({ profile }: { profile: string }) {
     }
   }
 
+  const settingsNavigation = (
+    <VStack gap={3}>
+      <VStack gap={0.5}>
+        <Heading level={3}>设置分类</Heading>
+        <Text type="supporting" color="secondary">选择一组设置进行编辑</Text>
+      </VStack>
+      <List density="spacious">
+        {SETTINGS_SECTIONS.map((item) => (
+          <ListItem
+            key={item.value}
+            label={item.label}
+            description={item.description}
+            startContent={<Icon icon={item.icon} size="sm" />}
+            isSelected={section === item.value}
+            onClick={() => setSection(item.value)}
+          />
+        ))}
+      </List>
+    </VStack>
+  );
+
   return (
-    <VStack gap={4}>
+    <Card padding={0}>
+      <Layout
+        contentWidth={1200}
+        start={isNarrow ? undefined : (
+          <LayoutPanel width={260} hasDivider padding={3} label="Agent 设置分类">
+            {settingsNavigation}
+          </LayoutPanel>
+        )}
+        content={
+          <LayoutContent padding={4}>
+            <VStack gap={6}>
+              {isNarrow ? (
+                <Selector
+                  label="设置分类"
+                  value={section}
+                  options={SETTINGS_SECTIONS.map((item) => ({ value: item.value, label: item.label }))}
+                  onChange={(value) => setSection(value as SettingsSection)}
+                  width="100%"
+                />
+              ) : null}
+
+              <VStack gap={0.5}>
+                <Heading level={2}>{SETTINGS_SECTIONS.find((item) => item.value === section)?.label}</Heading>
+                <Text color="secondary">
+                  {SETTINGS_SECTIONS.find((item) => item.value === section)?.description}
+                </Text>
+              </VStack>
+
+              {section === "behavior" ? (
+                <VStack gap={8} id="agent-behavior-panel">
       <SettingsPanel
         title="运行模式"
         description="决定 Profile 的访问模型与身份边界。"
@@ -323,8 +400,17 @@ export function ConfigView({ profile }: { profile: string }) {
         )}
       </SettingsPanel>
 
-      <MeetingPanel profile={profile} config={cfg.meeting} onChange={(meeting) => update("meeting", meeting)} />
+                </VStack>
+              ) : null}
 
+              {section === "meeting" ? (
+                <VStack gap={8} id="agent-meeting-panel">
+                  <MeetingPanel profile={profile} config={cfg.meeting} onChange={(meeting) => update("meeting", meeting)} />
+                </VStack>
+              ) : null}
+
+              {section === "access" ? (
+                <VStack gap={8} id="agent-access-panel">
       <SettingsPanel
         title="访问控制"
         description="管理可用用户、群与管理员。"
@@ -368,26 +454,27 @@ export function ConfigView({ profile }: { profile: string }) {
           onRemove={(id) => void access("remove", "admin", id)}
         />
       </SettingsPanel>
-
-      <Card elevation="med" padding={0} style={{ position: "sticky", bottom: 12, zIndex: 1 }}>
-        <Layout
-          footer={
-            <LayoutFooter padding={3}>
-              <HStack gap={2} hAlign="end" vAlign="center">
-                <Button label="重新加载" variant="ghost" isDisabled={saving} onClick={() => void load()} />
-                <Button
-                  label="保存配置"
-                  variant="primary"
-                  isLoading={saving}
-                  isDisabled={saving}
-                  onClick={() => void save()}
-                />
-              </HStack>
-            </LayoutFooter>
-          }
-        />
-      </Card>
-    </VStack>
+                </VStack>
+              ) : null}
+            </VStack>
+          </LayoutContent>
+        }
+        footer={
+          <LayoutFooter hasDivider padding={3}>
+            <HStack gap={2} hAlign="end" vAlign="center">
+              <Button label="重新加载" variant="ghost" isDisabled={saving} onClick={() => void load()} />
+              <Button
+                label="保存配置"
+                variant="primary"
+                isLoading={saving}
+                isDisabled={saving}
+                onClick={() => void save()}
+              />
+            </HStack>
+          </LayoutFooter>
+        }
+      />
+    </Card>
   );
 }
 
@@ -407,25 +494,22 @@ function SettingsPanel({
   children: ReactNode;
 }) {
   return (
-    <Card padding={0}>
-      <Layout
-        header={
-          <LayoutHeader padding={4} hasDivider>
-            <HStack gap={3} hAlign="between" vAlign="center" wrap="wrap">
-              <HStack gap={3} vAlign="center">
-                <Icon icon={icon} color="secondary" />
-                <VStack gap={0.5}>
-                  <Heading level={3}>{title}</Heading>
-                  {description && <Text type="supporting" color="secondary">{description}</Text>}
-                </VStack>
-              </HStack>
-              {headerAction ?? badge}
-            </HStack>
-          </LayoutHeader>
-        }
-        content={<LayoutContent padding={4}><VStack gap={4}>{children}</VStack></LayoutContent>}
-      />
-    </Card>
+    <Section variant="transparent" padding={0} dividers={["bottom"]}>
+      <VStack gap={4} paddingBlockEnd={6}>
+        <HStack gap={3} hAlign="between" vAlign="center" wrap="wrap">
+          <HStack gap={3} vAlign="center">
+            <Icon icon={icon} color="secondary" />
+            <VStack gap={0.5}>
+              <Heading level={3}>{title}</Heading>
+              {description && <Text type="supporting" color="secondary">{description}</Text>}
+            </VStack>
+          </HStack>
+          {headerAction ?? badge}
+        </HStack>
+        <Divider />
+        <VStack gap={4}>{children}</VStack>
+      </VStack>
+    </Section>
   );
 }
 

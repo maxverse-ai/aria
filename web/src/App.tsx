@@ -2,13 +2,10 @@ import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { AppShell } from "@astryxdesign/core/AppShell";
 import { Button } from "@astryxdesign/core/Button";
 import { Card } from "@astryxdesign/core/Card";
+import { Divider } from "@astryxdesign/core/Divider";
 import { EmptyState } from "@astryxdesign/core/EmptyState";
 import { Icon } from "@astryxdesign/core/Icon";
-import {
-  Layout,
-  LayoutContent,
-  LayoutFooter,
-} from "@astryxdesign/core/Layout";
+import { Layout, LayoutContent } from "@astryxdesign/core/Layout";
 import { NavIcon } from "@astryxdesign/core/NavIcon";
 import {
   SideNav,
@@ -19,10 +16,9 @@ import {
 import { Spinner } from "@astryxdesign/core/Spinner";
 import { HStack, VStack } from "@astryxdesign/core/Stack";
 import { StatusDot } from "@astryxdesign/core/StatusDot";
-import { Heading, Text } from "@astryxdesign/core/Text";
+import { Text } from "@astryxdesign/core/Text";
 import { ToastViewport } from "@astryxdesign/core/Toast";
 import {
-  CircleStackIcon,
   CalendarDaysIcon,
   CommandLineIcon,
   CpuChipIcon,
@@ -35,24 +31,27 @@ import { ProfileDetail } from "@/views/ProfileDetail";
 import { OnboardWizard } from "@/views/OnboardWizard";
 import { TriggersView } from "@/views/TriggersView";
 
-const TRIGGERS_ROUTE = "__triggers__";
+type ConsoleRoute =
+  | { kind: "workspace" }
+  | { kind: "automations" }
+  | { kind: "profile"; profile: string };
 
 export function App() {
   const [onboard, setOnboard] = useState<OnboardState | null>(null);
   const [status, setStatus] = useState<Status | null>(null);
-  const [selected, setSelected] = useState<string | null>(null);
+  const [route, setRoute] = useState<ConsoleRoute>({ kind: "workspace" });
   const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     try {
-      const os = await apiGet<OnboardState>("/api/onboard/state");
-      setOnboard(os);
-      if (os.hasConfig) {
-        setStatus(await apiGet<Status>("/api/status").catch(() => null));
-      }
+      const nextOnboard = await apiGet<OnboardState>("/api/onboard/state");
+      setOnboard(nextOnboard);
+      setStatus(nextOnboard.hasConfig
+        ? await apiGet<Status>("/api/status").catch(() => null)
+        : null);
       setError(null);
-    } catch (e) {
-      setError(String((e as Error).message ?? e));
+    } catch (cause) {
+      setError(String((cause as Error).message ?? cause));
     }
   }, []);
 
@@ -64,10 +63,10 @@ export function App() {
 
   const shell = (children: ReactNode) => (
     <ConsoleShell
-      profiles={onboard?.profiles ?? []}
       status={status}
-      selected={selected}
-      onSelect={setSelected}
+      profiles={onboard?.profiles ?? []}
+      route={route}
+      onRoute={setRoute}
     >
       {children}
     </ConsoleShell>
@@ -75,166 +74,172 @@ export function App() {
 
   if (error) {
     return shell(
-      <EmptyState
-        title="控制台连接失败"
-        description={error}
-        actions={<Button label="重新加载" variant="primary" onClick={() => void refresh()} />}
-      />,
+      <Layout content={
+        <LayoutContent padding={6}>
+          <EmptyState
+            title="控制台暂时不可用"
+            description={error}
+            actions={<Button label="重新连接" variant="primary" onClick={() => void refresh()} />}
+          />
+        </LayoutContent>
+      } />,
     );
   }
 
   if (!onboard) {
     return shell(
-      <Card padding={8}>
-        <HStack gap={3} hAlign="center" vAlign="center">
-          <Spinner label="正在加载控制台" />
-          <Text color="secondary">正在连接 Aria supervisor…</Text>
-        </HStack>
-      </Card>,
+      <Layout content={
+        <LayoutContent padding={6}>
+          <Card variant="muted" padding={8}>
+            <HStack gap={3} hAlign="center" vAlign="center">
+              <Spinner label="正在连接 Aria" />
+              <Text color="secondary">正在读取本机 Supervisor…</Text>
+            </HStack>
+          </Card>
+        </LayoutContent>
+      } />,
     );
   }
 
   if (!onboard.hasConfig) {
     return shell(
-      <VStack gap={5}>
-        <VStack gap={1}>
-          <Text type="supporting" color="accent" weight="semibold">首次设置</Text>
-          <Heading level={1}>初始化 AI 助手</Heading>
-          <Text color="secondary">创建第一个飞书应用并绑定本地 Agent。</Text>
-        </VStack>
-        <Card padding={6} maxWidth={720}>
-          <OnboardWizard onCreated={() => void refresh()} />
-        </Card>
-      </VStack>,
+      <Layout content={
+        <LayoutContent padding={6}>
+          <Card variant="blue" padding={8} maxWidth={760}>
+            <OnboardWizard onCreated={() => void refresh()} />
+          </Card>
+        </LayoutContent>
+      } />,
+    );
+  }
+
+  if (route.kind === "automations") {
+    return shell(<TriggersView profiles={onboard.profiles} />);
+  }
+
+  if (route.kind === "profile") {
+    return shell(
+      <ProfileDetail
+        profile={route.profile}
+        onBack={() => {
+          setRoute({ kind: "workspace" });
+          void refresh();
+        }}
+      />,
     );
   }
 
   return shell(
-    selected === TRIGGERS_ROUTE ? (
-      <TriggersView profiles={onboard.profiles} />
-    ) : selected ? (
-      <ProfileDetail
-        profile={selected}
-        onBack={() => {
-          setSelected(null);
-          void refresh();
-        }}
-      />
-    ) : (
-      <ProfilesView
-        status={status}
-        onOpen={setSelected}
-        onProfilesChanged={() => void refresh()}
-      />
-    ),
+    <ProfilesView
+      status={status}
+      onOpen={(profile) => setRoute({ kind: "profile", profile })}
+      onProfilesChanged={() => void refresh()}
+    />,
   );
 }
 
 function ConsoleShell({
   children,
-  profiles,
   status,
-  selected,
-  onSelect,
+  profiles,
+  route,
+  onRoute,
 }: {
   children: ReactNode;
-  profiles: string[];
   status: Status | null;
-  selected: string | null;
-  onSelect: (profile: string | null) => void;
+  profiles: string[];
+  route: ConsoleRoute;
+  onRoute: (route: ConsoleRoute) => void;
 }) {
-  const navigation = (
-    <>
-      <SideNavSection title="控制台" isHeaderHidden>
-        <SideNavItem
-          label="运行总览"
-          icon={Squares2X2Icon}
-          isSelected={selected === null}
-          onClick={() => onSelect(null)}
-        />
-        <SideNavItem
-          label="定时任务"
-          icon={CalendarDaysIcon}
-          isSelected={selected === TRIGGERS_ROUTE}
-          onClick={() => onSelect(TRIGGERS_ROUTE)}
-        />
-      </SideNavSection>
-      <SideNavSection title="Profiles">
-        {profiles.map((profile) => (
-          <SideNavItem
-            key={profile}
-            label={profile}
-            icon={CpuChipIcon}
-            isSelected={selected === profile}
-            onClick={() => onSelect(profile)}
-          />
-        ))}
-      </SideNavSection>
-    </>
-  );
-
   return (
     <ToastViewport position="bottomEnd" maxVisible={4}>
       <AppShell
-        variant="elevated"
+        variant="surface"
         contentPadding={0}
         height="fill"
-        mobileNav={{ breakpoint: "md", content: navigation }}
+        mobileNav={{ breakpoint: "md" }}
         sideNav={
           <SideNav
             collapsible
-            resizable={{ defaultWidth: 272, minWidth: 232, maxWidth: 360, autoSaveId: "aria-console-nav" }}
+            resizable={{ defaultWidth: 264, minWidth: 224, maxWidth: 360 }}
             header={
               <SideNavHeading
-                superheading="Supervisor"
-                heading="Aria Console"
-                subheading={status ? `v${status.version}` : "正在连接"}
-                icon={
-                  <NavIcon
-                    icon={<Icon icon={CommandLineIcon} size="sm" color="accent" />}
-                  />
-                }
+                heading="Aria"
+                superheading="Agent workspace"
+                headingHref="#workspace"
+                icon={<NavIcon icon={<Icon icon={CommandLineIcon} size="sm" color="accent" />} />}
+                onClick={(event) => {
+                  event.preventDefault();
+                  onRoute({ kind: "workspace" });
+                }}
               />
             }
             footer={
-              <SideNavSection title="系统状态" isHeaderHidden>
+              <SideNavSection title="Supervisor" isHeaderHidden>
                 <SideNavItem
-                  label={status ? `${status.online} 个 profile 在线` : "连接 supervisor"}
-                  icon={
+                  label={status ? `${status.online} 个 Agent 在线` : "正在连接"}
+                  icon={CpuChipIcon}
+                  href="#status"
+                  endContent={
                     <StatusDot
                       variant={status ? "success" : "warning"}
-                      label={status ? "Supervisor 在线" : "正在连接 supervisor"}
+                      label={status ? `Supervisor v${status.version}` : "连接中"}
+                      isPulsing={Boolean(status)}
                     />
                   }
-                  endContent={<Icon icon={CircleStackIcon} size="sm" color="secondary" />}
+                  onClick={(event) => event.preventDefault()}
                 />
               </SideNavSection>
             }
           >
-            {navigation}
+            <SideNavSection title="导航" isHeaderHidden>
+              <SideNavItem
+                label="工作台"
+                icon={Squares2X2Icon}
+                href="#workspace"
+                isSelected={route.kind === "workspace"}
+                onClick={(event) => {
+                  event.preventDefault();
+                  onRoute({ kind: "workspace" });
+                }}
+              />
+              <SideNavItem
+                label="自动化"
+                icon={CalendarDaysIcon}
+                href="#automations"
+                isSelected={route.kind === "automations"}
+                onClick={(event) => {
+                  event.preventDefault();
+                  onRoute({ kind: "automations" });
+                }}
+              />
+            </SideNavSection>
+            {profiles.length > 0 ? (
+              <>
+                <Divider />
+                <SideNavSection title="Agent">
+                  <VStack gap={0.5}>
+                    {profiles.map((profile) => (
+                      <SideNavItem
+                        key={profile}
+                        label={profile}
+                        icon={CommandLineIcon}
+                        href={`#profile-${encodeURIComponent(profile)}`}
+                        isSelected={route.kind === "profile" && route.profile === profile}
+                        onClick={(event) => {
+                          event.preventDefault();
+                          onRoute({ kind: "profile", profile });
+                        }}
+                      />
+                    ))}
+                  </VStack>
+                </SideNavSection>
+              </>
+            ) : null}
           </SideNav>
         }
       >
-        <Layout
-          height="fill"
-          contentWidth={1280}
-          content={<LayoutContent padding={6}>{children}</LayoutContent>}
-          footer={
-            status ? (
-              <LayoutFooter padding={3} hasDivider>
-                <HStack gap={2} hAlign="between" vAlign="center" wrap="wrap">
-                  <HStack gap={2} vAlign="center">
-                    <StatusDot variant="success" label="Supervisor 运行正常" />
-                    <Text type="supporting" color="secondary">单主进程托管所有 profile</Text>
-                  </HStack>
-                  <Text type="supporting" color="secondary">
-                    在线配置即时生效 · Aria v{status.version}
-                  </Text>
-                </HStack>
-              </LayoutFooter>
-            ) : undefined
-          }
-        />
+        {children}
       </AppShell>
     </ToastViewport>
   );

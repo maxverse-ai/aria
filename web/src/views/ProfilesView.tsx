@@ -1,34 +1,36 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { AlertDialog } from "@astryxdesign/core/AlertDialog";
 import { Badge } from "@astryxdesign/core/Badge";
 import { Button } from "@astryxdesign/core/Button";
 import { Card } from "@astryxdesign/core/Card";
 import { Dialog, DialogHeader } from "@astryxdesign/core/Dialog";
+import { Divider } from "@astryxdesign/core/Divider";
 import { EmptyState } from "@astryxdesign/core/EmptyState";
 import { Grid } from "@astryxdesign/core/Grid";
 import { Icon } from "@astryxdesign/core/Icon";
-import {
-  Layout,
-  LayoutContent,
-  LayoutHeader,
-} from "@astryxdesign/core/Layout";
-import { List, ListItem } from "@astryxdesign/core/List";
+import { Layout, LayoutContent, LayoutHeader } from "@astryxdesign/core/Layout";
+import { Section } from "@astryxdesign/core/Section";
 import { Spinner } from "@astryxdesign/core/Spinner";
-import { HStack, VStack } from "@astryxdesign/core/Stack";
+import { HStack, StackItem, VStack } from "@astryxdesign/core/Stack";
 import { StatusDot } from "@astryxdesign/core/StatusDot";
 import { Heading, Text } from "@astryxdesign/core/Text";
+import { TextInput } from "@astryxdesign/core/TextInput";
+import { ToggleButton, ToggleButtonGroup } from "@astryxdesign/core/ToggleButton";
 import { useToast } from "@astryxdesign/core/Toast";
 import {
   ArrowPathIcon,
-  ChevronRightIcon,
-  CpuChipIcon,
+  ArrowRightIcon,
+  BoltIcon,
+  CommandLineIcon,
+  MagnifyingGlassIcon,
+  PauseIcon,
   PlusIcon,
-  SignalIcon,
-  StopCircleIcon,
 } from "@heroicons/react/24/outline";
 import { apiGet, apiPost } from "@/lib/api";
 import type { ProfileInfo, Status } from "@/lib/types";
 import { OnboardWizard } from "./OnboardWizard";
+
+type ProfileFilter = "all" | "running" | "stopped";
 
 export function ProfilesView({
   status,
@@ -45,6 +47,8 @@ export function ProfilesView({
   const [stopTarget, setStopTarget] = useState<string | null>(null);
   const [stopping, setStopping] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
+  const [filter, setFilter] = useState<ProfileFilter>("all");
   const showToast = useToast();
 
   const load = () =>
@@ -53,7 +57,7 @@ export function ProfilesView({
         setProfiles(data.profiles);
         setError(null);
       })
-      .catch((e) => setError(String(e.message ?? e)));
+      .catch((cause) => setError(String(cause.message ?? cause)));
 
   useEffect(() => {
     void load();
@@ -61,15 +65,26 @@ export function ProfilesView({
     return () => clearInterval(timer);
   }, []);
 
-  async function start(name: string, e: React.MouseEvent) {
-    e.stopPropagation();
+  const visibleProfiles = useMemo(() => {
+    if (!profiles) return [];
+    const search = query.trim().toLocaleLowerCase();
+    return profiles.filter((profile) => {
+      if (filter === "running" && !profile.running) return false;
+      if (filter === "stopped" && profile.running) return false;
+      return !search
+        || profile.name.toLocaleLowerCase().includes(search)
+        || profile.agentKind.toLocaleLowerCase().includes(search);
+    });
+  }, [filter, profiles, query]);
+
+  async function start(name: string) {
     setBusy(name);
     try {
       await apiPost("/api/profiles/start", { profile: name });
-      showToast({ body: `已启动 ${name}` });
+      showToast({ body: `${name} 已启动` });
       await load();
-    } catch (err) {
-      showToast({ body: String((err as Error).message ?? err), type: "error" });
+    } catch (cause) {
+      showToast({ body: String((cause as Error).message ?? cause), type: "error" });
     } finally {
       setBusy(null);
     }
@@ -80,166 +95,183 @@ export function ProfilesView({
     setStopping(true);
     try {
       await apiPost("/api/profiles/stop", { profile: stopTarget });
-      showToast({ body: `已停止 ${stopTarget}` });
+      showToast({ body: `${stopTarget} 已停止` });
       setStopTarget(null);
       setTimeout(() => void load(), 500);
-    } catch (e) {
-      showToast({ body: String((e as Error).message ?? e), type: "error" });
+    } catch (cause) {
+      showToast({ body: String((cause as Error).message ?? cause), type: "error" });
     } finally {
       setStopping(false);
     }
   }
 
   const running = profiles?.filter((profile) => profile.running).length ?? 0;
-  const stopped = profiles ? profiles.length - running : 0;
 
   return (
-    <VStack gap={6}>
-      <HStack gap={4} hAlign="between" vAlign="start" wrap="wrap">
-        <VStack gap={1}>
-          <Text type="supporting" color="accent" weight="semibold">运行总览</Text>
-          <Heading level={1}>Profiles</Heading>
-          <Text color="secondary">查看运行健康度、启动或停止本机 Agent 实例。</Text>
-        </VStack>
-        <Button
-          label="新建 Profile"
-          variant="primary"
-          icon={<Icon icon={PlusIcon} size="sm" />}
-          onClick={() => setCreating(true)}
-        />
-      </HStack>
-
-      <Grid columns={{ minWidth: 190, max: 4, repeat: "fit" }} gap={3}>
-        <MetricCard
-          label="Profile 总数"
-          value={profiles?.length ?? "—"}
-          icon={CpuChipIcon}
-          description="已注册的本地实例"
-        />
-        <MetricCard
-          label="在线"
-          value={profiles ? running : "—"}
-          icon={SignalIcon}
-          description="由 supervisor 托管"
-          status="success"
-        />
-        <MetricCard
-          label="未运行"
-          value={profiles ? stopped : "—"}
-          icon={StopCircleIcon}
-          description="可随时重新启动"
-          status={stopped > 0 ? "neutral" : "success"}
-        />
-        <MetricCard
-          label="Supervisor"
-          value={status?.hosted ? "Hosted" : "Local"}
-          icon={ArrowPathIcon}
-          description={status ? `Aria v${status.version}` : "正在读取版本"}
-          status={status ? "success" : "warning"}
-        />
-      </Grid>
-
-      <Card padding={0}>
-        <Layout
-          header={
-            <LayoutHeader padding={4} hasDivider>
-              <HStack hAlign="between" vAlign="center" gap={3}>
-                <VStack gap={0.5}>
-                  <Heading level={2}>实例状态</Heading>
-                  <Text type="supporting" color="secondary">每 5 秒自动刷新</Text>
-                </VStack>
+    <>
+      <Layout
+        height="fill"
+        header={
+          <LayoutHeader hasDivider padding={6}>
+            <HStack gap={4} hAlign="between" vAlign="center" wrap="wrap">
+              <VStack gap={1}>
+                <Text type="supporting" color="accent" weight="semibold">WORKSPACE</Text>
+                <Heading level={1}>Agent 工作台</Heading>
+                <HStack gap={2} vAlign="center" wrap="wrap">
+                  <StatusDot
+                    variant={status ? "success" : "warning"}
+                    label={status ? "Supervisor 在线" : "正在连接 Supervisor"}
+                    isPulsing={Boolean(status)}
+                  />
+                  <Text color="secondary">
+                    {status ? `${running} 个在线，${profiles?.length ?? 0} 个已配置` : "状态会自动刷新"}
+                  </Text>
+                </HStack>
+              </VStack>
+              <Button
+                label="添加 Agent"
+                variant="primary"
+                icon={<Icon icon={PlusIcon} size="sm" />}
+                onClick={() => setCreating(true)}
+              />
+            </HStack>
+          </LayoutHeader>
+        }
+        content={
+          <LayoutContent padding={6}>
+            <VStack gap={6}>
+              <HStack gap={3} vAlign="center" wrap="wrap">
+                <StackItem size="fill">
+                  <TextInput
+                    label="搜索 Agent"
+                    isLabelHidden
+                    placeholder="搜索名称或执行引擎"
+                    value={query}
+                    onChange={setQuery}
+                    startIcon={MagnifyingGlassIcon}
+                    width="100%"
+                  />
+                </StackItem>
+                <ToggleButtonGroup
+                  label="按运行状态筛选"
+                  value={filter}
+                  onChange={(value) => setFilter((value ?? "all") as ProfileFilter)}
+                >
+                  <ToggleButton label="全部" value="all" />
+                  <ToggleButton label="在线" value="running" />
+                  <ToggleButton label="未运行" value="stopped" />
+                </ToggleButtonGroup>
                 <Button
                   label="刷新"
                   variant="ghost"
-                  size="sm"
                   icon={<Icon icon={ArrowPathIcon} size="sm" />}
                   onClick={() => void load()}
                 />
               </HStack>
-            </LayoutHeader>
-          }
-          content={
-            <LayoutContent padding={0}>
-              {error ? (
-                <EmptyState
-                  title="无法读取 Profiles"
-                  description={error}
-                  actions={<Button label="重试" onClick={() => void load()} />}
-                  isCompact
-                />
-              ) : profiles === null ? (
-                <HStack hAlign="center" vAlign="center" gap={2} style={{ padding: 40 }}>
-                  <Spinner size="sm" aria-label="正在加载 profiles" />
-                  <Text color="secondary">正在加载…</Text>
-                </HStack>
-              ) : profiles.length === 0 ? (
-                <EmptyState
-                  title="还没有 Profile"
-                  description="创建一个飞书应用并连接 Claude Code 或 Codex。"
-                  icon={<Icon icon={CpuChipIcon} size="lg" color="secondary" />}
-                  actions={<Button label="新建 Profile" variant="primary" onClick={() => setCreating(true)} />}
-                />
-              ) : (
-                <List density="spacious" hasDividers>
-                  {profiles.map((profile) => (
-                    <ListItem
-                      key={profile.name}
-                      label={
-                        <HStack gap={2} vAlign="center" wrap="wrap">
-                          <Text weight="semibold">{profile.name}</Text>
-                          <Badge variant="neutral" label={profile.agentKind} />
-                          <Badge
-                            variant={profile.running ? "success" : "neutral"}
-                            label={profile.running ? "在线" : "未运行"}
-                          />
-                        </HStack>
-                      }
-                      description={profile.running ? "进程已连接，配置修改可即时生效" : "当前没有运行中的 bot"}
-                      startContent={
-                        <StatusDot
-                          variant={profile.running ? "success" : "neutral"}
-                          label={profile.running ? "在线" : "未运行"}
-                          isPulsing={profile.running}
-                        />
-                      }
-                      endContent={
-                        <HStack gap={2} vAlign="center">
-                          {profile.running ? (
-                            <Button
-                              label="停止"
-                              variant="ghost"
-                              size="sm"
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                setStopTarget(profile.name);
-                              }}
-                            />
-                          ) : (
-                            <Button
-                              label="启动"
-                              variant="secondary"
-                              size="sm"
-                              isLoading={busy === profile.name}
-                              isDisabled={busy === profile.name}
-                              onClick={(event) => void start(profile.name, event)}
-                            />
-                          )}
-                          <Icon icon={ChevronRightIcon} size="sm" color="secondary" />
-                        </HStack>
-                      }
-                      onClick={() => onOpen(profile.name)}
-                    />
-                  ))}
-                </List>
-              )}
-            </LayoutContent>
-          }
-        />
-      </Card>
 
-      <Dialog isOpen={creating} onOpenChange={setCreating} width={620} purpose="form">
+              <Section variant="transparent" padding={0}>
+                <VStack gap={4}>
+                  <HStack gap={3} hAlign="between" vAlign="center">
+                    <Heading level={2}>所有 Agent</Heading>
+                    <Text type="supporting" color="secondary">{visibleProfiles.length} 个结果</Text>
+                  </HStack>
+                  <Divider />
+
+                  {error ? (
+                    <EmptyState
+                      title="无法读取 Agent"
+                      description={error}
+                      actions={<Button label="重试" onClick={() => void load()} />}
+                    />
+                  ) : profiles === null ? (
+                    <HStack hAlign="center" vAlign="center" gap={2} minHeight={180}>
+                      <Spinner size="sm" aria-label="正在加载 Agent" />
+                      <Text color="secondary">正在加载 Agent…</Text>
+                    </HStack>
+                  ) : profiles.length === 0 ? (
+                    <EmptyState
+                      title="创建第一个 Agent"
+                      description="连接一个飞书应用，再选择 Claude Code 或 Codex 作为执行引擎。"
+                      icon={<Icon icon={CommandLineIcon} size="lg" color="secondary" />}
+                      actions={<Button label="添加 Agent" variant="primary" onClick={() => setCreating(true)} />}
+                    />
+                  ) : visibleProfiles.length === 0 ? (
+                    <EmptyState
+                      title="没有匹配的 Agent"
+                      description="尝试调整搜索词或运行状态筛选。"
+                      actions={<Button label="清除筛选" onClick={() => { setQuery(""); setFilter("all"); }} />}
+                    />
+                  ) : (
+                    <Grid columns={{ minWidth: 300, max: 3, repeat: "fit" }} gap={4}>
+                      {visibleProfiles.map((profile) => (
+                        <Card key={profile.name} padding={0} elevation="low">
+                          <Section variant={profile.running ? "section" : "muted"} padding={5}>
+                            <VStack gap={5}>
+                              <HStack gap={3} hAlign="between" vAlign="start">
+                                <HStack gap={3} vAlign="center">
+                                  <Icon
+                                    icon={profile.running ? BoltIcon : CommandLineIcon}
+                                    size="lg"
+                                    color={profile.running ? "success" : "secondary"}
+                                  />
+                                  <VStack gap={0.5}>
+                                    <Heading level={3}>{profile.name}</Heading>
+                                    <StatusDot
+                                      variant={profile.running ? "success" : "neutral"}
+                                      label={profile.running ? "渠道已连接" : "当前未运行"}
+                                      isPulsing={profile.running}
+                                    />
+                                  </VStack>
+                                </HStack>
+                                <Badge
+                                  variant="neutral"
+                                  label={profile.agentKind === "codex" ? "Codex" : "Claude"}
+                                />
+                              </HStack>
+                              <Divider />
+                              <HStack gap={2} hAlign="end" vAlign="center" wrap="wrap">
+                                {profile.running ? (
+                                  <Button
+                                    label="停止"
+                                    variant="ghost"
+                                    size="sm"
+                                    icon={<Icon icon={PauseIcon} size="sm" />}
+                                    onClick={() => setStopTarget(profile.name)}
+                                  />
+                                ) : (
+                                  <Button
+                                    label="启动"
+                                    variant="secondary"
+                                    size="sm"
+                                    isLoading={busy === profile.name}
+                                    isDisabled={busy === profile.name}
+                                    onClick={() => void start(profile.name)}
+                                  />
+                                )}
+                                <Button
+                                  label="打开工作区"
+                                  variant="primary"
+                                  size="sm"
+                                  icon={<Icon icon={ArrowRightIcon} size="sm" />}
+                                  onClick={() => onOpen(profile.name)}
+                                />
+                              </HStack>
+                            </VStack>
+                          </Section>
+                        </Card>
+                      ))}
+                    </Grid>
+                  )}
+                </VStack>
+              </Section>
+            </VStack>
+          </LayoutContent>
+        }
+      />
+
+      <Dialog isOpen={creating} onOpenChange={setCreating} width={640} purpose="form">
         <Layout
-          header={<DialogHeader title="新建 Profile" onOpenChange={setCreating} />}
+          header={<DialogHeader title="添加 Agent" onOpenChange={setCreating} />}
           content={
             <LayoutContent padding={5}>
               <OnboardWizard
@@ -258,44 +290,13 @@ export function ProfilesView({
       <AlertDialog
         isOpen={stopTarget !== null}
         onOpenChange={(open) => !open && setStopTarget(null)}
-        title={`停止 ${stopTarget ?? "Profile"}？`}
-        description="将停止该 profile 正在运行的 bot；若它是后台服务，也会禁用自动重启。之后可随时重新启动。"
-        cancelLabel="取消"
-        actionLabel="确认停止"
+        title={`停止 ${stopTarget ?? "Agent"}？`}
+        description="该 Agent 会断开渠道连接，并停止接收新消息；之后可以从工作台重新启动。"
+        cancelLabel="继续运行"
+        actionLabel="停止 Agent"
         isActionLoading={stopping}
         onAction={() => void confirmStop()}
       />
-    </VStack>
-  );
-}
-
-function MetricCard({
-  label,
-  value,
-  icon,
-  description,
-  status,
-}: {
-  label: string;
-  value: string | number;
-  icon: typeof CpuChipIcon;
-  description: string;
-  status?: "success" | "warning" | "neutral";
-}) {
-  return (
-    <Card padding={4}>
-      <VStack gap={3}>
-        <HStack hAlign="between" vAlign="center">
-          <Text type="label" color="secondary">{label}</Text>
-          {status ? (
-            <StatusDot variant={status} label={label} />
-          ) : (
-            <Icon icon={icon} size="sm" color="secondary" />
-          )}
-        </HStack>
-        <Heading level={2}>{value}</Heading>
-        <Text type="supporting" color="secondary">{description}</Text>
-      </VStack>
-    </Card>
+    </>
   );
 }
