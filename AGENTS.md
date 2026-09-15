@@ -36,3 +36,10 @@
 - PATCH releases may be automated only on the release line authorized by `.release-policy.json`; MINOR, MAJOR, and stable promotion releases require explicit human authorization.
 - Agents MUST NOT change `stableLine` or set `ARIA_RELEASE_HUMAN_AUTHORIZED` unless the current task contains explicit human authorization for the exact target release line.
 - Never overwrite a published version or release tag. Release artifacts MUST come from the exact tested commit on `origin/main`.
+
+## Private fork intake
+
+- Work from the machine-private Aria fork reaches this repository only through
+  [agent-skills/private-fork-intake/SKILL.md](agent-skills/private-fork-intake/SKILL.md).
+  Read it before absorbing private changes, syncing `vendor/aria`, or
+  re-attributing commit history.
