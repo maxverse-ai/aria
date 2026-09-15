@@ -1,5 +1,7 @@
 # Execution space implementation through Phase 5
 
+> Status: historical — implementation record for E2.2–E5.3 on baseline `b1dc362f`.
+
 This task implements E2.2–E5.3 on baseline `b1dc362f55693a47c35a5d9434903b270969f66d`.
 The repository gate and exact candidate integration receipt are owned by that
 task's workflow. It does not activate migrations, deploy/restart a service, or
@@ -121,10 +123,12 @@ tests do not claim a real OAuth account has been connected.
   retained results, scope-specific reset and blocked retries.
 - [Native Read HTTP](../tests/unit/space/native-read.test.ts): physical read
   partition, foreign cursor/detail rejection and revoked source admission.
-- [All-engine process fixtures](../tests/process/space-engines.test.ts): A/B
-  homes, synthetic host-secret denial, native policy and owned daemon history.
-- [OS confinement](../tests/process/space-isolation.test.ts) and
-  [history/egress helpers](../tests/process/space-query-egress.test.ts): child,
+- `tests/process/space-engines.test.ts` and `tests/process/space-isolation.test.ts`
+  (named rather than linked: both were removed in 0.3.0 together with the
+  `bubblewrap` execution driver they exercised): all-engine process fixtures —
+  A/B homes, synthetic host-secret denial, native policy, owned daemon history,
+  and the OS confinement boundary.
+- [history/egress helpers](../tests/process/space-query-egress.test.ts): child,
   symlink, read-only, live host-listener and broker boundaries, without external
   network dependencies or reading account secrets.
 
