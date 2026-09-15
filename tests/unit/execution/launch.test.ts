@@ -10,7 +10,7 @@ function fixture() {
     cwd: '/manager', env: { HOME: '/manager' },
   }));
   const launch: ConfinedLaunch = {
-    binary: '/usr/bin/agent', paths, workspaceAccess: 'workspace', executableRoots: [], environment: {},
+    binary: '/usr/bin/agent', paths, workspaceAccess: 'workspace', executableRoots: [], environment: {}, driver: 'execution',
     executionEnvironment: { id: 'test-space', prepare, close: async () => {} },
   };
   return { prepare, launch };

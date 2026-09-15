@@ -50,7 +50,7 @@ it.each(SPACE_ENGINE_IDS)('%s trusted process: explicit shared host, independent
   } finally { await Promise.all(runtimes.map((runtime) => runtime.dispose())); }
 }, 20_000);
 
-it('missing bubblewrap never selects trusted execution', () => {
+it('an undeclared driver never selects trusted execution', () => {
   const paths = resolveSpacePaths('/tmp/aria-launch-fixture', { kind: 'default', profileId: 'p' });
   expect(() => withConfinedLaunch({ binary: process.execPath, paths, executableRoots: [], environment: {}, workspaceAccess: 'workspace' },
     () => confineSpawn(process.execPath, [], {}))).toThrow('explicit supported isolation driver');

@@ -170,7 +170,7 @@ describe('business workspace provisioning', () => {
     const b = bundle(); b.resources = [{ name: 'project', path: join(s.root, 'missing'), access: 'read-only' }];
     expect((await s.owner(s.definition(b)).status(s.context)).resources).toEqual([{ name: 'project', available: false }]);
     b.resources = [{ name: 'project', path: s.root, access: 'read-only' }];
-    await expect(s.owner(s.definition(b), 'bubblewrap').prepare(s.context)).rejects.toThrow('conflict');
+    await expect(s.owner(s.definition(b), 'execution').prepare(s.context)).rejects.toThrow('conflict');
   });
   it.each(['claude', 'grok', 'opencode', 'pi', 'kimi', 'dsh'])('provides an explicit lazy catalog for %s without claiming native verification', async engine => {
     const s = await setup(engine), owner = s.owner(); await owner.prepare(s.context); await owner.recordDiscovery(s.key);

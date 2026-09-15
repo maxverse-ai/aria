@@ -10,7 +10,7 @@
 
 ## 1. 已知现状与设计依据
 
-前次部署核查显示 ***REMOVED*** 为 Docker 内非 root 5011:5011、cap-drop ALL、no-new-privileges、只读根文件系统；Space 使用 trusted-process，Codex full 权限映射为 danger-full-access。Space Podman 驱动尚未验证；先前 Linux 沙箱入口曾报告 bwrap 无权创建 namespace，不能据此断言 Podman 必然失败，也不能假设换运行时就能成功。
+前次部署核查显示 ***REMOVED*** 为 Docker 内非 root 5011:5011、cap-drop ALL、no-new-privileges、只读根文件系统；Space 使用 trusted-process，Codex full 权限映射为 danger-full-access。Space Podman 驱动尚未验证；历史上内核沙箱入口曾因权限不足无法创建 namespace，不能据此断言 Podman 必然失败，也不能假设换运行时就能成功。
 
 前次盘点包含 13 个 Space、72 条封存旧会话，以及 prepared Space 启用之后新增的会话/产物；这些是历史观测，不是迁移时的最终数量。正式实施必须重盘点当前活动 preparation、实际版本、会话目录和新增写入。
 
@@ -40,7 +40,7 @@ Aria 管理服务不直接执行模型生成的代码；Space 容器运行 agent
 
 可信边界包括执行节点内核、管理/授权服务和镜像供应链。容器是跨 Space 边界，团队 Space 的文件、历史及 bot 结果属于共享数据；个人 Space 的数据和授权不进入团队容器。容器共享内核，不宣称可防御宿主管理员或所有内核漏洞。
 
-部署能力预检验证 Podman 版本、UID 映射、挂载、网络和资源限额；实际 rootless/rootful、seccomp/LSM、存储驱动由部署配置选择并通过验收。能力不足阻塞上线，不自动使用 privileged、取消限制或回退 trusted-process。历史 bwrap 失败只是当时环境观测，不是所有部署的前置结论。
+部署能力预检验证 Podman 版本、UID 映射、挂载、网络和资源限额；实际 rootless/rootful、seccomp/LSM、存储驱动由部署配置选择并通过验收。能力不足阻塞上线，不自动使用 privileged、取消限制或回退 trusted-process。历史上内核沙箱入口的失败只是当时环境观测，不是所有部署的前置结论。
 
 ## 3. Space、个人身份与生命周期
 

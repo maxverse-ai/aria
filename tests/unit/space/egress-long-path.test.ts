@@ -14,7 +14,7 @@ it.runIf(process.platform === 'linux')('container proxy reaches a long-path brok
   try {
     expect(Buffer.byteLength(broker.socket)).toBeGreaterThan(108);
     // Exercise the generated wrapper exactly as an execution backend invokes it:
-    // unlike bubblewrap there is no short socket alias in the argument list.
+    // the socket path goes into the argument list with no short alias.
     const code = `const net=require('node:net');const p=new URL(process.env.HTTPS_PROXY);const s=net.connect(Number(p.port),p.hostname,()=>s.write('CONNECT forbidden.example.com:443 HTTP/1.1\\r\\n\\r\\n'));let answer='';s.on('data',c=>answer+=c);s.on('end',()=>{console.log(answer);process.exit(answer.startsWith('HTTP/1.1 403')?0:3)});s.on('error',()=>process.exit(2));`;
     const child = spawn(process.execPath, [broker.proxyEntry, broker.socket, process.execPath, '-e', code], { stdio: ['ignore', 'pipe', 'pipe'] });
     let stdout = ''; let stderr = '';

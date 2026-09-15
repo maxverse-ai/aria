@@ -121,7 +121,7 @@ it('ordinary management JSON and untrusted operators cannot obtain transition au
   const selection = await f.service.prepare('bot', f.deployment, actor);
   const path = preparationPaths(f.paths.profileDir, selection.preparationId).receipt;
   const receipt = JSON.parse(await readFile(path, 'utf8'));
-  receipt.deployment.driver = 'bubblewrap';
+  receipt.deployment.driver = 'execution';
   await writeFile(path, JSON.stringify(receipt), { mode: 0o600 });
   await expect(f.service.activate('bot', selection, actor)).rejects.toThrow('changed execution space preparation');
 });

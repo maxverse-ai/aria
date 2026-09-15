@@ -62,7 +62,7 @@ export class PreparedSpaceProfile {
     const profile = structuredClone(input.profile);
     const deployment = structuredClone(input.deployment);
     const workspaces = new SpaceWorkspaces({ profileId: input.profileId, directory: input.directory, authorization,
-      engineId: deployment.engineId, driver: deployment.launch.driver ?? 'bubblewrap', definition: input.workspaces ?? EMPTY_SPACE_WORKSPACES,
+      engineId: deployment.engineId, driver: deployment.launch.driver, definition: input.workspaces ?? EMPTY_SPACE_WORKSPACES,
       readonlyResources: deployment.readonlyResources, availableTools: deployedToolRevisions(deployment.tools, input.workspaces?.extensions) });
     if (input.workspaces?.extensions?.length && (!['trusted-process', 'execution'].includes(deployment.launch.driver ?? '') || !deployment.queryNode)) {
       throw new Error('workspace tools require a prepared native tool transport');

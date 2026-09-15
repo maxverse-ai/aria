@@ -66,14 +66,14 @@ write lease. Optional features remain independently gated.
 
 ## Native adapter evidence and limits
 
-The Linux driver uses bubblewrap namespaces, drops capabilities, mounts only
-explicit executable roots and space data, and leaves host home/control state
-and management sockets inaccessible. Space mount points and staged attachments
-are immutable to the engine; a read-only run also mounts its workspace read-only.
-Ambient credentials/startup hooks are not inherited. Model access, when supplied
-by trusted deployment composition, uses a space-owned CONNECT broker limited to
-explicit public TLS endpoints; private/reserved/DNS-rebound destinations reject.
-Direct host networking remains unavailable. No model request was made for this task.
+The accepted driver is `trusted-process`: each space selects its own native
+home, cwd and environment, and ambient credentials or startup hooks are not
+inherited into the launch. Children still retain host filesystem, process and
+network access, so this bounds application ownership rather than OS resources.
+Model access, when supplied by trusted deployment composition, uses a
+space-owned CONNECT broker limited to explicit public TLS endpoints;
+private/reserved/DNS-rebound destinations reject. No model request was made for
+this task.
 
 | Engine | Native state / ownership | Implemented optional behavior |
 | --- | --- | --- |

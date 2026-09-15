@@ -36,7 +36,9 @@ export interface SpaceEngineDeployment {
   readonly modelEndpoints?: readonly ModelEgressRule[];
   readonly readonlyResources?: readonly string[];
   readonly templates?: readonly { target: string; contents: string; sha256: string }[];
-  readonly launch: Omit<ConfinedLaunch, 'binary' | 'paths' | 'executionEnvironment'>;
+  readonly launch: Omit<ConfinedLaunch, 'binary' | 'paths' | 'executionEnvironment' | 'driver'> & {
+    readonly driver: 'trusted-process' | 'execution';
+  };
 }
 
 /** Native-specific state projection stays in the engine layer. No host auth import. */

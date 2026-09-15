@@ -27,8 +27,8 @@ Implementation sequence:
    functional limitations and the independent isolation acceptance status.
 
 Read-only preflight on 2026-09-07 found the running ***REMOVED*** image still on Aria
-`f60e8b1`, Codex `0.153.4`, with no bubblewrap and an unavailable nested user
-namespace. Its catalog contained 72 thread references across 67 scopes, all
+`f60e8b1`, Codex `0.153.4`, on a host offering no usable kernel sandbox. Its
+catalog contained 72 thread references across 67 scopes, all
 with rollouts present; the native sessions directory contained 395 JSONL files
 (1,373,987,930 bytes). These are inventory observations, not ownership proof.
 No real profile, credential, message or deployment has been changed so far.
@@ -60,12 +60,12 @@ Meetings remain unavailable until their resource audience adapter is implemented
 
 ## Execution and channel contracts
 
-The deployment explicitly chooses `bubblewrap` or `trusted-process`. Neither
-driver falls back to the other. Both select a space-owned native home, cwd,
-environment and runtime; Codex/Grok execution and queries share that runtime.
-Trusted-process children retain host filesystem/process/network access. Passing
-its application tests does not establish an OS or credential isolation boundary.
-Bubblewrap retains its process tests and optional model egress broker.
+The deployment declares its driver explicitly; an undeclared or unknown driver
+is rejected rather than run unconfined. `trusted-process` selects a space-owned
+native home, cwd, environment and runtime, and Codex/Grok execution and queries
+share that runtime. Its children retain host filesystem/process/network access,
+so passing the application tests does not establish an OS or credential
+isolation boundary. Use the container driver when that boundary is required.
 
 Native model credential values are resolved from explicitly named environment
 keys at launch. They are not placed in selection files or public plans. Native

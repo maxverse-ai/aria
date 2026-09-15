@@ -22,9 +22,8 @@ export interface SpaceDeploymentDefinition {
   engineId: SpaceEngineId;
   binary: string;
   binaryVersion: string;
-  driver: 'bubblewrap' | 'trusted-process' | 'execution';
+  driver: 'trusted-process' | 'execution';
   execution?: ExecutionDefinition;
-  bubblewrap?: string;
   queryNode?: string;
   tools?: SpaceEngineDeployment['tools'];
   environmentPackages?: SpaceEngineDeployment['environmentPackages'];
@@ -50,13 +49,12 @@ export function normalizeSpaceDeployment(value: unknown): SpaceDeploymentDefinit
   const v = value as SpaceDeploymentDefinition;
   if (v.schema !== 'aria.space.deployment.v1' || !SPACE_ENGINE_IDS.includes(v.engineId)
     || !isAbsolute(v.binary || '') || !v.binaryVersion?.trim() || v.binaryVersion.length > 128
-    || !['bubblewrap', 'trusted-process', 'execution'].includes(v.driver)
+    || !['trusted-process', 'execution'].includes(v.driver)
     || !['read-only', 'workspace', 'full'].includes(v.workspaceAccess)
     || !Array.isArray(v.executableRoots) || v.executableRoots.some((p) => typeof p !== 'string' || !isAbsolute(p))
     || !Array.isArray(v.environmentKeys) || new Set(v.environmentKeys).size !== v.environmentKeys.length
     || v.environmentKeys.some((k) => typeof k !== 'string' || !/^[A-Z][A-Z0-9_]{0,127}$/.test(k) || forbiddenEnvironment.test(k))
     || !Array.isArray(v.templates)) throw new Error('invalid space deployment');
-  if (v.driver === 'bubblewrap' && (!v.bubblewrap || !isAbsolute(v.bubblewrap))) throw new Error('bubblewrap path is required');
   if (v.driver === 'execution') normalizeExecutionDefinition(v.execution);
   else if (v.execution !== undefined) throw new Error('execution configuration requires the execution driver');
   if (v.readonlyResources !== undefined && (v.driver !== 'execution'
@@ -77,7 +75,7 @@ export function normalizeSpaceDeployment(value: unknown): SpaceDeploymentDefinit
     validateEnvironmentPackages(v.environmentPackages);
   }
   if (v.modelEndpoints !== undefined && (!Array.isArray(v.modelEndpoints)
-    || !['bubblewrap', 'execution'].includes(v.driver) || !v.queryNode || v.modelEndpoints.some((rule) =>
+    || v.driver !== 'execution' || !v.queryNode || v.modelEndpoints.some((rule) =>
       !rule || typeof rule.hostname !== 'string' || isIP(rule.hostname) || !rule.hostname.includes('.')
       || !/^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$/i.test(rule.hostname) || rule.port !== 443))) {
     throw new Error('invalid model egress deployment');
@@ -91,7 +89,7 @@ export function normalizeSpaceDeployment(value: unknown): SpaceDeploymentDefinit
       throw new Error('native templates cannot contain credential values');
     }
   }
-  const keys = new Set(['schema', 'engineId', 'binary', 'binaryVersion', 'driver', 'execution', 'bubblewrap', 'queryNode', 'tools', 'environmentPackages', 'modelEndpoints', 'readonlyResources', 'workspaceAccess', 'executableRoots', 'environmentKeys', 'templates']);
+  const keys = new Set(['schema', 'engineId', 'binary', 'binaryVersion', 'driver', 'execution', 'queryNode', 'tools', 'environmentPackages', 'modelEndpoints', 'readonlyResources', 'workspaceAccess', 'executableRoots', 'environmentKeys', 'templates']);
   if (Object.keys(v).some((key) => !keys.has(key))) throw new Error('unknown space deployment field');
   return structuredClone(v);
 }
@@ -110,8 +108,7 @@ export function resolveSpaceDeployment(definition: SpaceDeploymentDefinition, en
     ...(v.environmentPackages ? { environmentPackages: v.environmentPackages } : {}),
     ...(v.readonlyResources ? { readonlyResources: v.readonlyResources } : {}),
     templates: v.templates,
-    launch: { driver: v.driver, ...(v.bubblewrap ? { bubblewrap: v.bubblewrap } : {}),
-      workspaceAccess: v.workspaceAccess, executableRoots: v.executableRoots, environment } };
+    launch: { driver: v.driver, workspaceAccess: v.workspaceAccess, executableRoots: v.executableRoots, environment } };
 }
 
 /** No model request or caller credentials are needed to probe the selected driver. */
