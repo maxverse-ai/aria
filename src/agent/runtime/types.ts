@@ -179,6 +179,8 @@ export interface EngineRuntime {
   readonly engineId: string;
   readonly descriptor: EngineRuntimeDescriptor;
   readonly execution: AgentAdapter;
+  /** False fences new borrowers; the owner must drain and dispose before replacement. */
+  isReusable?(): boolean;
   statusSnapshot?(): Promise<EngineStatusSnapshot>;
   /** Models exposed by the live engine connection, when supported. */
   listModels?(signal: AbortSignal): Promise<ModelOption[]>;

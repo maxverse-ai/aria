@@ -11,7 +11,6 @@ import { checkAgentAvailability, type AgentAvailability } from '../preflight';
 import {
   CLAUDE_DEFAULT_PERMISSION_MODE,
   type AgentAdapter,
-  type AgentBotIdentity,
   type AgentEvent,
   type AgentRun,
   type AgentRunOptions,
@@ -22,6 +21,7 @@ import { buildAgentLaunchEnv } from '../launch-env';
 
 export interface ClaudeAdapterOptions {
   binary?: string;
+  systemPromptDirectory?: string;
   /** Override identity for Claude-compatible engines (e.g. Kimi). */
   id?: string;
   displayName?: string;
@@ -37,20 +37,17 @@ export class ClaudeAdapter implements AgentAdapter {
   readonly displayName: string;
 
   private readonly binary: string;
+  private readonly systemPromptDirectory?: string;
   private readonly agentId: string;
   private readonly ariaChannel: ChannelEnvContext | undefined;
-  private botIdentity: AgentBotIdentity | undefined;
 
   constructor(opts: ClaudeAdapterOptions = {}) {
     this.id = opts.id ?? 'claude';
     this.displayName = opts.displayName ?? 'Claude Code';
     this.agentId = opts.agentId ?? this.id;
     this.binary = opts.binary ?? 'claude';
+    this.systemPromptDirectory = opts.systemPromptDirectory;
     this.ariaChannel = opts.ariaChannel;
-  }
-
-  setBotIdentity(identity: AgentBotIdentity): void {
-    this.botIdentity = identity;
   }
 
   async isAvailable(): Promise<boolean> {
@@ -79,7 +76,7 @@ export class ClaudeAdapter implements AgentAdapter {
     // stream-json response. Pass the prompt via stdin and the appended system
     // prompt via a temp file (the same approach the Codex adapter uses) so no
     // special characters ever reach the shell.
-    const systemPromptFile = writeSystemPromptFile(buildBridgeSystemPrompt(this.botIdentity));
+    const systemPromptFile = writeSystemPromptFile(buildBridgeSystemPrompt(opts.identity), this.systemPromptDirectory);
 
     const args = [
       '-p',
@@ -277,8 +274,8 @@ async function* createEventStream(
  * passed via `--append-system-prompt-file` instead of argv. Returns the path
  * plus an idempotent, best-effort cleanup that removes the temp directory.
  */
-function writeSystemPromptFile(content: string): { path: string; cleanup: () => void } {
-  const dir = mkdtempSync(join(tmpdir(), 'lark-claude-'));
+function writeSystemPromptFile(content: string, directory?: string): { path: string; cleanup: () => void } {
+  const dir = mkdtempSync(join(directory ?? tmpdir(), 'lark-claude-'));
   const path = join(dir, 'append-system-prompt.md');
   writeFileSync(path, content, 'utf8');
   return {

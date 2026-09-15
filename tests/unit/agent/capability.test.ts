@@ -43,7 +43,7 @@ describe('agent capability contract', () => {
       agentId: 'codex',
       sessionKind: 'codex-thread',
       promptInjection: 'stdin-prefix',
-      supportsNativeHistory: false,
+      supportsNativeHistory: true,
       systemPrompt: BRIDGE_SYSTEM_PROMPT,
       permissions: {
         maxAccess: 'workspace',

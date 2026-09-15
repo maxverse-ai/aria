@@ -1,3 +1,6 @@
+import { assertRunAuthorization } from '../../../runtime/run-authorization';
+import { registerRuntimeQueries } from '../../../runtime/queries';
+import { listGrokSessionsWithClient } from '../history';
 import { readFile } from 'node:fs/promises';
 import { extname } from 'node:path';
 import type { AccessMode } from '../../../../config/permissions';
@@ -9,7 +12,6 @@ import {
 } from '../../../runtime/types';
 import type {
   AgentAdapter,
-  AgentBotIdentity,
   AgentEvent,
   AgentRun,
   AgentRunOptions,
@@ -70,6 +72,9 @@ export class GrokAgentStdioRuntime implements EngineRuntime {
 
   constructor(private readonly options: GrokAgentStdioRuntimeOptions) {
     this.execution = new GrokAgentStdioAdapter(this);
+    registerRuntimeQueries(this, {
+      listHistory: async (input) => listGrokSessionsWithClient(await this.client(), input),
+    });
   }
 
   async client(): Promise<GrokAgentStdioClient> {
@@ -118,6 +123,8 @@ export class GrokAgentStdioRuntime implements EngineRuntime {
   }
 
   bindSession(sessionId: string, run: GrokAgentRun): void {
+    const existing = this.activeSessions.get(sessionId);
+    if (existing && existing !== run) throw new Error('Grok session is already owned by another active run');
     this.activeSessions.set(sessionId, run);
   }
 
@@ -185,7 +192,7 @@ export class GrokAgentStdioRuntime implements EngineRuntime {
     if (!sessionId || !this.activeSessions.has(sessionId)) {
       throw new GrokServerRequestError('Grok permission request does not match an active session', -32602);
     }
-    const desiredKind = this.options.access === 'full' ? 'allow_once' : 'reject_once';
+    const desiredKind = this.activeSessions.get(sessionId)!.allowsPermission() ? 'allow_once' : 'reject_once';
     const option = Array.isArray(params?.options)
       ? params.options.find((candidate) => isRecord(candidate) && candidate.kind === desiredKind)
       : undefined;
@@ -202,13 +209,8 @@ export class GrokAgentStdioRuntime implements EngineRuntime {
 class GrokAgentStdioAdapter implements AgentAdapter {
   readonly id = 'grok';
   readonly displayName = 'Grok Build';
-  private botIdentity: AgentBotIdentity | undefined;
 
   constructor(private readonly runtime: GrokAgentStdioRuntime) {}
-
-  setBotIdentity(identity: AgentBotIdentity): void {
-    this.botIdentity = identity;
-  }
 
   async isAvailable(): Promise<boolean> {
     return (await this.checkAvailability()).ok;
@@ -226,7 +228,7 @@ class GrokAgentStdioAdapter implements AgentAdapter {
 
   run(options: AgentRunOptions): AgentRun {
     if (!options.cwd) throw new Error('cwd is required for Grok Build');
-    const run = new GrokAgentRun(this.runtime, options, this.botIdentity);
+    const run = new GrokAgentRun(this.runtime, options);
     this.runtime.track(run);
     return run;
   }
@@ -252,10 +254,14 @@ export class GrokAgentRun implements AgentRun {
   private readonly exitPromise: Promise<void>;
   private resolveExit!: () => void;
 
+  allowsPermission(): boolean {
+    assertRunAuthorization(this.options);
+    return this.runtime.fullAccess && (this.options.sandbox === undefined || this.options.sandbox === 'danger-full-access');
+  }
+
   constructor(
     private readonly runtime: GrokAgentStdioRuntime,
     private readonly options: AgentRunOptions,
-    private readonly botIdentity: AgentBotIdentity | undefined,
   ) {
     this.runId = options.runId;
     this.exitPromise = new Promise((resolve) => {
@@ -381,7 +387,7 @@ export class GrokAgentRun implements AgentRun {
       const prompt = [
         {
           type: 'text',
-          text: prefixBridgeSystemPrompt(this.options.prompt, this.botIdentity),
+          text: prefixBridgeSystemPrompt(this.options.prompt, this.options.identity),
         },
         ...await imageBlocks(this.options.images ?? []),
       ];

@@ -2,6 +2,7 @@ import { opencodeCapability } from '../../capability';
 import { OPENCODE_MODELS, registerModelOptions } from '../../models';
 import { AgentPreflightError } from '../../preflight';
 import type { EnginePlugin } from '../../plugin/types';
+import { defineEngineRuntimeFactory } from '../../runtime/construction';
 import type { AccessMode } from '../../../config/permissions';
 import { resolveExecutablePath } from '../../../platform/executable';
 import { mergeProcessEnv, spawnProcess, type SpawnedProcessByStdio } from '../../../platform/spawn';
@@ -18,6 +19,30 @@ import { createAdapterRuntime } from '../../runtime/adapter-runtime';
 export function resolveOpencodeAutoApprove(defaultAccess: AccessMode): boolean {
   return defaultAccess === 'full';
 }
+
+export const opencodeRuntimeFactory = defineEngineRuntimeFactory(
+  'opencode',
+  (context, profile) => {
+    const opencode = profile.opencode;
+    if (!opencode?.binaryPath) {
+      throw new Error('opencode profile requires opencode.binaryPath');
+    }
+    return {
+      binary: opencode.binaryPath,
+      profileStateDir: context.state.directory,
+      autoApprove: resolveOpencodeAutoApprove(profile.permissions.defaultAccess),
+      effortFlag: opencodeEnginePlugin.effortFlag,
+      xdg: {
+        dataHome: opencode.dataHome,
+        configHome: opencode.configHome,
+        cacheHome: opencode.cacheHome,
+        stateHome: opencode.stateHome,
+      },
+      ariaChannel: context.launch.legacyChannel,
+    };
+  },
+  (options) => createAdapterRuntime(new OpenCodeAdapter(options)),
+);
 
 export const opencodeEnginePlugin: EnginePlugin = {
   id: 'opencode',
@@ -99,25 +124,7 @@ export const opencodeEnginePlugin: EnginePlugin = {
       .filter((line) => line && !line.startsWith('┌') && !line.startsWith('│') && !line.startsWith('└'))
       .map((line) => ({ value: line, label: line }));
   },
-  createRuntime: (ctx) => {
-    const opencode = ctx.profileConfig.opencode;
-    if (!opencode?.binaryPath) {
-      throw new Error('opencode profile requires opencode.binaryPath');
-    }
-    return createAdapterRuntime(new OpenCodeAdapter({
-      binary: opencode.binaryPath,
-      profileStateDir: ctx.appPaths.profileDir,
-      autoApprove: resolveOpencodeAutoApprove(ctx.profileConfig.permissions.defaultAccess),
-      effortFlag: opencodeEnginePlugin.effortFlag,
-      xdg: {
-        dataHome: opencode.dataHome,
-        configHome: opencode.configHome,
-        cacheHome: opencode.cacheHome,
-        stateHome: opencode.stateHome,
-      },
-      ariaChannel: ctx.ariaChannel,
-    }));
-  },
+  createRuntime: opencodeRuntimeFactory.createRuntime,
   modelOptions: () => OPENCODE_MODELS,
 };
 

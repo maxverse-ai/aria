@@ -1,6 +1,6 @@
 import type { AccessMode } from '../../../config/permissions';
 import type { EngineHistoryEntry } from '../../plugin/types';
-import { GrokServerRequestError } from './agent-stdio/client';
+import { GrokServerRequestError, type GrokAgentStdioClient } from './agent-stdio/client';
 import { startGrokAgentStdio } from './agent-stdio/process';
 import { isRecord } from './agent-stdio/protocol';
 
@@ -29,7 +29,14 @@ export async function listGrokSessionHistory(
       throw new GrokServerRequestError(`unsupported history server request: ${request.method}`);
     },
   });
-  try {
+  try { return await listGrokSessionsWithClient(client, options); }
+  finally { await client.dispose(); }
+}
+
+export async function listGrokSessionsWithClient(
+  client: GrokAgentStdioClient,
+  options: Pick<ListGrokHistoryOptions, 'cwd' | 'limit'>,
+): Promise<EngineHistoryEntry[]> {
     const entries: EngineHistoryEntry[] = [];
     let cursor: string | undefined;
     do {
@@ -59,7 +66,4 @@ export async function listGrokSessionHistory(
         : undefined;
     } while (cursor);
     return entries;
-  } finally {
-    await client.dispose();
-  }
 }

@@ -25,6 +25,10 @@ export async function discoverModelOptions(
     }
   }
 
+  if (query.runtimeOnly) {
+    if (runtimeError) throw runtimeError;
+    return { models: [], source: 'runtime' };
+  }
   const plugin = getEnginePlugin(query.engineId);
   if (plugin?.modelLister) {
     const models = await plugin.modelLister({ profileConfig: query.profileConfig, signal });

@@ -1,10 +1,35 @@
+import { join } from 'node:path';
 import { codexCapability } from '../../capability';
 import { CODEX_MODELS, registerModelOptions } from '../../models';
 import { AgentPreflightError } from '../../preflight';
 import type { EnginePlugin } from '../../plugin/types';
+import { defineEngineRuntimeFactory } from '../../runtime/construction';
 import { resolveExecutablePath } from '../../../platform/executable';
 import { listCodexThreadHistory } from '../../../session/codex-history';
 import { CodexAppServerRuntime } from './app-server/runtime';
+import { importCodexSessions } from './session-import';
+
+export const codexRuntimeFactory = defineEngineRuntimeFactory(
+  'codex',
+  (context, profile) => {
+    const codex = profile.codex;
+    if (!codex?.binaryPath) {
+      throw new Error('codex profile requires codex.binaryPath');
+    }
+    const inheritCodexHome = codex.inheritCodexHome === true;
+    const codexHome = codex.codexHome ||
+      (!inheritCodexHome ? join(context.state.directory, 'codex-home') : undefined);
+    return {
+      binary: codex.binaryPath,
+      profileStateDir: context.state.directory,
+      ...(codexHome ? { codexHome } : {}),
+      inheritCodexHome,
+      sandbox: profile.sandbox.defaultMode,
+      ...(context.launch.legacyChannel ? { ariaChannel: context.launch.legacyChannel } : {}),
+    };
+  },
+  (options) => new CodexAppServerRuntime(options),
+);
 
 export const codexEnginePlugin: EnginePlugin = {
   id: 'codex',
@@ -17,6 +42,7 @@ export const codexEnginePlugin: EnginePlugin = {
   defaultBinary: 'codex',
   defaultBinaryEnvKey: 'LARK_CHANNEL_CODEX_BIN',
   capability: (profile) => codexCapability(profile),
+  importSessions: importCodexSessions,
   bootstrapConfig: async ({ binaryPath }) => {
     const command = binaryPath ?? process.env.LARK_CHANNEL_CODEX_BIN ?? 'codex';
     let resolvedBinary: string;
@@ -63,20 +89,7 @@ export const codexEnginePlugin: EnginePlugin = {
     label: 'sandbox',
     value: `${profile.sandbox.defaultMode}/${profile.sandbox.maxMode}`,
   }),
-  createRuntime: (ctx) => {
-    const codex = ctx.profileConfig.codex;
-    if (!codex?.binaryPath) {
-      throw new Error('codex profile requires codex.binaryPath');
-    }
-    return new CodexAppServerRuntime({
-      binary: codex.binaryPath,
-      profileStateDir: ctx.appPaths.profileDir,
-      ...(codex.codexHome ? { codexHome: codex.codexHome } : {}),
-      inheritCodexHome: codex.inheritCodexHome === true,
-      sandbox: ctx.profileConfig.sandbox.defaultMode,
-      ...(ctx.ariaChannel ? { ariaChannel: ctx.ariaChannel } : {}),
-    });
-  },
+  createRuntime: codexRuntimeFactory.createRuntime,
   modelOptions: () => CODEX_MODELS,
 };
 

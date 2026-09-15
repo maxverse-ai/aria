@@ -23,7 +23,6 @@ describe('Grok agent stdio runtime', () => {
       inheritGrokHome: true,
       access: 'full',
     });
-    runtime.execution.setBotIdentity?.({ openId: 'ou_aria', name: 'Aria' });
 
     expect(runtime.descriptor).toMatchObject({
       contractVersion: 1,
@@ -39,6 +38,7 @@ describe('Grok agent stdio runtime', () => {
 
     const run = runtime.execution.run({
       runId: 'run-grok-1',
+      identity: { providerId: 'lark', accountId: 'app', subjectId: 'ou_aria', displayName: 'Aria' },
       scopeId: 'scope-grok',
       prompt: 'inspect this',
       cwd: root,

@@ -1,7 +1,9 @@
 import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { spawn } from 'node:child_process';
+import { CodexAppServerClient } from '../../src/agent/engines/codex/app-server/client';
 import type { AgentEvent } from '../../src/agent/types';
 import { CodexAppServerRuntime } from '../../src/agent/engines/codex/app-server/runtime';
 
@@ -12,6 +14,16 @@ afterEach(async () => {
 });
 
 describe('Codex App Server runtime', () => {
+  it('waits for a real stdio server to exit normally without signalling its transport', async () => {
+    const child = spawn(process.execPath, ['-e', 'process.stdin.resume(); process.stdin.on("end", () => process.exit(0));'],
+      { stdio: ['pipe', 'pipe', 'pipe'] });
+    const kill = vi.spyOn(child, 'kill');
+    const client = new CodexAppServerClient(child);
+    await Promise.all([client.dispose(), client.dispose()]);
+    expect(child.exitCode).toBe(0);
+    expect(kill).not.toHaveBeenCalled();
+  });
+
   it('runs a structured turn and exposes model, context, and weekly limits', async () => {
     const root = await mkdtemp(join(tmpdir(), 'aria-codex-app-server-'));
     roots.push(root);
@@ -160,9 +172,9 @@ describe('Codex App Server runtime', () => {
       inheritCodexHome: true,
       sandbox: 'workspace-write',
     });
-    runtime.execution.setBotIdentity?.({ openId: 'ou_bot_self', name: 'Bridge' });
     const run = runtime.execution.run({
       runId: 'run-identity',
+      identity: { providerId: 'lark', accountId: 'app', subjectId: 'ou_bot_self', displayName: 'Bridge' },
       scopeId: 'scope-codex',
       prompt: 'hello',
       cwd: root,

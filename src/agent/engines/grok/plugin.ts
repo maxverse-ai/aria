@@ -1,9 +1,31 @@
+import { join } from 'node:path';
 import { grokCapability } from '../../capability';
 import { AgentPreflightError } from '../../preflight';
 import type { EnginePlugin } from '../../plugin/types';
+import { defineEngineRuntimeFactory } from '../../runtime/construction';
 import { resolveExecutablePath } from '../../../platform/executable';
 import { GrokAgentStdioRuntime } from './agent-stdio/runtime';
 import { listGrokSessionHistory } from './history';
+
+export const grokRuntimeFactory = defineEngineRuntimeFactory(
+  'grok',
+  (context, profile) => {
+    const grok = profile.grok;
+    if (!grok?.binaryPath) throw new Error('grok profile requires grok.binaryPath');
+    const inheritGrokHome = grok.inheritGrokHome !== false;
+    const grokHome = grok.grokHome ||
+      (!inheritGrokHome ? join(context.state.directory, 'grok-home') : undefined);
+    return {
+      binary: grok.binaryPath,
+      profileStateDir: context.state.directory,
+      ...(grokHome ? { grokHome } : {}),
+      inheritGrokHome,
+      access: profile.permissions.defaultAccess,
+      ...(context.launch.legacyChannel ? { ariaChannel: context.launch.legacyChannel } : {}),
+    };
+  },
+  (options) => new GrokAgentStdioRuntime(options),
+);
 
 export const grokEnginePlugin: EnginePlugin = {
   id: 'grok',
@@ -54,16 +76,5 @@ export const grokEnginePlugin: EnginePlugin = {
     label: 'permission',
     value: profile.permissions.defaultAccess,
   }),
-  createRuntime: (ctx) => {
-    const grok = ctx.profileConfig.grok;
-    if (!grok?.binaryPath) throw new Error('grok profile requires grok.binaryPath');
-    return new GrokAgentStdioRuntime({
-      binary: grok.binaryPath,
-      profileStateDir: ctx.appPaths.profileDir,
-      ...(grok.grokHome ? { grokHome: grok.grokHome } : {}),
-      inheritGrokHome: grok.inheritGrokHome !== false,
-      access: ctx.profileConfig.permissions.defaultAccess,
-      ...(ctx.ariaChannel ? { ariaChannel: ctx.ariaChannel } : {}),
-    });
-  },
+  createRuntime: grokRuntimeFactory.createRuntime,
 };

@@ -1,3 +1,6 @@
+import { registerRuntimeQueries } from '../../../runtime/queries';
+import { readCodexImportedHistory } from '../imported-history';
+import { parseThreadListResponse } from '../../../../session/codex-history';
 import type { SandboxMode } from '../../../../config/profile-schema';
 import type { ModelOption } from '../../../models';
 import { checkAgentAvailability, type AgentAvailability } from '../../../preflight';
@@ -7,7 +10,7 @@ import {
   type EngineStatusSnapshot,
   type EngineUsageWindow,
 } from '../../../runtime/types';
-import type { AgentAdapter, AgentBotIdentity, AgentEvent, AgentRun, AgentRunOptions } from '../../../types';
+import type { AgentAdapter, AgentEvent, AgentRun, AgentRunOptions } from '../../../types';
 import type { AgentSteeringOutcome, AgentSteeringRequest } from '../../../steering';
 import { prefixBridgeSystemPrompt } from '../../../bridge-system-prompt';
 import type { ChannelEnvContext } from '../../../channel-env';
@@ -62,6 +65,34 @@ export class CodexAppServerRuntime implements EngineRuntime {
 
   constructor(private readonly options: CodexAppServerRuntimeOptions) {
     this.execution = new CodexAppServerAdapter(this);
+    registerRuntimeQueries(this, {
+      listHistory: async ({ cwd, limit, signal }) => {
+        const client = await this.client();
+        const imports = await readCodexImportedHistory(this.options.profileStateDir, cwd);
+        const cwds = [...new Set([cwd, ...imports.map(entry => entry.nativeCwd)])];
+        const aliases = new Map(imports.map(entry => [entry.nativeId, entry.nativeCwd]));
+        const entries = [];
+        let cursor: string | undefined;
+        const cursors = new Set<string>();
+        for (let page = 0; page < 100; page++) {
+          const response = await client.request<{ nextCursor?: string | null }>('thread/list', {
+            cwd: cwds.length === 1 ? cwd : cwds, limit: imports.length ? 100 : limit,
+            sortKey: 'updated_at', sortDirection: 'desc', archived: false, ...(cursor ? { cursor } : {}),
+            ...(imports.length ? { modelProviders: [] } : {}),
+            useStateDbOnly: true, sourceKinds: ['cli', 'vscode', 'exec', 'appServer', 'unknown'],
+          }, 5000, signal);
+          const parsed = parseThreadListResponse(response);
+          if (!parsed.ok) throw parsed.error;
+          entries.push(...parsed.entries.filter(entry => entry.cwd === cwd || aliases.get(entry.threadId) === entry.cwd));
+          cursor = response.nextCursor ?? undefined;
+          if (entries.length >= limit || !cursor || !imports.length) break;
+          if (cursors.has(cursor)) throw new Error('native history cursor repeated');
+          cursors.add(cursor);
+        }
+        return entries.slice(0, limit).map((entry) => ({ id: entry.threadId, preview: entry.name || entry.preview,
+          updatedAtMs: entry.updatedAtMs, detail: 'Codex' }));
+      },
+    });
   }
 
   async client(): Promise<CodexAppServerClient> {
@@ -209,13 +240,8 @@ export class CodexAppServerRuntime implements EngineRuntime {
 class CodexAppServerAdapter implements AgentAdapter {
   readonly id = 'codex';
   readonly displayName = 'Codex App Server';
-  private botIdentity: AgentBotIdentity | undefined;
 
   constructor(private readonly runtime: CodexAppServerRuntime) {}
-
-  setBotIdentity(identity: AgentBotIdentity): void {
-    this.botIdentity = identity;
-  }
 
   async isAvailable(): Promise<boolean> {
     return (await this.checkAvailability()).ok;
@@ -233,7 +259,7 @@ class CodexAppServerAdapter implements AgentAdapter {
 
   run(options: AgentRunOptions): AgentRun {
     if (!options.cwd) throw new Error('cwd is required for Codex App Server');
-    const run = new AppServerRun(this.runtime, options, this.botIdentity);
+    const run = new AppServerRun(this.runtime, options);
     this.runtime.track(run);
     return run;
   }
@@ -257,7 +283,6 @@ export class AppServerRun implements AgentRun {
   constructor(
     private readonly runtime: CodexAppServerRuntime,
     private readonly options: AgentRunOptions,
-    private readonly botIdentity: AgentBotIdentity | undefined,
   ) {
     this.runId = options.runId;
     this.exitPromise = new Promise((resolve) => {
@@ -383,7 +408,7 @@ export class AppServerRun implements AgentRun {
       const input: unknown[] = [
         {
           type: 'text',
-          text: prefixBridgeSystemPrompt(this.options.prompt, this.botIdentity),
+          text: prefixBridgeSystemPrompt(this.options.prompt, this.options.identity),
           text_elements: [],
         },
         ...(this.options.images ?? []).map((path) => ({

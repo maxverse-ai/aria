@@ -1,9 +1,10 @@
 import type { AppPaths } from '../../config/app-paths';
-import type { ProfileConfig } from '../../config/profile-schema';
+import type { EngineProfileConfig } from '../../config/profile-schema';
 import type { AgentCapability } from '../capability';
 import type { ChannelEnvContext } from '../channel-env';
 import type { ModelOption, ModelReasoningCapability } from '../models';
 import type { EngineRuntime } from '../runtime/types';
+import type { NativeSessionImportInput, NativeSessionImportReceipt } from '../runtime/session-import';
 
 /** A local agent CLI probe: command name plus optional env override key. */
 export interface EngineProbe {
@@ -24,7 +25,7 @@ export type EngineAutomationCapability = 'scheduled-triggers';
 
 /** Everything an engine plugin needs to build its managed runtime. */
 export interface EnginePluginContext {
-  profileConfig: ProfileConfig;
+  profileConfig: EngineProfileConfig;
   appPaths: Pick<AppPaths, 'profileDir'>;
   ariaChannel?: ChannelEnvContext;
 }
@@ -43,32 +44,34 @@ export interface EnginePlugin {
   readonly automationCapabilities?: readonly EngineAutomationCapability[];
   /** Commands probed during first-run agent detection. */
   readonly probes: readonly EngineProbe[];
-  /** ProfileConfig field holding engine-specific config (e.g. `codex`). */
+  /** EngineProfileConfig field holding engine-specific config (e.g. `codex`). */
   readonly configField?: string;
   /** Binary name used when a new profile is created without an explicit path. */
   readonly defaultBinary?: string;
   /** Env var override for {@link defaultBinary}, e.g. `LARK_CHANNEL_CODEX_BIN`. */
   readonly defaultBinaryEnvKey?: string;
-  capability(profile: ProfileConfig): AgentCapability;
+  capability(profile: EngineProfileConfig): AgentCapability;
   /** Create one managed engine instance for a profile. */
   createRuntime(ctx: EnginePluginContext): EngineRuntime;
+  /** Optional native-format migration, never inferred from resume support. */
+  importSessions?(input: NativeSessionImportInput): Promise<NativeSessionImportReceipt>;
   /** Build default engine config for new profiles (binary path resolution). */
   bootstrapConfig?(input: { binaryPath?: string }): Promise<Record<string, unknown>>;
   /** Resume history for `/resume`; absent means the engine has no history. */
   listHistory?(input: {
     cwd: string;
     limit: number;
-    profileConfig: ProfileConfig;
+    profileConfig: EngineProfileConfig;
     profileDir: string;
   }): Promise<EngineHistoryEntry[]>;
   /** Live model list; falls back to {@link modelOptions} when absent/failing. */
-  modelLister?(input: { profileConfig: ProfileConfig; signal: AbortSignal }): Promise<ModelOption[]>;
+  modelLister?(input: { profileConfig: EngineProfileConfig; signal: AbortSignal }): Promise<ModelOption[]>;
   /** CLI args for a reasoning effort value, e.g. `['--variant', 'high']`. */
   effortFlag?(value: string): string[];
   /** Proven fallback capability when the live model catalog has no metadata. */
   reasoningOptions?(model: string): ModelReasoningCapability | undefined;
   /** `/status` access line for this engine. */
-  statusPermission?(profile: ProfileConfig): { label: string; value: string };
+  statusPermission?(profile: EngineProfileConfig): { label: string; value: string };
   modelOptions?(): ModelOption[];
 }
 

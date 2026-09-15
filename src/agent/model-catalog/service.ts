@@ -198,7 +198,7 @@ function catalogKey(query: ModelCatalogQuery): string {
     .update(JSON.stringify(modelProviderConfig(query)))
     .digest('hex')
     .slice(0, 16);
-  return [query.profileId, query.engineId, query.runtimeGeneration ?? 0, fingerprint].join('\u0000');
+  return [query.profileId, query.engineId, query.runtimeGeneration ?? 0, fingerprint, query.runtimeOnly ? 'owned' : 'legacy', query.cacheScope ?? ''].join('\u0000');
 }
 
 export const modelCatalog = new ModelCatalogService();

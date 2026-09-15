@@ -6,6 +6,8 @@ import type { ModelCatalogSnapshot } from './types';
 export interface ListEngineModelsContext {
   profileId?: string;
   runtimeGeneration?: number;
+  runtimeOnly?: boolean;
+  cacheScope?: string;
   runtimeModels?: (signal: AbortSignal) => Promise<ModelOption[] | undefined>;
 }
 
@@ -23,6 +25,8 @@ export async function listEngineModels(
     ...(context.runtimeGeneration !== undefined
       ? { runtimeGeneration: context.runtimeGeneration }
       : {}),
+    ...(context.runtimeOnly ? { runtimeOnly: true } : {}),
+    ...(context.cacheScope ? { cacheScope: context.cacheScope } : {}),
     ...(context.runtimeModels ? { runtimeModels: context.runtimeModels } : {}),
   }, force);
   return snapshot.models;
@@ -40,6 +44,8 @@ export function getEngineModelCatalog(
     ...(context.runtimeGeneration !== undefined
       ? { runtimeGeneration: context.runtimeGeneration }
       : {}),
+    ...(context.runtimeOnly ? { runtimeOnly: true } : {}),
+    ...(context.cacheScope ? { cacheScope: context.cacheScope } : {}),
     ...(context.runtimeModels ? { runtimeModels: context.runtimeModels } : {}),
   });
 }

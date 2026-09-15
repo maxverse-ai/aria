@@ -8,7 +8,6 @@ import { buildChannelEnv, type ChannelEnvContext } from '../../channel-env';
 import { checkAgentAvailability, type AgentAvailability } from '../../preflight';
 import type {
   AgentAdapter,
-  AgentBotIdentity,
   AgentEvent,
   AgentRun,
   AgentRunOptions,
@@ -49,7 +48,6 @@ export class OpenCodeAdapter implements AgentAdapter {
   private readonly effortFlag: ((value: string) => string[]) | undefined;
   private readonly defaultStopGraceMs: number;
   private readonly ariaChannel: ChannelEnvContext | undefined;
-  private botIdentity: AgentBotIdentity | undefined;
 
   constructor(opts: OpenCodeAdapterOptions) {
     this.binary = opts.binary;
@@ -59,10 +57,6 @@ export class OpenCodeAdapter implements AgentAdapter {
     this.effortFlag = opts.effortFlag;
     this.defaultStopGraceMs = opts.stopGraceMs ?? 5000;
     this.ariaChannel = opts.ariaChannel;
-  }
-
-  setBotIdentity(identity: AgentBotIdentity): void {
-    this.botIdentity = identity;
   }
 
   async isAvailable(): Promise<boolean> {
@@ -157,7 +151,7 @@ export class OpenCodeAdapter implements AgentAdapter {
     child.stdin.on('error', (err) => {
       log.warn('agent', 'stdin-error', { message: err.message });
     });
-    child.stdin.end(prefixBridgeSystemPrompt(opts.prompt, this.botIdentity), 'utf8');
+    child.stdin.end(prefixBridgeSystemPrompt(opts.prompt, opts.identity), 'utf8');
 
     const stopGraceMs = opts.stopGraceMs ?? this.defaultStopGraceMs;
 

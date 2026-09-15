@@ -2,10 +2,28 @@ import { dshCapability } from '../../capability';
 import { DSH_MODELS, registerModelOptions } from '../../models';
 import { AgentPreflightError } from '../../preflight';
 import type { EnginePlugin } from '../../plugin/types';
+import { defineEngineRuntimeFactory } from '../../runtime/construction';
 import { resolveExecutablePath } from '../../../platform/executable';
 import { join } from 'node:path';
 import { DshAdapter } from './adapter';
 import { createAdapterRuntime } from '../../runtime/adapter-runtime';
+
+export const dshRuntimeFactory = defineEngineRuntimeFactory(
+  'dsh',
+  (context, profile) => {
+    const dsh = profile.dsh;
+    if (!dsh?.binaryPath) {
+      throw new Error('dsh profile requires dsh.binaryPath');
+    }
+    return {
+      binary: dsh.binaryPath,
+      profileStateDir: context.state.directory,
+      dshHome: dsh.dshHome ?? join(context.state.directory, 'dsh-home'),
+      ariaChannel: context.launch.legacyChannel,
+    };
+  },
+  (options) => createAdapterRuntime(new DshAdapter(options)),
+);
 
 export const dshEnginePlugin: EnginePlugin = {
   id: 'dsh',
@@ -43,18 +61,7 @@ export const dshEnginePlugin: EnginePlugin = {
     label: 'sandbox',
     value: `${profile.sandbox.defaultMode}/${profile.sandbox.maxMode}`,
   }),
-  createRuntime: (ctx) => {
-    const dsh = ctx.profileConfig.dsh;
-    if (!dsh?.binaryPath) {
-      throw new Error('dsh profile requires dsh.binaryPath');
-    }
-    return createAdapterRuntime(new DshAdapter({
-      binary: dsh.binaryPath,
-      profileStateDir: ctx.appPaths.profileDir,
-      dshHome: dsh.dshHome ?? join(ctx.appPaths.profileDir, 'dsh-home'),
-      ariaChannel: ctx.ariaChannel,
-    }));
-  },
+  createRuntime: dshRuntimeFactory.createRuntime,
   modelOptions: () => DSH_MODELS,
 };
 

@@ -7,12 +7,12 @@ import { buildChannelEnv, type ChannelEnvContext } from '../../channel-env';
 import { checkAgentAvailability, type AgentAvailability } from '../../preflight';
 import type {
   AgentAdapter,
-  AgentBotIdentity,
   AgentEvent,
   AgentRun,
   AgentRunOptions,
 } from '../../types';
 import { buildDshArgs } from './argv';
+import { DshProgress, prepareDshProgress } from './progress';
 
 export interface DshAdapterOptions {
   binary: string;
@@ -29,20 +29,17 @@ export class DshAdapter implements AgentAdapter {
   readonly displayName = 'DeepSeek Harness';
 
   private readonly binary: string;
+  private readonly profileStateDir: string;
   private readonly dshHome: string | undefined;
   private readonly defaultStopGraceMs: number;
   private readonly ariaChannel: ChannelEnvContext | undefined;
-  private botIdentity: AgentBotIdentity | undefined;
 
   constructor(opts: DshAdapterOptions) {
     this.binary = opts.binary;
+    this.profileStateDir = opts.profileStateDir;
     this.dshHome = opts.dshHome;
     this.defaultStopGraceMs = opts.stopGraceMs ?? 5000;
     this.ariaChannel = opts.ariaChannel;
-  }
-
-  setBotIdentity(identity: AgentBotIdentity): void {
-    this.botIdentity = identity;
   }
 
   async isAvailable(): Promise<boolean> {
@@ -74,15 +71,23 @@ export class DshAdapter implements AgentAdapter {
     if (!opts.cwd) {
       throw new Error('cwd is required for DshAdapter.run');
     }
-    const args = buildDshArgs(prefixBridgeSystemPrompt(opts.prompt, this.botIdentity));
+    const extension = prepareDshProgress(this.profileStateDir);
+    const progress = new DshProgress();
+    const args = buildDshArgs(prefixBridgeSystemPrompt(opts.prompt, opts.identity), extension.patch);
     const envOverrides: NodeJS.ProcessEnv = buildChannelEnv(this.ariaChannel);
     if (this.dshHome) envOverrides.DSH_HOME = this.dshHome;
 
-    const child = spawnProcess(this.binary, args, {
-      cwd: opts.cwd,
-      env: mergeProcessEnv(process.env, envOverrides),
-      stdio: ['ignore', 'pipe', 'pipe'],
-    }) as DshChild;
+    let child: DshChild;
+    try {
+      child = spawnProcess(this.binary, args, {
+        cwd: opts.cwd,
+        env: mergeProcessEnv(process.env, envOverrides),
+        stdio: ['ignore', 'pipe', 'pipe', 'pipe'],
+      }) as DshChild;
+    } catch (error) {
+      extension.cleanup();
+      throw error;
+    }
 
     log.info('agent', 'spawn', {
       pid: child.pid ?? null,
@@ -92,10 +97,47 @@ export class DshAdapter implements AgentAdapter {
     });
 
     const stdoutChunks: Buffer[] = [];
-    const stderrChunks: Buffer[] = [];
+    let stdoutBytes = 0;
     let runtimeError: Error | null = null;
-    child.stdout.on('data', (chunk: Buffer) => stdoutChunks.push(chunk));
-    child.stderr.on('data', (chunk: Buffer) => stderrChunks.push(chunk));
+    const stopGraceMs = opts.stopGraceMs ?? this.defaultStopGraceMs;
+    let killTimer: ReturnType<typeof setTimeout> | undefined;
+    const fail = (error: Error): void => {
+      runtimeError ??= error;
+      if (killTimer || child.exitCode !== null || child.signalCode !== null) return;
+      child.kill('SIGTERM');
+      killTimer = setTimeout(() => {
+        if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+      }, stopGraceMs);
+      killTimer.unref();
+    };
+    const startupTimer = setTimeout(() => fail(new Error('DSH progress plugin initialization timed out')), 30_000);
+    startupTimer.unref();
+    child.stdout.on('data', (chunk: Buffer) => {
+      stdoutBytes += chunk.length;
+      if (stdoutBytes <= 8 * 1024 * 1024) stdoutChunks.push(chunk);
+      else fail(new Error('DSH final answer exceeds limit'));
+    });
+    // Headless stderr contains provider reasoning. Drain it without retaining or
+    // exposing it as an error message or progress event.
+    child.stderr.resume();
+    const progressPipe = child.stdio[3] as Readable;
+    progressPipe.on('data', (chunk: Buffer) => {
+      progress.push(chunk);
+      if (progress.ready) clearTimeout(startupTimer);
+      if (progress.error) fail(progress.error);
+    });
+    progressPipe.on('error', () => {
+      fail(new Error('DSH progress pipe failed'));
+    });
+    const closed = new Promise<number | null>((resolve) => {
+      child.once('close', (code) => {
+        clearTimeout(startupTimer);
+        clearTimeout(killTimer);
+        progress.close();
+        extension.cleanup();
+        resolve(code);
+      });
+    });
     child.on('error', (err) => {
       runtimeError = err;
     });
@@ -103,14 +145,13 @@ export class DshAdapter implements AgentAdapter {
       log.info('agent', 'exit', { pid: child.pid ?? null, code, signal });
     });
 
-    const stopGraceMs = opts.stopGraceMs ?? this.defaultStopGraceMs;
-
     return {
       runId: opts.runId,
       events: createEventStream(
         child,
         () => stdoutChunks,
-        () => stderrChunks,
+        progress,
+        closed,
         () => runtimeError,
       ),
       async stop() {
@@ -158,7 +199,8 @@ export class DshAdapter implements AgentAdapter {
 async function* createEventStream(
   child: DshChild,
   getStdout: () => Buffer[],
-  getStderr: () => Buffer[],
+  progress: DshProgress,
+  closed: Promise<number | null>,
   getError: () => Error | null,
 ): AsyncGenerator<AgentEvent> {
   if (!child.pid) {
@@ -170,16 +212,15 @@ async function* createEventStream(
     };
     return;
   }
-  const exitCode = await waitForExitCode(child);
-  const runtimeError = getError();
+  yield* progress.events();
+  const exitCode = await closed;
+  const runtimeError = getError() ?? progress.error ?? (!progress.ready ? new Error('DSH progress plugin did not initialize') : null);
   if (exitCode !== 0 || runtimeError) {
-    const stderr = Buffer.concat(getStderr()).toString('utf8').trim();
-    const detail = stderr ? `: ${stderr.slice(0, 500)}` : '';
     yield {
       type: 'error',
       message: runtimeError
         ? `dsh runtime error: ${runtimeError.message}`
-        : `dsh exited with code ${exitCode}${detail}`,
+        : `dsh exited with code ${exitCode}`,
       terminationReason: 'failed',
     };
     return;
@@ -195,13 +236,4 @@ async function* createEventStream(
   }
   yield { type: 'final_text', content: answer };
   yield { type: 'done', terminationReason: 'normal' };
-}
-
-async function waitForExitCode(child: DshChild): Promise<number | null> {
-  if (child.exitCode !== null || child.signalCode !== null) {
-    return child.exitCode;
-  }
-  return new Promise<number | null>((resolve) => {
-    child.once('exit', (code) => resolve(code));
-  });
 }

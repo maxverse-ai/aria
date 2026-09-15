@@ -61,7 +61,7 @@ describe('OpenCodeAdapter process contract', () => {
     expect(record.argv).toEqual(buildOpenCodeArgs({ cwd }));
     expect(record.argv).not.toContain('--auto');
     expect(record.stdin).toContain('Aria 运行约定');
-    expect(record.stdin).toContain('__bridge_cb');
+    expect(record.stdin).not.toContain('__bridge_cb');
     expect(record.stdin).toContain('hello from lark');
     expect(record.env.LARK_CHANNEL).toBe('1');
   });

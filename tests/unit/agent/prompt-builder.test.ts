@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { buildAgentPrompt } from '../../../src/agent/prompt';
+import { BRIDGE_SYSTEM_PROMPT } from '../../../src/agent/bridge-system-prompt';
 
 describe('agent prompt builder', () => {
   it('serializes untrusted message, quote, card, and comment text without closing bridge tags', () => {
@@ -99,35 +100,35 @@ describe('agent prompt builder', () => {
     expect(prompt).not.toContain('<comment_context>');
   });
 
-  it('keeps bridge agents inside the current lark-channel profile by default', () => {
+  it('keeps profile guidance in the shared prompt without repeating it in channel instructions', () => {
     const source = readFileSync(join(process.cwd(), 'src/bot/channel.ts'), 'utf8');
 
-    expect(source).not.toContain('命令必须写成 env -u LARK_CHANNEL');
-    expect(source).not.toContain('env -u LARK_CHANNEL lark-cli');
-    expect(source).toContain('danger-full-access');
-    expect(source).toContain('bypassPermissions');
-    expect(source).toContain('不要 unset LARK_CHANNEL');
-    expect(source).toContain('LARKSUITE_CLI_CONFIG_DIR');
-    expect(source).not.toContain('lark-cli config bind --source lark-channel');
+    expect(BRIDGE_SYSTEM_PROMPT).toContain('LARKSUITE_CLI_CONFIG_DIR');
+    expect(BRIDGE_SYSTEM_PROMPT).toContain('不要清除变量或切换配置绕过绑定');
+    expect(BRIDGE_SYSTEM_PROMPT).toContain('不要自行 bind');
+    expect(source).not.toContain('BRIDGE_AGENT_INSTRUCTIONS');
+    expect(source).not.toContain('应能像用户本机终端一样访问 keychain');
+    expect(source).toContain('instructions: extraInstructions');
   });
 
-  it('keeps lark-cli OAuth inside the current profile and enables user identity after login', () => {
+  it('keeps lark-cli OAuth inside the current profile without changing identity policy', () => {
     const source = readFileSync(join(process.cwd(), 'src/agent/bridge-system-prompt.ts'), 'utf8');
 
     expect(source).toContain('LARKSUITE_CLI_CONFIG_DIR');
     expect(source).toContain('lark-cli auth login --device-code');
-    expect(source).toContain('lark-cli config strict-mode off');
-    expect(source).toContain('lark-cli config default-as auto');
+    expect(source).not.toContain('lark-cli config strict-mode off');
+    expect(source).not.toContain('lark-cli config default-as auto');
     expect(source).not.toContain('env -u LARK_CHANNEL lark-cli auth login');
   });
 
-  it('keeps lark-cli user identity policy details out of user-facing OAuth replies', () => {
-    const source = readFileSync(join(process.cwd(), 'src/agent/bridge-system-prompt.ts'), 'utf8');
-
-    expect(source).toContain('不要把 strict-mode/default-as 这类内部配置命令展示给用户');
-    expect(source).toContain('当前 profile 还没有可用的用户身份授权');
-    expect(source).toContain('如果当前 profile 已经有用户授权');
-    expect(source).toContain('内部顺序执行身份策略收敛');
+  it('keeps one cross-turn OAuth instruction for final-only and streaming deployments', () => {
+    const channel = readFileSync(join(process.cwd(), 'src/bot/channel.ts'), 'utf8');
+    expect(BRIDGE_SYSTEM_PROMPT).toContain('最终回复');
+    expect(BRIDGE_SYSTEM_PROMPT).toContain('结束本轮');
+    expect(BRIDGE_SYSTEM_PROMPT).toContain('用户回来后');
+    expect(BRIDGE_SYSTEM_PROMPT).toContain('登录不修改身份策略');
+    expect(channel).not.toContain('FINAL_ONLY_AGENT_INSTRUCTION');
+    expect(channel).not.toContain('lark-cli auth login --no-wait');
   });
 });
 

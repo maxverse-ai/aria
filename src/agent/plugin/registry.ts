@@ -1,7 +1,13 @@
+import { registerRuntimeQueries, runtimeQueries } from '../runtime/queries';
 import type { AppPaths } from '../../config/app-paths';
-import type { ProfileConfig } from '../../config/profile-schema';
+import type { EngineProfileConfig } from '../../config/profile-schema';
 import type { AgentCapability } from '../capability';
-import { BUILTIN_ENGINE_PLUGINS } from '../engines';
+import { BUILTIN_ENGINE_PLUGINS, getBuiltinEngineRuntimeFactory } from '../engines';
+import {
+  copyLegacyEnginePluginContext,
+  resolveEngineRuntimeConstructionContext,
+  type PreparedEngineRuntime,
+} from '../runtime/construction';
 import {
   assertEngineRuntimeDescriptor,
   defineEngineRuntimeDescriptor,
@@ -84,7 +90,7 @@ export function listEnginePlugins(): EnginePlugin[] {
   return [...plugins.values()];
 }
 
-export function capabilityFor(id: string, profile: ProfileConfig): AgentCapability {
+export function capabilityFor(id: string, profile: EngineProfileConfig): AgentCapability {
   return requireEnginePlugin(id).capability(profile);
 }
 
@@ -93,7 +99,37 @@ export function engineSupportsAutomation(id: string, capability: EngineAutomatio
 }
 
 export function createEngineRuntime(id: string, ctx: EnginePluginContext): EngineRuntime {
-  const runtime = requireEnginePlugin(id).createRuntime(ctx);
+  return prepareEngineRuntime(id, ctx).create();
+}
+
+/** Internal two-stage construction; the public plugin and runtime v1 stay intact. */
+export function prepareEngineRuntime(id: string, ctx: EnginePluginContext): PreparedEngineRuntime {
+  const plugin = requireEnginePlugin(id);
+  const factory = getBuiltinEngineRuntimeFactory(plugin);
+  let prepared: PreparedEngineRuntime;
+  if (factory) {
+    prepared = factory.prepare(ctx);
+  } else {
+    // Preserve the v1 shape, including extra profile/path fields. Give each
+    // external instance its own mutable projection of the prepared snapshot.
+    const snapshot = copyLegacyEnginePluginContext(ctx);
+    prepared = {
+      context: resolveEngineRuntimeConstructionContext(id, snapshot),
+      create: () => plugin.createRuntime(copyLegacyEnginePluginContext(snapshot)),
+    };
+  }
+  return Object.freeze({
+    context: prepared.context,
+    create(): EngineRuntime {
+      if (requireEnginePlugin(id) !== plugin) {
+        throw new Error(`engine plugin changed after runtime preparation: ${id}`);
+      }
+      return manageEngineRuntime(id, prepared.create());
+    },
+  });
+}
+
+function manageEngineRuntime(id: string, runtime: EngineRuntime): EngineRuntime {
   // Keep already-compiled pre-v1 external plugins loadable. Missing metadata
   // is normalized conservatively and never inferred from the engine id.
   const descriptor = runtime?.descriptor ?? defineEngineRuntimeDescriptor({
@@ -118,7 +154,7 @@ export function createEngineRuntime(id: string, ctx: EnginePluginContext): Engin
 
   activeRuntimeCounts.set(id, (activeRuntimeCounts.get(id) ?? 0) + 1);
   let disposed = false;
-  return {
+  const tracked: EngineRuntime = {
     engineId: runtime.engineId,
     descriptor,
     execution: runtime.execution,
@@ -140,6 +176,8 @@ export function createEngineRuntime(id: string, ctx: EnginePluginContext): Engin
       }
     },
   };
+  registerRuntimeQueries(tracked, runtimeQueries(runtime));
+  return tracked;
 }
 
 export function modelOptionsFor(id: string) {

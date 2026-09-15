@@ -30,6 +30,7 @@ export class CodexAppServerClient {
   private readonly lines;
   private closed = false;
   private closeError: Error | undefined;
+  private disposal: Promise<void> | undefined;
 
   constructor(private readonly child: AppServerChild) {
     this.lines = createInterface({ input: child.stdout, crlfDelay: Infinity });
@@ -103,23 +104,29 @@ export class CodexAppServerClient {
     return () => this.closeListeners.delete(listener);
   }
 
-  async dispose(graceMs = 2_000): Promise<void> {
+  dispose(graceMs = 10_000): Promise<void> {
+    return this.disposal ??= this.closeProcess(graceMs);
+  }
+
+  private async closeProcess(graceMs: number): Promise<void> {
     if (this.closed && (this.child.exitCode !== null || this.child.signalCode !== null)) return;
     this.markClosed(new Error('codex app-server disposed'));
     this.lines.close();
-    if (this.child.exitCode === null && this.child.signalCode === null) {
-      this.child.kill('SIGTERM');
-      await new Promise<void>((resolve) => {
-        const timer = setTimeout(() => {
-          if (this.child.exitCode === null && this.child.signalCode === null) this.child.kill('SIGKILL');
-          resolve();
-        }, graceMs);
-        this.child.once('exit', () => {
-          clearTimeout(timer);
-          resolve();
-        });
+    const exited = () => this.child.exitCode !== null || this.child.signalCode !== null;
+    const waitForExit = async (stop: () => void) => {
+      if (exited()) return;
+      await new Promise<void>(resolve => {
+        const done = () => { clearTimeout(timer); this.child.removeListener('exit', done); resolve(); };
+        const timer = setTimeout(done, graceMs);
+        this.child.once('exit', done);
+        stop();
       });
-    }
+    };
+    // EOF is the normal stdio shutdown. Signalling an exec transport fences
+    // its entire container, including a successful metadata-only probe.
+    await waitForExit(() => { this.child.stdin.end(); });
+    await waitForExit(() => { this.child.kill('SIGTERM'); });
+    if (!exited()) this.child.kill('SIGKILL');
   }
 
   private write(message: JsonRpcRequest | JsonRpcNotification | JsonRpcResponse): void {

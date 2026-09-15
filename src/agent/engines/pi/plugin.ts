@@ -2,16 +2,35 @@ import { piCapability } from '../../capability';
 import { PI_MODELS, registerModelOptions } from '../../models';
 import { AgentPreflightError } from '../../preflight';
 import type { EnginePlugin } from '../../plugin/types';
+import { defineEngineRuntimeFactory } from '../../runtime/construction';
 import { resolveExecutablePath } from '../../../platform/executable';
 import { join } from 'node:path';
 import { PiAdapter } from './adapter';
 import { createAdapterRuntime } from '../../runtime/adapter-runtime';
 
+export const piRuntimeFactory = defineEngineRuntimeFactory(
+  'pi',
+  (context, profile) => {
+    const pi = profile.pi;
+    if (!pi?.binaryPath) {
+      throw new Error('pi profile requires pi.binaryPath');
+    }
+    return {
+      binary: pi.binaryPath,
+      profileStateDir: context.state.directory,
+      sessionDir: pi.sessionDir ?? join(context.state.directory, 'pi-sessions'),
+      approve: profile.permissions.defaultAccess === 'full',
+      ariaChannel: context.launch.legacyChannel,
+    };
+  },
+  (options) => createAdapterRuntime(new PiAdapter(options)),
+);
+
 export const piEnginePlugin: EnginePlugin = {
   id: 'pi',
   displayName: 'Pi',
   sessionKind: 'pi-session',
-  supportsNativeHistory: true,
+  supportsNativeHistory: false,
   probes: [{ command: 'pi', envKey: 'LARK_CHANNEL_PI_BIN' }],
   configField: 'pi',
   defaultBinary: 'pi',
@@ -51,19 +70,7 @@ export const piEnginePlugin: EnginePlugin = {
     label: 'permission',
     value: profile.permissions.defaultAccess,
   }),
-  createRuntime: (ctx) => {
-    const pi = ctx.profileConfig.pi;
-    if (!pi?.binaryPath) {
-      throw new Error('pi profile requires pi.binaryPath');
-    }
-    return createAdapterRuntime(new PiAdapter({
-      binary: pi.binaryPath,
-      profileStateDir: ctx.appPaths.profileDir,
-      sessionDir: pi.sessionDir ?? join(ctx.appPaths.profileDir, 'pi-sessions'),
-      approve: ctx.profileConfig.permissions.defaultAccess === 'full',
-      ariaChannel: ctx.ariaChannel,
-    }));
-  },
+  createRuntime: piRuntimeFactory.createRuntime,
   modelOptions: () => PI_MODELS,
 };
 

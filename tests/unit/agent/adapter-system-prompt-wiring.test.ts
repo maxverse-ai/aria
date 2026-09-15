@@ -42,18 +42,17 @@ beforeEach(() => {
 });
 
 describe('ClaudeAdapter system prompt wiring', () => {
-  it('appends the identity-aware bridge system prompt via a temp file after setBotIdentity', async () => {
+  it('appends the identity-aware bridge system prompt via a temp file from the run identity', async () => {
     const child = fakeChild();
     spawnMock.spawnProcess.mockReturnValue(child);
     const adapter = new ClaudeAdapter();
-    adapter.setBotIdentity({ openId: 'ou_bot_self', name: 'Bridge' });
 
-    adapter.run({ runId: 'r1', scopeId: 'scope-test', prompt: 'hi', cwd: '/tmp' });
+    adapter.run({ identity: { providerId: 'lark', accountId: 'app', subjectId: 'ou_bot_self', displayName: 'Bridge' }, runId: 'r1', scopeId: 'scope-test', prompt: 'hi', cwd: '/tmp' });
 
     // The prompt goes via stdin, never argv (cmd.exe would mangle it on Windows).
     expect(await readAll(child.stdin)).toBe('hi');
     expect(systemPromptFileContent()).toBe(
-      buildBridgeSystemPrompt({ openId: 'ou_bot_self', name: 'Bridge' }),
+      buildBridgeSystemPrompt({ providerId: 'lark', accountId: 'app', subjectId: 'ou_bot_self', displayName: 'Bridge' }),
     );
   });
 

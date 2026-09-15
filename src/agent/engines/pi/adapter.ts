@@ -8,7 +8,6 @@ import { buildChannelEnv, type ChannelEnvContext } from '../../channel-env';
 import { checkAgentAvailability, type AgentAvailability } from '../../preflight';
 import type {
   AgentAdapter,
-  AgentBotIdentity,
   AgentEvent,
   AgentRun,
   AgentRunOptions,
@@ -36,7 +35,6 @@ export class PiAdapter implements AgentAdapter {
   private readonly approve: boolean;
   private readonly defaultStopGraceMs: number;
   private readonly ariaChannel: ChannelEnvContext | undefined;
-  private botIdentity: AgentBotIdentity | undefined;
 
   constructor(opts: PiAdapterOptions) {
     this.binary = opts.binary;
@@ -44,10 +42,6 @@ export class PiAdapter implements AgentAdapter {
     this.approve = opts.approve === true;
     this.defaultStopGraceMs = opts.stopGraceMs ?? 5000;
     this.ariaChannel = opts.ariaChannel;
-  }
-
-  setBotIdentity(identity: AgentBotIdentity): void {
-    this.botIdentity = identity;
   }
 
   async isAvailable(): Promise<boolean> {
@@ -80,7 +74,7 @@ export class PiAdapter implements AgentAdapter {
       throw new Error('cwd is required for PiAdapter.run');
     }
     const args = buildPiArgs({
-      prompt: prefixBridgeSystemPrompt(opts.prompt, this.botIdentity),
+      prompt: prefixBridgeSystemPrompt(opts.prompt, opts.identity),
       sessionId: opts.sessionId,
       model: opts.model,
       thinking: opts.reasoningEffort,

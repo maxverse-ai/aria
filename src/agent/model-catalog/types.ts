@@ -20,5 +20,7 @@ export interface ModelCatalogQuery {
   engineId: string;
   profileConfig: ProfileConfig;
   runtimeGeneration?: number;
+  runtimeOnly?: boolean;
+  cacheScope?: string;
   runtimeModels?: (signal: AbortSignal) => Promise<ModelOption[] | undefined>;
 }

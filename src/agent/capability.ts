@@ -55,7 +55,7 @@ export function codexCapability(profile: Pick<ProfileConfig, 'permissions'>): Ag
     sessionKind: 'codex-thread',
     promptInjection: 'stdin-prefix',
     systemPrompt: BRIDGE_SYSTEM_PROMPT,
-    supportsNativeHistory: false,
+    supportsNativeHistory: true,
     callback: {
       marker: '__bridge_cb',
       legacyMarkers: [],
@@ -116,6 +116,7 @@ export function dshCapability(profile: Pick<ProfileConfig, 'permissions'>): Agen
     promptInjection: 'stdin-prefix',
     systemPrompt: BRIDGE_SYSTEM_PROMPT,
     supportsNativeHistory: false,
+    finalReply: 'separate',
     callback: {
       marker: '__bridge_cb',
       legacyMarkers: [],
@@ -133,7 +134,7 @@ export function kimiCapability(profile: Pick<ProfileConfig, 'permissions'>): Age
     sessionKind: 'kimi-session',
     promptInjection: 'append-system-prompt',
     systemPrompt: BRIDGE_SYSTEM_PROMPT,
-    supportsNativeHistory: true,
+    supportsNativeHistory: false,
     callback: {
       marker: '__bridge_cb',
       legacyMarkers: [],
@@ -151,7 +152,7 @@ export function piCapability(profile: Pick<ProfileConfig, 'permissions'>): Agent
     sessionKind: 'pi-session',
     promptInjection: 'stdin-prefix',
     systemPrompt: BRIDGE_SYSTEM_PROMPT,
-    supportsNativeHistory: true,
+    supportsNativeHistory: false,
     callback: {
       marker: '__bridge_cb',
       legacyMarkers: [],

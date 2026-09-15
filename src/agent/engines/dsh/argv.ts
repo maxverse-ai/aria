@@ -1,5 +1,5 @@
-export function buildDshArgs(prompt: string): string[] {
-  // dsh launcher: `--profile headless` then the task positional. The prompt is
-  // the last argv token (dsh has no stdin prompt transport).
-  return ['--profile', 'headless', prompt];
+export function buildDshArgs(prompt: string, progressPatch: string): string[] {
+  // Keep native model selection and headless lifecycle; the public patch adds
+  // a separate fd 3 progress channel before the task starts.
+  return ['--profile', 'headless', '--patch', progressPatch, prompt];
 }
