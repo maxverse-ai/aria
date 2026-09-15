@@ -149,7 +149,7 @@ export async function probeSpaceDeployment(definition: SpaceDeploymentDefinition
       throw new Error('native tool binary version did not pass its startup probe');
     }
     const node = spawnProcessSync(d.queryNode!, ['--version'], { encoding: 'utf8', timeout: 10_000, maxBuffer: 64 * 1024 });
-    if (node.error || node.status !== 0 || !/^v(?:2[2-9]|[3-9][0-9])\./.test(String(node.stdout ?? '').trim())) throw new Error('native tool Node helper is unavailable');
+    if (node.error || node.status !== 0 || !/^v(?:2[4-9]|[3-9][0-9])\./.test(String(node.stdout ?? '').trim())) throw new Error('native tool Node helper is unavailable');
   }
   } finally { await environment?.close(); }
 }

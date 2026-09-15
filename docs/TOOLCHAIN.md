@@ -12,7 +12,7 @@ release or deployment automation.
   separately installed global pnpm.
 - `pnpm-workspace.yaml#allowBuilds` is the reviewed allowlist for dependency
   lifecycle scripts.
-- CI validates the supported Node 20 floor across Linux, macOS, and Windows. The
+- CI validates the supported Node 24 floor across Linux, macOS, and Windows. The
   package artifact is built with the pinned runtime.
 
 Run the local prerequisite check with:
@@ -22,9 +22,9 @@ corepack pnpm infra:doctor
 ```
 
 The doctor fails on an unsupported Node version, a mismatched pnpm version,
-missing Git or `tar`, or a missing frozen lockfile. A supported Node version that differs
-from `.node-version` is reported as a warning rather than a failure so the Node
-20 compatibility lane remains valid.
+missing Git or `tar`, or a missing frozen lockfile. A supported Node version
+that differs from `.node-version` is reported as a warning rather than a
+failure, so a release line can pin a patch while the floor stays lower.
 
 ## Standard validation entry points
 
