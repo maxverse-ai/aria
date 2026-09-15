@@ -317,6 +317,21 @@ aria profile export <name> [--output ./profile.json] [--force]
 aria profile export <name> --include-secrets --yes
 ```
 
+Interactive `profile create` saves configuration and then starts the profile on the
+existing Supervisor. Use `--no-start` to save only; non-interactive scripts save
+only by default and can opt in with `--start`. If startup fails, the configuration
+is retained and the command reports failure with a retry command:
+
+```bash
+aria profile start <name>
+```
+
+If no Supervisor is running, start it with `aria start --web-ui`, then retry.
+A successful start confirms runtime startup; send a message to verify an actual
+engine reply. Supervisor restarts restore profiles explicitly requested to run;
+profiles explicitly stopped remain stopped. On the first startup without a
+running-intent record, only the active profile starts, preserving prior behavior.
+
 `profile remove` archives local state by default, including the active profile. If other profiles remain, the bridge switches to the next one; if it was the last profile, the root config is cleared so the same name can be created again. `--purge --yes` permanently deletes local state. `profile export` redacts app secrets by default; `--include-secrets --yes` includes sensitive config.
 
 If a profile was created with the wrong agent kind, stop or unregister any matching background service first, then run `profile remove <name>` and recreate it with the intended `--agent`.

@@ -307,6 +307,19 @@ aria profile export <name> [--output ./profile.json] [--force]
 aria profile export <name> --include-secrets --yes
 ```
 
+交互式终端中的 `profile create` 会先保存配置，再通过已有 Supervisor 启动。
+`--no-start` 只保存配置；非交互脚本默认只保存，可用 `--start` 明确要求上线。
+启动失败时配置仍保留，命令会说明原因并返回失败；无需重新创建，执行：
+
+```bash
+aria profile start <name>
+```
+
+若 Supervisor 未运行，先执行 `aria start --web-ui`，再重试上线。
+“启动成功”表示运行时启动完成，实际引擎回复仍需发消息验证。
+Supervisor 重启会恢复明确要求运行的 profile，主动停止的保持停止。
+首次没有运行意图记录时，仅启动默认 profile，保持旧版行为。
+
 `profile remove` 默认归档本地状态，也可以删除当前激活的 profile。若还剩其他 profile，会自动切到下一个；若这是最后一个 profile，会清空 root config，之后可以用同名重新创建。只有加 `--purge --yes` 才会永久删除。`profile export` 默认脱敏 app secret；只有加 `--include-secrets --yes` 才会导出敏感配置。
 
 如果某个 profile 被建成了错误的 agent 类型，先 `stop` 或 `unregister --profile <name>` 清理对应后台服务，再 `profile remove <name>`，然后用正确的 `--agent` 重新创建。
