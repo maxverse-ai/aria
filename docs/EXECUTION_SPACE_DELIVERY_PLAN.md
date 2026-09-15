@@ -58,9 +58,9 @@ upstream isolation mechanism is an explicit engine adoption gate, not an
 undefined core routing rule.
 
 Document validation checks relative links/anchors, consistent implementation
-status, code references and whitespace. Repository-required ***REMOVED*** validation
-still applies to documentation-only candidates; the target gate must not
-be weakened or replaced by a document-specific shortcut.
+status, code references and whitespace. The repository gate still applies to
+documentation-only candidates; it must not be weakened or replaced by a
+document-specific shortcut.
 
 ## Current code and migration seams
 
@@ -380,16 +380,11 @@ scenarios to tests; migration and live deployment scenarios remain outstanding.
 
 ## Integration and evidence rules
 
-For this machine-private fork, [AGENTS.md](../AGENTS.md) and
-[Private fork workflow](PRIVATE_FORK_WORKFLOW.md) are authoritative. Work uses
-local main and the ***REMOVED*** repo alias `aria`; no Git remote, upstream fetch,
-publication or deployment is implied by older documents mentioning origin/main.
-
-Each task claims the smallest honest path set with strict claims, edits only its
-returned workspace, installs the guard, commits, submits, and follows the
-current `***REMOVED*** task next --json` instructions. Run focused checks appropriate
-to its change and the unchanged target-owned `.***REMOVED***/checks.toml` gate.
-Validation remains offline and memory-bounded.
+[AGENTS.md](../AGENTS.md) is authoritative for how work lands in this
+repository. Each task owns the smallest honest path set, edits only its own
+worktree, commits, and validates before integrating through the repository's
+normal flow. Run focused checks appropriate to the change alongside the
+repository gate. Validation remains offline and memory-bounded.
 
 At each handoff update this plan with the exact completed boundary, source/test
 links, supported and rejected combinations, persisted-format/default changes,

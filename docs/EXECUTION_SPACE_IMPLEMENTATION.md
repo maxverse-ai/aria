@@ -1,9 +1,9 @@
 # Execution space implementation through Phase 5
 
 This task implements E2.2–E5.3 on baseline `b1dc362f55693a47c35a5d9434903b270969f66d`.
-The task owner uses ***REMOVED*** lease `01M1XJME38GNJMNAZ6285TRBDD`; the repository gate
-and exact candidate integration receipt are owned by that workflow. It does not
-activate migrations, deploy/restart a service, or authorize any real account.
+The repository gate and exact candidate integration receipt are owned by that
+task's workflow. It does not activate migrations, deploy/restart a service, or
+authorize any real account.
 
 ## Activation and routing constraints
 
@@ -60,8 +60,8 @@ and provider grant renewal are not inferred from an ordinary retry.
 
 Workspace-selection and other management commands remain unavailable in the
 prepared channel path until Phase 6 supplies the authorized transition/resource
-operations. No host project tree or ***REMOVED***/control socket is mounted in an
-isolated engine. Sharing an execution space does not grant a shared project
+operations. No host project tree or control socket is mounted in an isolated
+engine. Sharing an execution space does not grant a shared project
 write lease. Optional features remain independently gated.
 
 ## Native adapter evidence and limits

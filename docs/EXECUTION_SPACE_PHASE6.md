@@ -144,9 +144,9 @@ rollout import, original-ID resume after process restart, old content reading
 and owned history queries; it uses synthetic history and no real credentials.
 
 The full local gate passed 1,561 tests (one real-native test is opt-in and passed
-separately), build, release checks and both TypeScript checks. Exact-head ***REMOVED***
-validation and ***REMOVED*** subtree/receipt integration remain deployment prerequisites.
-***REMOVED*** requires a
+separately), build, release checks and both TypeScript checks. Exact-head
+repository validation and subtree/receipt integration into the embedding
+deployment remain deployment prerequisites. That deployment requires a
 compatibility upgrade, temporary-state rehearsal, exact image/source receipts,
 resident-service health checks and a tested rollback. Real Feishu messages need
 designated test subjects; a fixture or direct model request is not a live
