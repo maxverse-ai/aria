@@ -13,7 +13,11 @@ export interface EngineProbeStatus {
 }
 
 const PROBE_TTL_MS = 60_000;
-const VERSION_TIMEOUT_MS = 5000;
+// A version probe only reads a flag, but a cold engine binary on a loaded or
+// virtualized host can take well over five seconds to start. Timing out turns
+// "slow" into "not installed", so allow for a slow start while still bounding
+// a genuinely hung binary.
+const VERSION_TIMEOUT_MS = 30_000;
 
 const cache = new Map<string, EngineProbeStatus>();
 let inflight: Promise<EngineProbeStatus[]> | undefined;

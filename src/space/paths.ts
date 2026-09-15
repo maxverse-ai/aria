@@ -1,5 +1,5 @@
 import { mkdir, realpath } from 'node:fs/promises';
-import { isAbsolute, join } from 'node:path';
+import { isAbsolute, join, relative } from 'node:path';
 import { assertConfinedPath } from '../platform/confined-path';
 export { assertConfinedPath, within } from '../platform/confined-path';
 import type { SpaceKey } from './identity';
@@ -29,9 +29,17 @@ export function resolveSpacePaths(profileDirectory: string, key: SpaceKey): Spac
     data: join(engine, 'data'), attachments: join(engine, 'data', 'attachments'), cache: join(engine, 'cache'), state: join(engine, 'state'), tools: join(engine, 'tools') });
 }
 export async function prepareSpacePaths(paths: SpacePaths): Promise<void> {
-  for (const directory of [paths.root, paths.control, paths.engine, paths.workspace, paths.home, paths.config, paths.data, paths.attachments, paths.cache, paths.state, paths.tools]) {
+  const directories = [paths.root, paths.control, paths.engine, paths.workspace, paths.home, paths.config, paths.data, paths.attachments, paths.cache, paths.state, paths.tools];
+  for (const directory of directories) {
     await assertConfinedPath(paths.root, directory);
     await mkdir(directory, { recursive: true, mode: 0o700 });
-    if ((await realpath(directory)) !== directory) throw new Error('space path changed during preparation');
+  }
+  // Compare against the canonical root so a platform path alias above the root
+  // does not read as a swapped path component.
+  const canonicalRoot = await realpath(paths.root);
+  for (const directory of directories) {
+    if ((await realpath(directory)) !== join(canonicalRoot, relative(paths.root, directory))) {
+      throw new Error('space path changed during preparation');
+    }
   }
 }
