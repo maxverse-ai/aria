@@ -21,14 +21,14 @@ export async function copyLegacyLarkCliState(input: {
     await assertConfinedPath(paths.engine, path);
   }
   let store: { schema: string; profileId: string; grants: {spaceId: string; principalId: string; providerId: string; credentialRef: string}[] };
-  try { store = await readPrivateJson(join(input.stateDirectory, 'space-control', 'tool-identity.v1.json')) as typeof store; }
+  try { store = await readPrivateJson(join(input.stateDirectory, 'space-control', 'tool-identity.v1.json'), join(input.stateDirectory, 'space-control')) as typeof store; }
   catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { migrated: false, files: 0 }; throw error; }
   if (!store || !['aria.space.tool-identity.v1', 'aria.space.tool-identity.v2'].includes(store.schema) || store.profileId !== key.profileId || !Array.isArray(store.grants)) throw new Error('legacy CLI identity store is invalid');
   const grants = store.grants.filter(g => g && g.spaceId === paths.spaceId && g.principalId === principalId(key.principal) && g.providerId === 'lark');
   if (!grants.length) return { migrated: false, files: 0 };
   if (grants.length !== 1 || !/^[a-f0-9-]{36}$/.test(grants[0]!.credentialRef)) throw new Error('legacy CLI grant is ambiguous');
   const source = join(input.stateDirectory, 'space-control', 'tool-credentials', createHash('sha256').update(grants[0]!.credentialRef).digest('hex'));
-  const binding = await readPrivateJson(join(source, 'binding.json')) as Record<string, unknown>;
+  const binding = await readPrivateJson(join(source, 'binding.json'), source) as Record<string, unknown>;
   if (binding.schema !== 'aria.space.lark-cli.v1' || binding.spaceId !== paths.spaceId
     || binding.owner !== principalId(key.principal) || binding.authorityId !== key.principal.authorityId
     || binding.identity !== 'user' || typeof binding.accountId !== 'string' || !/^cli_[a-z0-9]+$/.test(binding.accountId)) {

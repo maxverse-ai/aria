@@ -30,7 +30,7 @@ export async function retainedPreparations(profileDirectory: string, profileId: 
   const values: RetainedSpacePreparation[] = [];
   for (const name of names) {
     if (!/^[a-f0-9]{32}\.json$/.test(name)) throw new Error('invalid retained preparation file');
-    const value = await readPrivateJson(join(directory(profileDirectory), name)) as RetainedSpacePreparation;
+    const value = await readPrivateJson(join(directory(profileDirectory), name), directory(profileDirectory)) as RetainedSpacePreparation;
     normalizeExecutionSpaceSelection(value.selection);
     if (value.schema !== 'aria.space.retained.v1' || value.profileId !== profileId
       || value.selection.preparationId + '.json' !== name || !Number.isFinite(Date.parse(value.rolledBackAt))

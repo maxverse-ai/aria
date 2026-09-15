@@ -87,13 +87,13 @@ export class SpaceManagementService {
       await mkdir(staging.directory, { recursive: true, mode: 0o700 });
       // A stable preparation id is resumable only for the exact same inputs.
       try {
-        if (JSON.stringify(await readPrivateJson(staging.journal)) !== JSON.stringify(intent)) throw new Error('migration inputs changed; use a new preparation id');
+        if (JSON.stringify(await readPrivateJson(staging.journal, paths.profileDir)) !== JSON.stringify(intent)) throw new Error('migration inputs changed; use a new preparation id');
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
         await writeFileAtomic(staging.journal, JSON.stringify(intent) + '\n', { mode: 0o600 });
       }
       try {
-        const receipt = await readPrivateJson(staging.receipt) as SpacePreparationReceipt;
+        const receipt = await readPrivateJson(staging.receipt, paths.profileDir) as SpacePreparationReceipt;
         if (receipt.profileId !== paths.profile || receipt.baseRevision !== baseRevision
           || receipt.executionFingerprint !== fingerprint || receipt.migration?.catalogDigest !== inventory.digest
           || JSON.stringify(receipt.deployment) !== JSON.stringify(definition)
@@ -157,7 +157,7 @@ export class SpaceManagementService {
       await assertConfinedPath(paths.profileDir, staging.journal);
       await mkdir(staging.directory, { recursive: true, mode: 0o700 });
       try {
-        if (JSON.stringify(await readPrivateJson(staging.journal)) !== JSON.stringify(intent)) throw new Error('upgrade inputs changed');
+        if (JSON.stringify(await readPrivateJson(staging.journal, paths.profileDir)) !== JSON.stringify(intent)) throw new Error('upgrade inputs changed');
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
         await writeFileAtomic(staging.journal, JSON.stringify(intent) + '\n', { mode: 0o600 });
@@ -172,7 +172,7 @@ export class SpaceManagementService {
         throw new Error('upgrade backup or source changed; preserve both for inspection');
       }
       try {
-        const existing = await readPrivateJson(staging.receipt) as SpacePreparationReceipt;
+        const existing = await readPrivateJson(staging.receipt, paths.profileDir) as SpacePreparationReceipt;
         if (existing.id !== preparationId || existing.schema !== 'aria.space.preparation.v2') throw new Error('upgrade receipt identity changed');
         const selection = await writePreparation(paths.profileDir, existing);
         const checked = await readPreparation(paths.profileDir, selection);

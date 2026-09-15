@@ -38,7 +38,7 @@ export async function writePreparation(profileDirectory: string, receipt: SpaceP
   const content = JSON.stringify(receipt);
   // Receipt is immutable. Replaying exactly the same completed preparation is safe.
   try {
-    const existing = await readPrivateJson(paths.receipt);
+    const existing = await readPrivateJson(paths.receipt, profileDirectory);
     if (JSON.stringify(existing) !== content) throw new Error('space preparation already sealed with different contents');
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
@@ -52,7 +52,7 @@ export async function readPreparation(profileDirectory: string, selection: Execu
   const selected = normalizeExecutionSpaceSelection(selection)!;
   const paths = preparationPaths(profileDirectory, selected.preparationId);
   await assertConfinedPath(profileDirectory, paths.receipt);
-  const value = await readPrivateJson(paths.receipt) as SpacePreparationReceipt;
+  const value = await readPrivateJson(paths.receipt, profileDirectory) as SpacePreparationReceipt;
   if (!value || digest(JSON.stringify(value)) !== selected.receiptDigest
     || !['aria.space.preparation.v1', 'aria.space.preparation.v2'].includes(value.schema) || value.id !== selected.preparationId
     || typeof value.profileId !== 'string' || !value.profileId

@@ -78,7 +78,7 @@ export class LarkSpaceCredentialProvider implements SpaceToolCredentialProvider 
   async complete(input: Parameters<SpaceToolCredentialProvider['complete']>[0]) {
     return this.serial(input.transactionId, async () => {
       const slot = await this.existing(input.transactionId, input.context, 'user');
-      const pending = await readPrivateJson(join(slot.directory, 'pending.json')) as PendingLogin;
+      const pending = await readPrivateJson(join(slot.directory, 'pending.json'), slot.directory) as PendingLogin;
       if (pending.schema !== 'aria.space.lark-login.v1' || typeof pending.deviceCode !== 'string'
         || !pending.deviceCode || !Number.isFinite(pending.expiresAt) || pending.expiresAt <= this.now()) {
         throw new Error('Lark authorization transaction expired');
@@ -151,7 +151,7 @@ export class LarkSpaceCredentialProvider implements SpaceToolCredentialProvider 
 
   private async existing(ref: string, context: AuthorizedSpaceSnapshot, identity: 'bot' | 'user') {
     const directory = this.directory(ref);
-    const receipt = await readPrivateJson(join(directory, 'binding.json'));
+    const receipt = await readPrivateJson(join(directory, 'binding.json'), directory);
     if (JSON.stringify(receipt) !== JSON.stringify(this.receipt(context, identity))) throw new Error('Lark credential binding belongs to another account or space');
     return this.slot(directory);
   }

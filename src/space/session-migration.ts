@@ -40,7 +40,7 @@ export function nativeSessionMigration(ownership: LegacySessionOwnership): Space
     const groups = new Map<string, { entry: SessionCatalogEntry; proof: VerifiedLegacySession }[]>();
     const importedKeys: string[] = [];
     const sourceChecks: { path: string; sha256: string }[] = [];
-    const persisted: { catalogFile: string; sessionsFile: string; key: string; scope: string; nativeId: string; cwd: string }[] = [];
+    const persisted: { root: string; catalogFile: string; sessionsFile: string; key: string; scope: string; nativeId: string; cwd: string }[] = [];
     try {
       for (const entry of input.inventory.sessions) {
         if (entry.agentId !== plugin.id || entry.status !== 'active') continue;
@@ -95,7 +95,7 @@ export function nativeSessionMigration(ownership: LegacySessionOwnership): Space
           state.sessions.set(snapshot.executionScope, proof.nativeSource.nativeId, state.paths.workspace);
           const minutes = input.inventory.idleTimeouts[entry.scopeId];
           if (minutes !== undefined) state.sessions.setIdleTimeoutMinutes(snapshot.executionScope, minutes);
-          persisted.push({ catalogFile: join(state.paths.control, 'sessions.catalog.json'),
+          persisted.push({ root: state.paths.control, catalogFile: join(state.paths.control, 'sessions.catalog.json'),
             sessionsFile: join(state.paths.control, 'sessions.json'), key: recorded.key,
             scope: snapshot.executionScope, nativeId: proof.nativeSource.nativeId, cwd: state.paths.workspace });
           importedKeys.push(entry.key);
@@ -113,8 +113,8 @@ export function nativeSessionMigration(ownership: LegacySessionOwnership): Space
       // The management owner additionally hashes the entire staged destination.
       if (new Set(importedKeys).size !== importedKeys.length) throw new Error('duplicate imported ownership');
       for (const expected of persisted) {
-        const catalog = await readPrivateJson(expected.catalogFile) as SessionCatalogEntry[];
-        const session = (await readPrivateJson(expected.sessionsFile) as Record<string, { sessionId?: string; cwd?: string }>)[expected.scope];
+        const catalog = await readPrivateJson(expected.catalogFile, expected.root) as SessionCatalogEntry[];
+        const session = (await readPrivateJson(expected.sessionsFile, expected.root) as Record<string, { sessionId?: string; cwd?: string }>)[expected.scope];
         if (!Array.isArray(catalog) || !catalog.some(entry => entry.key === expected.key
           && entry.status === 'active' && (entry.threadId ?? entry.sessionId) === expected.nativeId)
           || session?.sessionId !== expected.nativeId || session.cwd !== expected.cwd) throw new Error('migrated session state was not durably written');

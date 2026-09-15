@@ -5,7 +5,7 @@ import { opaqueId } from './identity';
 import { constants } from 'node:fs';
 import { open } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
-import { isAbsolute, resolve, parse } from 'node:path';
+import { dirname, isAbsolute, resolve, parse } from 'node:path';
 import { assertConfinedPath } from '../platform/confined-path';
 import { isIP } from 'node:net';
 import type { ModelEgressRule } from './egress';
@@ -150,9 +150,17 @@ export function deployedToolRevisions(tools: SpaceEngineDeployment['tools'], ext
 
 export function digest(value: string | Buffer): string { return createHash('sha256').update(value).digest('hex'); }
 
-export async function readPrivateJson(path: string, maxBytes = 16 * 1024 * 1024): Promise<unknown> {
+/**
+ * Read a private control file, rejecting a symlink at or below `root`.
+ *
+ * Callers pass the tightest boundary they own, which is the directory tree
+ * they created and validated. The file's own directory is the default: it
+ * still rejects a symlinked leaf alongside `O_NOFOLLOW` without inspecting
+ * operator-owned ancestors, which are not part of any space.
+ */
+export async function readPrivateJson(path: string, root: string = dirname(resolve(path)), maxBytes = 16 * 1024 * 1024): Promise<unknown> {
   const absolute = resolve(path);
-  await assertConfinedPath(parse(absolute).root, absolute);
+  await assertConfinedPath(root, absolute);
   const file = await open(absolute, constants.O_RDONLY | constants.O_NOFOLLOW);
   try {
     const stat = await file.stat();

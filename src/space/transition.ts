@@ -207,7 +207,7 @@ export class SpaceTransitionCoordinator {
   private directory(profile: string) { return join(resolveAppPaths({ rootDir: this.input.rootDir, profile }).profileDir, 'space-control'); }
   private async read(profile: string): Promise<TransitionJournal | undefined> {
     let journal: TransitionJournal;
-    try { journal = await readPrivateJson(join(this.directory(profile), 'transition.v1.json')) as TransitionJournal; }
+    try { journal = await readPrivateJson(join(this.directory(profile), 'transition.v1.json'), this.directory(profile)) as TransitionJournal; }
     catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined; throw error; }
     if (journal.schema !== 'aria.space.transition.v1' || journal.profile !== profile || !/^[a-f0-9]{32}$/.test(journal.id)
       || !['enable', 'rollback', 'reactivate', 'upgrade'].includes(journal.operation) || !['draining', 'stopped', 'preparing', 'prepared', 'activating', 'starting', 'healthy', 'restoring', 'rolled-back', 'aborted', 'recovery-required'].includes(journal.phase)
@@ -237,7 +237,7 @@ export class SpaceTransitionCoordinator {
  * this fence. The installed transition owner explicitly resumes after health. */
 export async function pendingSpaceTransition(profileDirectory: string): Promise<boolean> {
   let value: TransitionJournal;
-  try { value = await readPrivateJson(join(profileDirectory, 'space-control', 'transition.v1.json')) as TransitionJournal; }
+  try { value = await readPrivateJson(join(profileDirectory, 'space-control', 'transition.v1.json'), join(profileDirectory, 'space-control')) as TransitionJournal; }
   catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false; throw error; }
   if (value.schema !== 'aria.space.transition.v1' || typeof value.phase !== 'string') throw new Error('invalid transition startup fence');
   return !terminal(value.phase);

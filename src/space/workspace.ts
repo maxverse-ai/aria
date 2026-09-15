@@ -177,7 +177,7 @@ export class SpaceWorkspaces {
   }
   private async receipt(paths: SpacePaths): Promise<Receipt | undefined> {
     let v: Receipt;
-    try { v = await readPrivateJson(join(paths.control, 'workspace-setup.json'), 48 * 1024 * 1024) as Receipt; }
+    try { v = await readPrivateJson(join(paths.control, 'workspace-setup.json'), paths.control, 48 * 1024 * 1024) as Receipt; }
     catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined; throw error; }
     this.validateReceipt(paths, v);
     return v;
@@ -193,7 +193,7 @@ export class SpaceWorkspaces {
   }
   private async journal(paths: SpacePaths): Promise<Journal | undefined> {
     let v: Journal;
-    try { v = await readPrivateJson(join(paths.control, 'workspace-update.json'), 96 * 1024 * 1024) as Journal; }
+    try { v = await readPrivateJson(join(paths.control, 'workspace-update.json'), paths.control, 96 * 1024 * 1024) as Journal; }
     catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined; throw error; }
     this.validateReceipt(paths, v?.receipt);
     if (v.schema !== 'aria.workspace.journal.v1' || !Array.isArray(v.changes) || v.changes.length > 1024
@@ -248,7 +248,7 @@ export class SpaceWorkspaces {
       changes: changes.map(c => ({ path: c.path, action: c.after === null ? 'remove' : c.before === null ? 'create' : 'update' })),
       conflicts, preservedAgents, resources, discovery: 'not-checked' };
     try {
-      const discovery = await readPrivateJson(join(paths.control, 'workspace-discovery.json')) as { revision: string; delivery: string };
+      const discovery = await readPrivateJson(join(paths.control, 'workspace-discovery.json'), paths.control) as { revision: string; delivery: string };
       if (status === 'ready' && discovery.revision === desired.revision && discovery.delivery === plan.delivery) {
         plan.discovery = plan.delivery === 'native-codex' ? 'native-verified' : 'explicit-catalog';
       }
