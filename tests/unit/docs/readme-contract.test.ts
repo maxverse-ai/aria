@@ -94,9 +94,11 @@ describe('README runtime contract', () => {
 });
 
 async function readDocs(): Promise<string> {
-  const [en, zh] = await Promise.all([
+  const [en, zh, larkChannel] = await Promise.all([
     readFile(new URL('../../../README.md', import.meta.url), 'utf8'),
     readFile(new URL('../../../README.zh.md', import.meta.url), 'utf8'),
+    // Channel-owned surfaces moved out of the README; they stay user-visible docs.
+    readFile(new URL('../../../docs/LARK_CHANNEL.md', import.meta.url), 'utf8'),
   ]);
-  return `${en}\n${zh}`;
+  return `${en}\n${zh}\n${larkChannel}`;
 }

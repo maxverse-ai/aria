@@ -3,22 +3,21 @@
 **[English](./README.md)** | 简体中文
 
 [![定位](https://img.shields.io/badge/focus-local--first%20agent%20control-7C5CFC?style=flat-square&labelColor=171717)](#why-aria)
-[![入口](https://img.shields.io/badge/channel-Feishu%20%7C%20Lark-00D6B9?style=flat-square&labelColor=171717)](#runtime-flow)
+[![渠道](https://img.shields.io/badge/channels-pluggable-00D6B9?style=flat-square&labelColor=171717)](#runtime-flow)
 [![平台](https://img.shields.io/badge/platforms-Windows%20%7C%20macOS%20%7C%20Linux-55DDE0?style=flat-square&labelColor=171717)](#supported-scope)
 [![分发](https://img.shields.io/badge/distribution-immutable%20GitHub%20Releases-F3B61F?style=flat-square&labelColor=171717)](#install)
 
-**飞书 / Lark 里的本地优先编码 Agent 控制平面。**
+**本地优先的编码 Agent 控制平面。聊天是遥控器，不是算力。**
 
-Aria 把飞书 / Lark 变成本机编码 Agent 的交互入口。引擎、工具、文件和凭据
+Aria 把聊天入口变成本机编码 Agent 的交互面。引擎、工具、文件和凭据
 留在本机；Aria 负责消息寻址、访问控制、profile、会话、工作空间、流式展示、
-轮次协调、后台服务，以及安全的版本生命周期。
+轮次协调、后台服务，以及安全的版本生命周期。渠道是可插拔的：飞书 / Lark
+内建，Channel Plugin ABI 是扩展边界。
 
 它的核心产品契约是：
 
-> 从飞书 / Lark 发出一项明确指向 Agent 的任务，把它路由到正确的本地 Agent
+> 从聊天入口发出一项明确指向 Agent 的任务，把它路由到正确的本地 Agent
 > 与工作空间；运行中的追问不丢失、不重复，最终答案只在仍然新鲜时发布。
-
-关于能实现的效果，详情可以阅读[飞书文档](https://larkcommunity.feishu.cn/docx/OaRIdFIRFoLM3xxTmKwcetHqn5e)
 
 [为什么选择 Aria](#why-aria) | [产品契约](#product-contract) |
 [运行流程](#runtime-flow) | [支持范围](#supported-scope) |
@@ -36,7 +35,7 @@ Aria 把飞书 / Lark 变成本机编码 Agent 的交互入口。引擎、工具
 - **安全 steering 与回退**：Codex 与 Grok 运行中的合格文本可以通过各自的
   原生实时输入通道接收；不支持、延迟或拒绝的输入仍归下一轮队列所有，不会消失。
 - **对话隔离**：每个聊天、话题或文档评论线程都有独立会话；profile 则隔离
-  应用凭据、Agent 状态、工作空间、日志和 lark-cli 身份。
+  应用凭据、Agent 状态、工作空间、日志和渠道工具身份。
 - **过程可感知**：流式卡片、可选 COT 过程消息、工具块、运行状态和终态
   freshness 检查，让远程运行可理解，也不会把临时输出伪装成最终答案。
 - **运维安全**：不可变 Release 元数据、字节校验、稳定 launcher、脱离服务
@@ -51,7 +50,7 @@ Aria 把飞书 / Lark 变成本机编码 Agent 的交互入口。引擎、工具
 
 | 表面 | 契约 |
 | --- | --- |
-| 飞书 / Lark Channel | 把私聊、群、话题、评论、mention、文件和卡片动作统一成带寻址语义的对话输入 |
+| Channel | 把渠道内的私聊、群、话题、评论、mention、文件和卡片动作统一成带寻址语义的对话输入 |
 | Profile | 绑定一个 PersonalAgent 应用、一个引擎、隔离的凭据 / 状态，以及默认或命名工作空间集合 |
 | Engine Plugin | 探测并启动本地 CLI，声明能力，流式输出，恢复兼容历史，并释放自己持有的资源 |
 | Turn Coordinator | 合并首批输入，维持 inbox 单一所有权，尝试合格实时追问，并可靠排队所有回退输入 |
@@ -59,7 +58,7 @@ Aria 把飞书 / Lark 变成本机编码 Agent 的交互入口。引擎、工具
 | Policy | 执行聊天访问、群聊寻址、工作空间校验、权限上限和身份边界，再允许任务运行 |
 | Distribution | 解析完整不可变 Release，校验元数据与字节，原子切换稳定 launcher，并在失败时回滚 |
 
-Agent 专属行为被限制在引擎契约之后。飞书 / Lark 路由、访问策略、协调器和
+Agent 专属行为被限制在引擎契约之后。渠道路由、访问策略、协调器和
 更新器不会围绕一个全局硬编码的“Fast”或“steering”开关分叉。
 
 <a id="runtime-flow"></a>
@@ -67,7 +66,7 @@ Agent 专属行为被限制在引擎契约之后。飞书 / Lark 路由、访问
 ## 运行流程
 
 ```text
-飞书 / Lark 中的人类用户
+聊天入口里的人类用户
         │
         ▼
 Channel 归一化 → 访问 + 寻址 → profile / session / workspace
@@ -113,8 +112,8 @@ Aria 的通用“加速开关”：只有 Codex App Server 为所选模型上报
 当前产品边界保持明确：
 
 - 一个本地主机拥有执行过程；Aria 不是托管式多租户 Agent 云；
-- 当前生产 Channel 是飞书 / Lark PersonalAgent，Channel 与 Engine Plugin
-  契约是后续扩展边界；
+- 飞书 / Lark PersonalAgent 内建并是当前生产 Channel；企业微信客服和外部
+  Channel Plugin 使用同一套 Channel 契约；
 - 多人群必须结构化 `@bot` 才能完成明确寻址；
 - 远端 freshness 历史查询有界；不可用或截断时 fail-open，不会因为历史故障
   静默丢掉最终答案；
@@ -324,7 +323,7 @@ Supervisor 重启会恢复明确要求运行的 profile，主动停止的保持�
 
 如果某个 profile 被建成了错误的 agent 类型，先 `stop` 或 `unregister --profile <name>` 清理对应后台服务，再 `profile remove <name>`，然后用正确的 `--agent` 重新创建。
 
-### 飞书内斜杠命令
+### 渠道内的斜杠命令
 
 | 命令 | 作用 |
 |---|---|
@@ -369,11 +368,12 @@ Codex Fast 使用动态模型能力探测：`/fast on` 开启，`/fast off` 显�
 
 开启 COT 后，bridge 会把过程消息和最终答案拆成两条消息。过程消息用于追踪 agent 做了什么；最终答案仍由 agent 原始文本生成，bridge 不做启发式过滤。若 agent 把最终答案也作为普通流式文本输出，COT 过程消息中可能会出现对应片段。
 
-## lark-cli 身份策略
+## 渠道工具
 
-每个 profile 都使用当前 profile 的 lark-cli 目录：`~/.aria/profiles/<profile>/lark-cli`。agent 子进程会收到指向这个目录的 `LARKSUITE_CLI_CONFIG_DIR`，所以一个 profile 里的个人授权不会共享给另一个 profile。
-
-默认策略是 `bot-only`：lark-cli 使用应用 / bot 身份，不访问个人资源。当用户为了日历、邮箱、云盘等个人资源完成授权后，当前 profile 可以切到 `user-default`，保留应用身份，同时允许已授权的用户身份。owner/admin 可以在 `/config` 查看或切换这个策略；`/status` 会用 `lark-cli: app` 或 `lark-cli: user-ready` 展示当前摘要。
+渠道专属的工具属于拥有它的那个渠道，不属于核心。对内置的飞书 / Lark
+渠道来说，就是当前 profile 的 `lark-cli` 目录、`LARKSUITE_CLI_CONFIG_DIR`，
+以及 `bot-only` / `user-default` 身份策略。详见
+[飞书 / Lark 渠道](docs/LARK_CHANNEL.md)。
 
 ## 工作目录
 
@@ -503,9 +503,10 @@ grep '"event":"enter"' ~/.aria/profiles/<profile>/logs/bridge-$(date +%Y%m%d).js
 
 每行都带 `chatId`（群 / 私聊 ID）和 `senderId`（用户 `open_id`）。手改完后**重启 bridge**，或在允许的 admin 上下文里发 `/reconnect` 让它生效。日常调整还是 `/invite` / `/config` 更省事，直接改文件主要用于部署脚本预填。
 
-## 云文档评论
+## 渠道专属界面
 
-云文档评论不再需要单独绑定工作目录或维护文档白名单。支持的文档评论里 @bot 后，bridge 会在同一个评论线程里回复。评论运行复用文档级 session key；没有记录过文档 cwd 时回退到用户 home 目录。
+云文档评论、卡片动作等渠道专属界面，跟随所属渠道文档。详见
+[飞书 / Lark 渠道](docs/LARK_CHANNEL.md)。
 
 ## 常见问题
 
@@ -531,6 +532,7 @@ grep '"event":"enter"' ~/.aria/profiles/<profile>/logs/bridge-$(date +%Y%m%d).js
 | Grok Agent stdio、ACP 会话和直接 steering | [Grok Agent stdio 运行时](docs/GROK_AGENT_STDIO.md) |
 | 内置与外部引擎契约 | [Engine Plugin](docs/PLUGINS.md) |
 | 多通道插件、生命周期、隔离和渐进式交付 | [通道平台架构](docs/CHANNEL_PLATFORM_ARCHITECTURE.md) |
+| 飞书 / Lark 渠道、它的工具身份策略和云文档评论 | [飞书 / Lark 渠道](docs/LARK_CHANNEL.md) |
 | 版本化通道包/运行时契约和测试工具 | [Channel Plugin ABI v1](docs/CHANNEL_PLUGIN_ABI_V1.md) |
 | 定时运行、提醒、未来触发源和结果路由 | [触发平台架构](docs/TRIGGER_PLATFORM_ARCHITECTURE.md) |
 | 私有 Release 安装、更新事务、稳定 launcher 与回滚 | [CLI 分发架构](docs/DISTRIBUTION.md) |

@@ -3,25 +3,25 @@
 **English** | [简体中文](./README.zh.md)
 
 [![Focus](https://img.shields.io/badge/focus-local--first%20agent%20control-7C5CFC?style=flat-square&labelColor=171717)](#why-aria)
-[![Channel](https://img.shields.io/badge/channel-Feishu%20%7C%20Lark-00D6B9?style=flat-square&labelColor=171717)](#runtime-flow)
+[![Channels](https://img.shields.io/badge/channels-pluggable-00D6B9?style=flat-square&labelColor=171717)](#runtime-flow)
 [![Platforms](https://img.shields.io/badge/platforms-Windows%20%7C%20macOS%20%7C%20Linux-55DDE0?style=flat-square&labelColor=171717)](#supported-scope)
 [![Distribution](https://img.shields.io/badge/distribution-immutable%20GitHub%20Releases-F3B61F?style=flat-square&labelColor=171717)](#install)
 
-**A local-first control plane for coding agents in Feishu / Lark.**
+**A local-first control plane for coding agents. Chat is the remote control, not
+the compute plane.**
 
-Aria turns Feishu / Lark into the interaction surface for coding agents that run
-on your own machine. The engine, tools, files, and credentials stay local;
+Aria turns a chat surface into the interaction surface for coding agents that
+run on your own machine. The engine, tools, files, and credentials stay local;
 Aria owns message addressing, access control, profiles, sessions, workspaces,
 streaming delivery, turn coordination, background services, and safe version
-lifecycle operations.
+lifecycle operations. Channels are pluggable: Lark / Feishu ships built in, and
+the channel plugin ABI is the extension boundary.
 
 The sharp product contract is:
 
-> Send an addressed task from Feishu / Lark, route it to the correct local
-> agent and workspace, incorporate eligible follow-ups without losing queued
-> input, and publish the terminal answer only while it is still fresh.
-
-For a product walkthrough, see the [Feishu document](https://larkcommunity.feishu.cn/docx/OaRIdFIRFoLM3xxTmKwcetHqn5e).
+> Send an addressed task from chat, route it to the correct local agent and
+> workspace, incorporate eligible follow-ups without losing queued input, and
+> publish the terminal answer only while it is still fresh.
 
 [Why Aria](#why-aria) | [Product contract](#product-contract) |
 [Runtime flow](#runtime-flow) | [Supported scope](#supported-scope) |
@@ -42,7 +42,7 @@ For a product walkthrough, see the [Feishu document](https://larkcommunity.feish
   disappearing.
 - **Conversation isolation:** each chat, topic, or document-comment thread has
   an independent session, while profiles isolate app credentials, agent state,
-  workspaces, logs, and lark-cli identity.
+  workspaces, logs, and channel tool identity.
 - **Observable delivery:** streaming cards, optional COT process messages,
   tool blocks, run status, and terminal freshness checks make the remote run
   understandable without pretending provisional output is final.
@@ -58,7 +58,7 @@ These are stable product surfaces, not agent-specific shortcuts:
 
 | Surface | Contract |
 | --- | --- |
-| Feishu / Lark channel | Normalize DMs, groups, topics, comments, mentions, files, and card actions into addressed conversation input |
+| Channel | Normalize a channel's direct messages, groups, topics, comments, mentions, files, and card actions into addressed conversation input |
 | Profile | Bind one PersonalAgent app, one engine, isolated credentials/state, and a default or named workspace set |
 | Engine plugin | Probe and start a local CLI, advertise capabilities, stream events, resume compatible history, and dispose owned resources |
 | Turn coordinator | Batch initial input, preserve one-owner inbox semantics, offer eligible live follow-ups, and safely queue every fallback |
@@ -66,14 +66,14 @@ These are stable product surfaces, not agent-specific shortcuts:
 | Policy | Apply chat access, group addressing, workspace validation, permission ceilings, and identity boundaries before execution |
 | Distribution | Resolve complete immutable releases, verify metadata and bytes, switch a stable launcher atomically, and roll back failed updates |
 
-Engine-specific behavior stays behind the engine contract. Feishu / Lark
-routing, access policy, coordination, and the updater do not branch on a
-hard-coded global “Fast” or “steering” switch.
+Engine-specific behavior stays behind the engine contract. Channel routing,
+access policy, coordination, and the updater do not branch on a hard-coded
+global “Fast” or “steering” switch.
 
 ## Runtime Flow
 
 ```text
-human in Feishu / Lark
+human in chat
         │
         ▼
 channel normalization → access + addressing → profile / session / workspace
@@ -118,8 +118,9 @@ tier for the selected model.
 The current product boundary is deliberately explicit:
 
 - one local host owns execution; Aria is not a hosted multi-tenant agent cloud;
-- Feishu / Lark PersonalAgent is the production channel today, with channel and
-  engine plugin contracts as the extension boundaries;
+- Lark / Feishu PersonalAgent ships built in and is the production channel
+  today; WeChat Customer Service and external channel plugins use the same
+  channel contracts;
 - multi-person groups require a structured `@bot` for unambiguous addressing;
 - remote freshness history is bounded and fails open when unavailable or
   truncated, so history failure never silently discards a terminal answer;
@@ -336,7 +337,7 @@ running-intent record, only the active profile starts, preserving prior behavior
 
 If a profile was created with the wrong agent kind, stop or unregister any matching background service first, then run `profile remove <name>` and recreate it with the intended `--agent`.
 
-### Slash commands inside Feishu / Lark
+### Slash commands in a channel
 
 | Command | Effect |
 |---|---|
@@ -381,11 +382,12 @@ Before publishing a terminal reply, Aria also checks the local inbox and a bound
 
 When COT is enabled, the bridge splits the process view and final answer into two messages. The COT message is for tracing what the agent did; the final answer is still generated from the agent's raw text, without heuristic bridge-side filtering. If an agent emits final-answer text as ordinary stream text, that text can also appear in the COT process message. Detailed mode may expose sensitive values present in tool arguments or output, so select `brief` or `off` for chats where that visibility is inappropriate.
 
-## lark-cli identity policy
+## Channel tooling
 
-Each profile uses a profile-local lark-cli directory at `~/.aria/profiles/<profile>/lark-cli`. The agent process receives `LARKSUITE_CLI_CONFIG_DIR` for that directory, so personal authorization in one profile is not shared with another profile.
-
-The default policy is `bot-only`: lark-cli uses the app/bot identity and does not access personal resources. When a user authorizes personal resources such as calendar, mail, or drive, the current profile can switch to `user-default`, which keeps app identity available and also allows the authorized user identity. Owner/admin users can inspect or change this policy in `/config`; `/status` shows the current summary as `lark-cli: app` or `lark-cli: user-ready`.
+Channel-specific tooling belongs to the channel that owns it, not to the core.
+For the built-in Lark / Feishu channel that means the profile-local `lark-cli`
+directory, `LARKSUITE_CLI_CONFIG_DIR`, and the `bot-only` / `user-default`
+identity policy. See the [Lark / Feishu channel](docs/LARK_CHANNEL.md).
 
 ## Working directories
 
@@ -516,9 +518,11 @@ grep '"event":"enter"' ~/.aria/profiles/<profile>/logs/bridge-$(date +%Y%m%d).js
 
 Each line carries `chatId` (group / DM id) and `senderId` (user `open_id`). After a manual edit, **restart the bridge** or send `/reconnect` from an allowed admin context to apply it. For day-to-day tweaks `/invite` / `/config` are easier; direct edits are mainly for deployment scripts that pre-seed access.
 
-## Cloud-doc comments
+## Channel-specific surfaces
 
-Cloud-doc comments do not need a separate workspace binding or document allowlist. In supported document comments, mention the bot and the bridge replies in the same thread. Comment runs reuse the document session key and fall back to the user home directory when no document cwd was previously recorded.
+Document comments, card actions, and other channel-owned surfaces are
+documented with their channel. See the
+[Lark / Feishu channel](docs/LARK_CHANNEL.md).
 
 ## FAQ
 
@@ -545,6 +549,7 @@ legacy global command as a rollback baseline; it does not delete it.
 | Grok Agent stdio, ACP sessions, and direct steering | [Grok Agent stdio runtime](docs/GROK_AGENT_STDIO.md) |
 | Built-in and external engine contracts | [Engine plugins](docs/PLUGINS.md) |
 | Multi-channel plugins, lifecycle, isolation, and progressive delivery | [Channel platform architecture](docs/CHANNEL_PLATFORM_ARCHITECTURE.md) |
+| Lark / Feishu channel, its tool identity policy, and document comments | [Lark / Feishu channel](docs/LARK_CHANNEL.md) |
 | Stored channel instances and reversible schema v2→v3 migration | [Channel profile schema v3](docs/CHANNEL_SCHEMA_V3.md) |
 | Versioned channel package/runtime contract and test kit | [Channel Plugin ABI v1](docs/CHANNEL_PLUGIN_ABI_V1.md) |
 | Scheduled runs, reminders, future trigger sources, and result routing | [Trigger platform architecture](docs/TRIGGER_PLATFORM_ARCHITECTURE.md) |

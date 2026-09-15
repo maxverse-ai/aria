@@ -1,7 +1,7 @@
 {
   "name": "@maxverse-ai/aria",
   "version": "0.3.0",
-  "description": "Aria — where your local agent team gathers in Feishu/Lark",
+  "description": "A local-first control plane for running your CLI coding agents as a team in chat",
   "type": "module",
   "packageManager": "pnpm@12.0.0",
   "publishConfig": {
@@ -102,8 +102,9 @@
   "keywords": [
     "aria",
     "agents",
-    "feishu",
-    "lark",
+    "coding-agents",
+    "control-plane",
+    "self-hosted",
     "claude",
     "claude-code",
     "codex",
