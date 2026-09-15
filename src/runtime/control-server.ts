@@ -19,6 +19,7 @@ export interface RuntimeControlServerOptions {
   endpoint: string;
   sidecarFile: string;
   snapshot(): RuntimeActivitySnapshotV1;
+  transition?: { drain(timeoutMs: number): Promise<void>; resume(): void };
   now?: () => Date;
 }
 
@@ -100,7 +101,7 @@ function receiveRequest(socket: Socket, options: RuntimeControlServerOptions, to
       writeResponse(socket, errorResponse('UNAUTHORIZED', 'invalid control token'));
       return;
     }
-    if (request.schemaVersion !== RUNTIME_CONTROL_PROTOCOL_VERSION || request.method !== 'restart.preflight') {
+    if (request.schemaVersion !== RUNTIME_CONTROL_PROTOCOL_VERSION || !['restart.preflight', 'transition.drain', 'transition.resume'].includes(request.method)) {
       writeResponse(socket, errorResponse('INVALID_REQUEST', 'unsupported control request'));
       return;
     }
@@ -108,17 +109,25 @@ function receiveRequest(socket: Socket, options: RuntimeControlServerOptions, to
       writeResponse(socket, errorResponse('PROFILE_MISMATCH', 'profile does not match endpoint'));
       return;
     }
-    writeResponse(socket, {
-      schemaVersion: RUNTIME_CONTROL_PROTOCOL_VERSION,
-      ok: true,
-      result: options.snapshot(),
-    });
+    void (async () => {
+      if (request.method !== 'restart.preflight') {
+        if (!options.transition) throw new Error('runtime transition control is unavailable');
+        if (request.method === 'transition.resume') options.transition.resume();
+        else {
+          const timeout = request.timeoutMs ?? 60_000;
+          if (!Number.isSafeInteger(timeout) || timeout < 1000 || timeout > 300_000) throw new Error('invalid transition timeout');
+          await options.transition.drain(timeout);
+        }
+      }
+      writeResponse(socket, { schemaVersion: RUNTIME_CONTROL_PROTOCOL_VERSION, ok: true, result: options.snapshot() });
+    })().catch(error => writeResponse(socket, errorResponse('INVALID_REQUEST', error instanceof Error ? error.message : 'runtime transition failed')));
   });
 }
 
 function validToken(actual: unknown, expected: string): boolean {
-  if (typeof actual !== 'string' || actual.length !== expected.length) return false;
-  return timingSafeEqual(Buffer.from(actual), Buffer.from(expected));
+  if (typeof actual !== 'string') return false;
+  const left = Buffer.from(actual), right = Buffer.from(expected);
+  return left.length === right.length && timingSafeEqual(left, right);
 }
 
 function errorResponse(

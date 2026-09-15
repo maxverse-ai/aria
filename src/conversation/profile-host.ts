@@ -1,7 +1,15 @@
+import { snapshotParticipantIdentity, type ParticipantIdentity } from './participant-identity';
+import { resolveExecutionProfile } from '../runtime/execution-profile';
+import { composeProfileExecution } from './composition';
+import type { ExecutionSpaceServices } from '../space/services';
+import type { AuthorizedSpaceContext } from '../space/authorization';
+import type { SpaceStateView } from '../space/state';
 import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { capabilityFor, loadExternalEnginePlugins } from '../agent/plugin/registry';
+import type { EngineRuntimeDescriptor } from '../agent/runtime/types';
 import type { AgentEvent } from '../agent/types';
+import { ProfileRuntimeSlot } from '../runtime/profile-runtime-slot';
 import { resolveAppPaths } from '../config/app-paths';
 import { getAgentStopGraceMs, getMaxConcurrentRuns } from '../config/schema';
 import { log } from '../core/logger';
@@ -15,6 +23,7 @@ import {
   checkRuntimeAgentAvailability,
   createProfileEngineRuntime,
 } from '../runtime/agent-runtime';
+import { resolveWorkerProfile } from '../worker/profile-config';
 import { resolveProfileRuntime } from '../runtime/profile-runtime';
 import type {
   NativeReadProfileRuntime,
@@ -34,6 +43,10 @@ export interface ProfileConversationNativeReadOptions {
 }
 
 export interface CreateProfileConversationHostOptions {
+  /** Deployment-owned self identity; never taken from user message JSON. */
+  identity?: ParticipantIdentity;
+  spaces?: ExecutionSpaceServices;
+  spaceProfile?: import('../space/profile').PreparedSpaceProfile;
   configPath: string;
   profile: string;
   stateDirectory: string;
@@ -41,6 +54,9 @@ export interface CreateProfileConversationHostOptions {
 }
 
 export interface ProfileTextConversationInput {
+  /** Opaque handle issued by a trusted source adapter, never by worker JSON. */
+  spaceContext?: AuthorizedSpaceContext;
+  actorKind?: 'user' | 'service' | 'agent';
   scopeId: string;
   actorId: string;
   prompt: string;
@@ -55,6 +71,8 @@ export interface ProfileTextConversationInput {
 
 export interface ProfileConversationInput extends ProfileTextConversationInput {
   attachments: AgentAttachment[];
+  /** Observe engine events without taking ownership of the run lifecycle. */
+  onEvent?: (event: AgentEvent) => void | Promise<void>;
 }
 
 export type ProfileTextConversationResult =
@@ -67,12 +85,15 @@ export interface ProfileConversationResetResult {
 }
 
 export interface ProfileConversationHost {
+  readonly requiresSpaceAuthorization?: boolean;
+  /** Explicit engine capabilities exposed to channel-neutral controllers. */
+  readonly descriptor: EngineRuntimeDescriptor;
   run(input: ProfileConversationInput): Promise<ProfileTextConversationResult>;
   runText(input: ProfileTextConversationInput): Promise<ProfileTextConversationResult>;
   /** Stop the run currently owned by this scope, if one exists. */
-  interrupt(scopeId: string): Promise<boolean>;
+  interrupt(scopeId: string, context?: AuthorizedSpaceContext): Promise<boolean>;
   /** Stop the current run and archive all resumable state for a fresh conversation. */
-  reset(scopeId: string): Promise<ProfileConversationResetResult>;
+  reset(scopeId: string, context?: AuthorizedSpaceContext): Promise<ProfileConversationResetResult>;
   close(): Promise<void>;
 }
 
@@ -98,6 +119,11 @@ const PROFILE_CONVERSATION_SETTLE_TIMEOUT_MS = 10_000;
 export async function createProfileConversationHost(
   options: CreateProfileConversationHostOptions,
 ): Promise<ProfileConversationHost> {
+  const identity = snapshotParticipantIdentity(options.identity);
+  if (options.spaceProfile) {
+    if (options.spaces && options.spaces !== options.spaceProfile.services) throw new Error('conversation and read services must share one space authority');
+    options = { ...options, spaces: options.spaceProfile.services };
+  }
   if (!options.configPath) throw new Error('profile conversation configPath is required');
   if (!options.profile) throw new Error('profile conversation profile is required');
   if (!options.stateDirectory) {
@@ -107,11 +133,14 @@ export async function createProfileConversationHost(
     throw new Error('profile conversation native read profile and rootDirectory are required');
   }
 
-  const resolved = await resolveProfileRuntime({
+  const standalone = await resolveWorkerProfile(options.configPath, options.profile);
+  const executionProfile = standalone ?? await resolveExecutionProfile(options.configPath, options.profile);
+  const resolved = executionProfile ?? await resolveProfileRuntime({
     config: options.configPath,
     profile: options.profile,
     allowBootstrap: false,
   });
+  if (resolved.profileConfig.executionSpaces && !options.spaces) throw new Error('prepared profile requires an authenticated space host');
   await loadExternalEnginePlugins(resolved.profileConfig.plugins ?? [], resolved.appPaths);
   await mkdir(options.stateDirectory, { recursive: true, mode: 0o700 });
 
@@ -122,13 +151,16 @@ export async function createProfileConversationHost(
   await Promise.all([sessions.load(), sessionCatalog.load(), sessionResets.load(), workspaces.load()]);
 
   const engine = createProfileEngineRuntime(resolved.profileConfig, {
-    ...resolved.appPaths,
-    configPath: resolved.configPath,
+    ...(executionProfile ? { profileDir: options.stateDirectory } : resolved.appPaths),
+    ...(executionProfile ? {} : { configPath: resolved.configPath }),
   });
   let nativeRead: NativeReadProfileRuntime | undefined;
   try {
-    const availability = await checkRuntimeAgentAvailability(engine.execution);
-    if (!availability.ok) throw availability.error;
+    if (!options.spaces) {
+      const availability = await checkRuntimeAgentAvailability(engine.execution);
+      if (!availability.ok) throw availability.error;
+    }
+    if (options.nativeRead && options.spaces && !options.spaceProfile) throw new Error('team Native Read requires its prepared space profile');
     if (options.nativeRead) {
       const appPaths = resolveAppPaths({
         rootDir: options.nativeRead.rootDirectory,
@@ -138,7 +170,9 @@ export async function createProfileConversationHost(
         profile: options.nativeRead.profile,
         appPaths,
         sessionCatalog,
+        ...(options.spaceProfile ? { spaces: options.spaceProfile } : {}),
       });
+      if (options.spaces && nativeRead.scope !== 'space') throw new Error('team Native Read requires a space-bound runtime');
       await nativeRead.start();
     }
   } catch (error) {
@@ -151,9 +185,12 @@ export async function createProfileConversationHost(
     resolved.profileConfig.agentKind,
     resolved.profileConfig,
   );
-  const conversationRuntime = new ProfileConversationRuntimeOwner({
+  const runtimeProvider = new ProfileRuntimeSlot(engine);
+  const conversationRuntime = composeProfileExecution({
+    ...(options.spaces ? { spaces: options.spaces } : {}),
     profileId: options.profile,
     agent: engine.execution,
+    runtimeProvider,
     sessions,
     sessionCatalog,
     workspaces,
@@ -167,11 +204,11 @@ export async function createProfileConversationHost(
   const preparingConversations = new Map<string, PreparingProfileConversation>();
   const resetOperations = new Map<string, Promise<ProfileConversationResetResult>>();
 
-  const interruptScope = async (scopeId: string): Promise<boolean> => {
+  const interruptScope = async (scopeId: string, context?: AuthorizedSpaceContext): Promise<boolean> => {
     assertScopeId(scopeId);
     if (closed) throw new Error('profile conversation host is closed');
     const active = activeConversations.get(scopeId);
-    if (!active) return conversations.interrupt(scopeId);
+    if (!active) return conversations.interrupt(scopeId, context);
     await active.execution.stop();
     const settled = await waitForSettlement(
       active.settled,
@@ -181,7 +218,10 @@ export async function createProfileConversationHost(
     return true;
   };
 
-  const prepareFreshScope = async (scopeId: string): Promise<number> => {
+  const prepareFreshScope = async (scopeId: string, stores?: SpaceStateView): Promise<number> => {
+    const sessionResets = stores?.resets ?? legacyResets;
+    const sessionCatalog = stores?.sessionCatalog ?? legacyCatalog;
+    const sessions = stores?.sessions ?? legacySessions;
     const state = sessionResets.state(scopeId);
     if (!state.forceFresh) return state.generation;
     sessionCatalog.archiveScope({ scopeId, now: Date.now() });
@@ -190,9 +230,28 @@ export async function createProfileConversationHost(
     return state.generation;
   };
 
+  const legacyResets = sessionResets, legacyCatalog = sessionCatalog, legacySessions = sessions;
+  const scopedInput = async (scopeId: string, context?: AuthorizedSpaceContext) => {
+    if (!options.spaces) { if (context) throw new Error('space context requires a team host'); return undefined; }
+    if (!context) throw new Error('trusted space authorization is required');
+    options.spaces.scope(context, scopeId);
+    return options.spaces.state.view(context);
+  };
+
   const host: ProfileConversationHost = {
+    requiresSpaceAuthorization: Boolean(options.spaces),
+    descriptor: engine.descriptor,
     async run(input) {
       if (closed) throw new Error('profile conversation host is closed');
+      const stores = await scopedInput(input.scopeId, input.spaceContext);
+      if (options.spaces && input.spaceContext) {
+        const snapshot = options.spaces.authorization.inspect(input.spaceContext);
+        if (snapshot.principal.subjectId !== input.actorId || snapshot.principal.kind !== (input.actorKind ?? 'user')) throw new Error('conversation principal mismatch');
+        input = { ...input, scopeId: snapshot.executionScope };
+      }
+      const sessions = stores?.sessions ?? legacySessions;
+      const sessionCatalog = stores?.sessionCatalog ?? legacyCatalog;
+      const sessionResets = stores?.resets ?? legacyResets;
       const hasAcceptedAttachment = input.attachments.some(
         (attachment) => attachment.decision === 'accepted',
       );
@@ -205,7 +264,7 @@ export async function createProfileConversationHost(
       const reset = resetOperations.get(input.scopeId);
       if (reset) await reset;
       if (closed) throw new Error('profile conversation host is closed');
-      const generation = await prepareFreshScope(input.scopeId);
+      const generation = await prepareFreshScope(input.scopeId, stores);
       const access: AccessDecision = input.authorized
         ? { ok: true, reason: 'allowed-team' }
         : { ok: false, reason: 'denied-user' };
@@ -218,10 +277,13 @@ export async function createProfileConversationHost(
       let flow: Awaited<ReturnType<ConversationRuntime['start']>>;
       try {
         flow = await conversations.start({
+          identity,
+          ...(input.spaceContext ? { spaceContext: input.spaceContext } : {}),
           scopeId: input.scopeId,
           scope: {
             source: input.source ?? 'channel:external',
             actorId: input.actorId,
+            actorKind: input.actorKind === 'service' ? 'system' : input.actorKind ?? 'user',
           },
           prompt: input.prompt,
           attachments: input.attachments,
@@ -329,6 +391,8 @@ export async function createProfileConversationHost(
             policy: flow.policy,
             event,
           });
+          if (options.spaces && input.spaceContext) options.spaces.authorization.inspect(input.spaceContext);
+          await input.onEvent?.(event);
           const observedSessionId = agentSessionId(capability.sessionKind, event);
           if (observedSessionId && observedSessionId !== sourceSessionId) {
             sourceSessionId = observedSessionId;
@@ -367,6 +431,7 @@ export async function createProfileConversationHost(
             logNativeReadFailure('session-refresh-failed', error),
           );
         }
+        if (options.spaces && input.spaceContext) options.spaces.authorization.inspect(input.spaceContext);
         return {
           ok: true,
           runId: flow.execution.runId,
@@ -382,10 +447,17 @@ export async function createProfileConversationHost(
     runText(input) {
       return host.run({ ...input, attachments: [] });
     },
-    interrupt(scopeId) {
-      return interruptScope(scopeId);
+    async interrupt(scopeId, context) {
+      await scopedInput(scopeId, context);
+      const effective = options.spaces && context ? options.spaces.scope(context, scopeId) : scopeId;
+      return interruptScope(effective, context);
     },
-    reset(scopeId) {
+    async reset(scopeId, context) {
+      const stores = await scopedInput(scopeId, context);
+      const sessions = stores?.sessions ?? legacySessions;
+      const sessionCatalog = stores?.sessionCatalog ?? legacyCatalog;
+      const sessionResets = stores?.resets ?? legacyResets;
+      if (options.spaces && context) scopeId = options.spaces.scope(context, scopeId);
       assertScopeId(scopeId);
       if (closed) throw new Error('profile conversation host is closed');
       const current = resetOperations.get(scopeId);
@@ -394,7 +466,7 @@ export async function createProfileConversationHost(
       const operation = (async (): Promise<ProfileConversationResetResult> => {
         sessionResets.markFresh(scopeId, Date.now());
         await sessionResets.flush();
-        let interrupted = await interruptScope(scopeId);
+        let interrupted = await interruptScope(scopeId, context);
         const preparation = preparationAtReset ?? preparingConversations.get(scopeId);
         if (preparation) {
           const settled = await waitForSettlement(
@@ -406,7 +478,7 @@ export async function createProfileConversationHost(
           }
           interrupted = true;
         }
-        interrupted = await interruptScope(scopeId) || interrupted;
+        interrupted = await interruptScope(scopeId, context) || interrupted;
         const archivedSessionCount = sessionCatalog.archiveScope({
           scopeId,
           now: Date.now(),
@@ -440,7 +512,7 @@ export async function createProfileConversationHost(
       await nativeRead?.stop().catch((error) =>
         logNativeReadFailure('stop-failed', error),
       );
-      await engine.dispose().catch((error) => {
+      await runtimeProvider.dispose().catch((error) => {
         closeError ??= error;
       });
       if (closeError) throw closeError;

@@ -1,6 +1,7 @@
 import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { generateKeyPairSync } from 'node:crypto';
 import { afterEach, describe, expect, it } from 'vitest';
 import { resolveAppPaths } from '../../../src/config/app-paths';
 import { SessionCatalog } from '../../../src/session/catalog';
@@ -13,6 +14,20 @@ afterEach(async () => {
 });
 
 describe('nativeReadFactoryFromEnvironment', () => {
+  it('requires a public Ed25519 verification key and explicit profile allowlist; never accepts a signing secret', async () => {
+    const root = await tempRoot(); const tokenFile = await privateToken(root);
+    const managementFile = join(root, 'management');
+    const keys = generateKeyPairSync('ed25519');
+    await writeFile(managementFile, keys.publicKey.export({ format: 'pem', type: 'spki' }), { mode: 0o444 });
+    const env = { ...enabledEnvironment(tokenFile), ARIA_NATIVE_READ_MANAGEMENT_PUBLIC_KEY_FILE: managementFile };
+    await expect(nativeReadFactoryFromEnvironment({ rootDir: root, env })).rejects.toThrow('allowlist');
+    const allowed = { ...env, ARIA_NATIVE_READ_MANAGEMENT_PROFILES: 'codex' };
+    expect(await nativeReadFactoryFromEnvironment({ rootDir: root, env: allowed })).toBeTypeOf('function');
+    await chmod(managementFile, 0o600);
+    await writeFile(managementFile, keys.privateKey.export({ format:'pem',type:'pkcs8' }));
+    await expect(nativeReadFactoryFromEnvironment({ rootDir: root, env: allowed })).rejects.toThrow('never a private key');
+    await expect(nativeReadFactoryFromEnvironment({ rootDir: root, env: { ...allowed, ARIA_NATIVE_READ_MANAGEMENT_PUBLIC_KEY_FILE: join(root, 'absent') } })).rejects.toThrow('management public key file unavailable');
+  });
   it('keeps the runtime disabled unless explicitly enabled', async () => {
     const factory = await nativeReadFactoryFromEnvironment({
       rootDir: '/not/read', serverVersion: 'test', env: {},

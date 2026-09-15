@@ -4,6 +4,7 @@ export type RestartBlockerCode =
   | 'ACTIVE_RUNS'
   | 'PREPARING_RUNS'
   | 'PENDING_MESSAGES'
+  | 'BLOCKED_SCOPES'
   | 'OUTBOUND_IN_FLIGHT'
   | 'STREAMING_REPLIES'
   | 'ACTIVE_MEETINGS';
@@ -33,6 +34,7 @@ export interface RuntimeActivityProvider {
 }
 
 export interface RuntimeActivitySnapshotV1 {
+  presentation?: import('../outbound/presentation').PresentationState;
   schemaVersion: 1;
   profile: string;
   instanceId: string;
@@ -84,6 +86,7 @@ export class RuntimeActivityTracker {
     addBlocker(blockers, 'ACTIVE_RUNS', total.activeRuns);
     addBlocker(blockers, 'PREPARING_RUNS', total.preparingRuns);
     addBlocker(blockers, 'PENDING_MESSAGES', total.pendingMessages);
+    addBlocker(blockers, 'BLOCKED_SCOPES', total.blockedScopes);
     addBlocker(blockers, 'OUTBOUND_IN_FLIGHT', total.outboundInFlight);
     addBlocker(blockers, 'STREAMING_REPLIES', total.streamingReplies);
     addBlocker(blockers, 'ACTIVE_MEETINGS', total.activeMeetings);

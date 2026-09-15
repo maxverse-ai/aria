@@ -7,6 +7,8 @@ import {
   type TrustedExternalChannelPlugin,
 } from '../channel/plugin/loader';
 import { ChannelPluginRegistry } from '../channel/plugin/registry';
+import type { PreparedSpaceProfile } from '../space/profile';
+import type { ExecutionSpaceServices } from '../space/services';
 import type {
   ChannelIngressPort,
   ResolvedChannelInstance,
@@ -17,6 +19,8 @@ export interface ExternalChannelPluginComposition {
   trustedPackages: readonly TrustedExternalChannelPlugin[];
   /** Converts normalized provider ingress into a core-owned durable acceptance. */
   createIngress(input: { profileId: string }): ChannelIngressPort;
+  /** Explicit companion for prepared spaces; never fall back to legacy ingress. */
+  createSpaceIngress?(input: { profileId: string; spaces: PreparedSpaceProfile; instance: ResolvedChannelInstance }): ChannelIngressPort & { spaceAuthority: ExecutionSpaceServices };
   /** Injectable installed-package boundary for tests and embedded deployments. */
   source?: ExternalChannelPluginPackageSource;
 }
@@ -26,6 +30,7 @@ export interface StartProfileExternalChannelRuntimeOptions {
   requests: readonly ExternalChannelPluginRequest[];
   instances: readonly ResolvedChannelInstance[];
   composition: ExternalChannelPluginComposition;
+  spaces?: PreparedSpaceProfile;
 }
 
 export interface ProfileExternalChannelRuntimeSnapshot {
@@ -61,10 +66,12 @@ export async function startProfileExternalChannelRuntime(
     const loadedPluginIds = new Set(loaded.map((entry) => entry.pluginId));
     const plans = options.instances
       .filter((instance) => instance.enabled && loadedPluginIds.has(instance.pluginId))
-      .map((instance) => ({
-        instance,
-        ingress: options.composition.createIngress({ profileId: options.profileId }),
-      }));
+      .map((instance) => {
+        if (!options.spaces) return { instance, ingress: options.composition.createIngress({ profileId: options.profileId }) };
+        const ingress = options.composition.createSpaceIngress?.({ profileId: options.profileId, spaces: options.spaces, instance });
+        if (!ingress || ingress.spaceAuthority !== options.spaces.services) throw new Error('external channel requires its prepared space ingress authority');
+        return { instance, ingress };
+      });
     await manager.start(plans);
     return createHandle(options.profileId, manager, loader);
   } catch (error) {

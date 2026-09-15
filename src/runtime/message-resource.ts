@@ -10,7 +10,11 @@ export interface MessageResourceEvent {
   occurredAt: string;
   actorSourceId?: string;
   actorKind?: MessageActorKind;
+  /** Channel-provided display snapshot; never used as identity or authority. */
+  actorDisplayName?: string;
   conversationKind?: MessageConversationKind;
+  /** Trusted channel metadata, never an authorization or a conversation key. */
+  conversationName?: string;
   content: {
     format: 'plain-text' | 'markdown' | 'structured' | 'unavailable';
     text?: string;
@@ -32,6 +36,8 @@ export interface MessageSessionBinding {
 }
 
 export interface MessageResourceSink {
+  /** Composition-owned capability. Space intake never uses an ambient sink. */
+  readonly scope?: 'space';
   observe(event: MessageResourceEvent): Promise<void>;
   bind(binding: MessageSessionBinding): Promise<void>;
   remove(sourceMessageId: string, occurredAt: string): Promise<void>;

@@ -1,3 +1,13 @@
+import { PersonalGroupPeers } from '../bot/personal-agent-group';
+import { ProfileRunIntentStore } from './profile-run-intent';
+import { createLarkSpaceGate } from '../bot/space-context';
+import { requireEnginePlugin } from '../agent/plugin/registry';
+import { runtimeQueries } from '../agent/runtime/queries';
+import type { PreparedSpaceProfile } from '../space/profile';
+import { createSelectedSpaceProfile } from '../space/selected-profile';
+import { pendingSpaceTransition } from '../space/transition';
+import { executionSpaceFingerprint } from '../config/execution-spaces';
+import { composeProfileExecution } from '../conversation/composition';
 import { randomUUID } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
@@ -123,10 +133,17 @@ import {
   type ControlActorContext,
   type RuntimeReconcileRequest,
 } from '../application/control';
+import { FileTaskStore } from '../task/file-store';
+import { TaskCoordinator } from '../task/coordinator';
+import type { TaskStore } from '../task/types';
 
 type StartChannelFn = typeof realStartChannel;
 
 export interface SupervisorOptions {
+  /** Classic single-profile hosts must not change the global Supervisor intent. */
+  persistRunningIntent?: boolean;
+  /** Internal opt-in composition; mode migration/activation has its own workflow. */
+  createExecutionSpaces?: (input: { profileId: string; profileConfig: ProfileConfig; appPaths: AppPaths }) => Promise<PreparedSpaceProfile>;
   /** Root config path (config.json). */
   configPath: string;
   /** LARK_CHANNEL_HOME root; undefined = default. */
@@ -202,12 +219,36 @@ class ManagedProfile {
     private triggerReminders?: ConversationReminderControl,
     private createNativeReadRuntime?: SupervisorOptions['createNativeReadRuntime'],
     private externalChannelPlugins?: SupervisorOptions['externalChannelPlugins'],
+    private taskStore?: TaskStore,
+    private taskCoordinator?: TaskCoordinator,
+    readonly spaces?: PreparedSpaceProfile,
   ) {
     this.runtimeSlot = new ProfileRuntimeSlot(engineRuntime);
   }
 
   get appId(): string {
     return this.cfg.accounts.app.id;
+  }
+  private transitionResume?: () => void;
+  private transitionIngressResume?: () => void;
+  async drainTransition(timeoutMs: number): Promise<void> {
+    if (!this.conversationRuntime) throw new Error('profile execution is unavailable');
+    // External durable ingress has its own drain contract. A composition must
+    // supply a coordinated transition owner before this path can stop it.
+    if (this.externalChannelRuntime) throw new Error('managed transition requires an external channel drain adapter');
+    this.transitionIngressResume ??= this.conversationRuntime.runtime.ingress.pause();
+    const deadline = Date.now() + timeoutMs;
+    // Admitted debounce batches and reservations must still reach the executor.
+    // Fence execution only after all ingress, queues and output have settled.
+    while (this.bridge.activitySnapshot().decision !== 'safe') {
+      if (Date.now() >= deadline) throw new Error('space transition is waiting for active work');
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    this.transitionResume ??= this.conversationRuntime.runtime.pauseNewRuns('space-transition');
+  }
+  resumeTransition(): void {
+    this.transitionResume?.(); this.transitionResume = undefined;
+    this.transitionIngressResume?.(); this.transitionIngressResume = undefined;
   }
 
   get botName(): string | undefined {
@@ -223,6 +264,14 @@ class ManagedProfile {
     this.locks = [];
     try {
       this.locks.push(await acquireProfileRuntimeLock(this.appPaths, this.profileConfig.agentKind));
+      const lockedProfile = (await loadRootConfig(this.configPath))?.profiles[this.profile];
+      if (this.spaces && !lockedProfile) throw new Error('prepared profile configuration disappeared during startup');
+      if (lockedProfile && (lockedProfile.mode !== this.profileConfig.mode
+        || lockedProfile.agentKind !== this.profileConfig.agentKind
+        || !isDeepStrictEqual(lockedProfile.executionSpaces, this.profileConfig.executionSpaces)
+        || (this.spaces && executionSpaceFingerprint(lockedProfile) !== executionSpaceFingerprint(this.profileConfig)))) {
+        throw new Error('profile execution configuration changed during startup');
+      }
       this.locks.push(
         await acquireAppRuntimeLock(this.appPaths, this.appId, this.profileConfig.agentKind),
       );
@@ -241,13 +290,17 @@ class ManagedProfile {
           profile: this.profile,
           appPaths: this.appPaths,
           sessionCatalog: this.sessionCatalog,
+          ...(this.spaces ? { spaces: this.spaces } : {}),
         });
+        if (this.spaces && nativeReadRuntime.scope !== 'space') throw new Error('team Native Read requires a space-bound runtime');
         this.nativeReadRuntime = nativeReadRuntime;
         await nativeReadRuntime.start();
       }
-      this.conversationRuntime = new ProfileConversationRuntimeOwner({
+      this.conversationRuntime = composeProfileExecution({
+        ...(this.spaces ? { spaces: this.spaces.services } : {}),
         profileId: this.profile,
         agent: this.runtimeSlot.execution,
+        runtimeProvider: this.runtimeSlot,
         sessions: this.sessions,
         sessionCatalog: this.sessionCatalog,
         workspaces: this.workspaces,
@@ -270,6 +323,11 @@ class ManagedProfile {
         this.cfg.accounts.app,
       );
       this.resolvedChannelInstances = resolvedChannelInstances;
+      // Profile start remains fenced after a transition process crash.
+      if (await pendingSpaceTransition(this.appPaths.profileDir)) {
+        this.transitionIngressResume = this.conversationRuntime.runtime.ingress.pause();
+        this.transitionResume = this.conversationRuntime.runtime.pauseNewRuns('space-transition-startup');
+      }
       this.larkChannelRuntime = await this.startLarkChannelRuntime({
         cfg: this.cfg,
         controls: this.controls,
@@ -294,6 +352,7 @@ class ManagedProfile {
         endpoint: this.appPaths.runtimeControlEndpoint,
         sidecarFile: this.appPaths.runtimeControlFile,
         snapshot: () => this.bridge.activitySnapshot(),
+        transition: { drain: timeout => this.drainTransition(timeout), resume: () => this.resumeTransition() },
       });
       const botName = this.bridge.channel.botIdentity?.name;
       if (botName) {
@@ -352,7 +411,7 @@ class ManagedProfile {
       log.warn('native-read', 'stop-failed', { profile: this.profile, err: String(err) }),
     );
     this.nativeReadRuntime = undefined;
-    await this.engineRuntime.dispose().catch((err) =>
+    await this.runtimeSlot.dispose().catch((err) =>
       log.warn('supervisor', 'engine-dispose-failed', { profile: this.profile, err: String(err) }),
     );
     if (this.entry) {
@@ -395,15 +454,19 @@ class ManagedProfile {
         code: 'profile-runtime-unavailable',
       });
     }
+    const authorized = await this.spaces?.authorizeIntent(intent);
+    const spaceContext = authorized?.operation.context;
     const capability = capabilityFor(this.profileConfig.agentKind, this.profileConfig);
-    const started = await owner.runtime.startIntent({
-      intent,
+    const start = () => owner.runtime.startIntent({
+      ...(spaceContext ? { spaceContext } : {}),
+      intent: spaceContext ? { ...intent, authorizationRef: this.spaces!.services.authorization.inspect(spaceContext).grantId } : intent,
       scopeId: intent.scopeRef,
       scope: {
         source: 'channel:trigger.schedule',
         actorId: intent.actor.actorRef,
+        actorKind: intent.actor.kind,
       },
-      access: { ok: true, reason: 'owner' },
+      access: { ok: true, reason: this.spaces ? 'allowed-team' : 'owner' },
       capability,
       profileConfig: this.profileConfig,
       resolvedAttachments: [],
@@ -414,12 +477,13 @@ class ManagedProfile {
         stage: 'trigger-dispatch',
       },
     });
+    const started = authorized ? await authorized.boundary.ledger.gate.run(authorized.operation, start) : await start();
     if (!started.ok) {
       throw Object.assign(new Error(started.rejectReason.userVisible), {
         code: started.rejectReason.code,
       });
     }
-    const completion = (async (): Promise<TriggerExecutionResult> => {
+    const complete = async (): Promise<TriggerExecutionResult> => {
       let terminal: TriggerExecutionResult | undefined;
       let finalText: string | undefined;
       for await (const event of started.execution.subscribe()) {
@@ -444,7 +508,8 @@ class ManagedProfile {
         }
       }
       return terminal ?? { status: 'failed', errorCode: 'agent-stream-ended' };
-    })();
+    };
+    const completion = authorized ? authorized.boundary.ledger.gate.run(authorized.operation, complete) : complete();
     return { runId: started.execution.runId, completion };
   }
 
@@ -453,7 +518,7 @@ class ManagedProfile {
     if (!manager) throw Object.assign(new Error('channel manager is unavailable'), {
       code: 'proactive-channel-unavailable',
     });
-    return manager.deliver(intent);
+    return this.spaces ? this.spaces.deliver(intent, () => manager.deliver(intent)) : manager.deliver(intent);
   }
 
   private startLarkChannelRuntime(input: {
@@ -476,6 +541,9 @@ class ManagedProfile {
       ...(this.nativeReadRuntime ? { messageRead: this.nativeReadRuntime.messageRead } : {}),
       ...(this.nativeReadRuntime ? { governanceAudit: this.nativeReadRuntime.governanceAudit } : {}),
       conversationRuntime: input.conversationRuntime,
+      ...(this.spaces ? { createSpaceGate: (channel) => createLarkSpaceGate(this.spaces!, channel, input.instance.instanceId, input.controls, input.appPaths) } : {}),
+      ...(this.taskStore ? { taskStore: this.taskStore } : {}),
+      ...(this.taskCoordinator ? { taskCoordinator: this.taskCoordinator } : {}),
     };
     return startProfileLarkChannelRuntime({
       profileId: this.profile,
@@ -496,6 +564,7 @@ class ManagedProfile {
       requests,
       instances,
       composition,
+      ...(this.spaces ? { spaces: this.spaces } : {}),
     });
   }
 
@@ -526,14 +595,30 @@ class ManagedProfile {
         await self.restart();
       },
       async switchAgent(targetAgentKind, actor) {
+        if (self.spaces) throw new Error('team engine changes require a prepared space transition');
         return self.switchAgent(targetAgentKind, actor);
       },
       async engineStatus() {
+        if (self.spaces) throw new Error('engine status requires a bound space operation');
         return self.runtimeSlot.statusSnapshot();
       },
       async engineModels(signal) {
+        if (self.spaces) throw new Error('engine models require a bound space operation');
         return self.runtimeSlot.listModels(signal);
       },
+      async engineHistory(cwd, limit) {
+        if (self.spaces) throw new Error('native history requires a bound space operation');
+        const lease = await self.runtimeSlot.acquire({ scopeId: 'native-history', purpose: 'query' });
+        try {
+          const query = runtimeQueries(lease.runtime).listHistory;
+          if (query) return query({ cwd, limit });
+          return await requireEnginePlugin(self.profileConfig.agentKind).listHistory?.({ cwd, limit, profileConfig: self.profileConfig, profileDir: self.appPaths.profileDir }) ?? [];
+        } finally { lease.release(); }
+      },
+      ...(self.spaces ? { issueSpaceReadAccess: async (conversationId?: string) => {
+        const gate = self.spaces!.activeGate();
+        return self.spaces!.readAccess.issueFromDirect(gate, gate.active(), conversationId);
+      } } : {}),
       engineGeneration() {
         return self.runtimeSlot.currentGeneration();
       },
@@ -613,8 +698,10 @@ class ManagedProfile {
         ...this.appPaths,
         configPath: this.configPath,
       });
-      const availability = await checkRuntimeAgentAvailability(nextEngineRuntime.execution);
-      if (!availability.ok) throw availability.error;
+      if (!this.spaces) {
+        const availability = await checkRuntimeAgentAvailability(nextEngineRuntime.execution);
+        if (!availability.ok) throw availability.error;
+      }
       log.info('agent-switch', 'candidate-ready', {
         profile: this.profile,
         to: targetAgentKind,
@@ -696,7 +783,7 @@ class ManagedProfile {
             channelReused: true,
             elapsedMs: Date.now() - switchStartedAt,
           });
-          await previousEngineRuntime.dispose().catch((err) =>
+          await this.runtimeSlot.disposeRuntime(previousEngineRuntime).catch((err) =>
             log.warn('supervisor', 'engine-dispose-failed', {
               profile: this.profile,
               err: String(err),
@@ -845,6 +932,9 @@ class ManagedProfile {
         profile: this.appPaths.profile,
         allowBootstrap: false,
       });
+      if (this.spaces && (executionSpaceFingerprint(nextRuntime.profileConfig) !== executionSpaceFingerprint(this.profileConfig)
+        || !isDeepStrictEqual(nextRuntime.profileConfig.executionSpaces, this.profileConfig.executionSpaces)
+        || nextRuntime.profileConfig.mode !== 'team')) throw new Error('prepared team reconnect requires unchanged execution configuration');
       const next = nextRuntime.cfg;
       if (!isComplete(next)) throw new Error('config incomplete after change');
       assertReconnectAgentKindUnchanged(this.profileConfig.agentKind, nextRuntime.profileConfig.agentKind);
@@ -933,7 +1023,7 @@ class ManagedProfile {
       this.controls = nextControls;
       nextLarkChannelRuntime = undefined;
       nextEngineRuntime = undefined;
-      await previousEngineRuntime.dispose().catch((err) =>
+      await this.runtimeSlot.disposeRuntime(previousEngineRuntime).catch((err) =>
         log.warn('supervisor', 'engine-dispose-failed', { profile: this.profile, err: String(err) }),
       );
     } finally {
@@ -972,17 +1062,26 @@ function assertExternalChannelDesiredStateUnchanged(
  * No `process.exit` here — the CLI entry owns process lifecycle.
  */
 export class Supervisor {
+  private readonly personalGroupPeers = new PersonalGroupPeers();
   private managed = new Map<string, ManagedProfile>();
+  private readonly runIntent: ProfileRunIntentStore;
+  private lifecycle: Promise<void> = Promise.resolve();
+  private shuttingDown = false;
   private readonly larkChannelPolicy: Readonly<LarkChannelOwnershipPolicy>;
   private readonly triggerManager: TriggerManager;
   private readonly triggerApi: TriggerManagementApi;
   private readonly triggerReminders: ConversationReminderService;
+  private readonly taskStore: TaskStore;
+  private readonly taskCoordinator: TaskCoordinator;
 
   constructor(private opts: SupervisorOptions) {
     this.larkChannelPolicy = resolveLarkChannelOwnership(
       opts.larkChannelRolloutMode ?? process.env[LARK_CHANNEL_ROLLOUT_ENV],
     );
     const triggerRoot = opts.rootDir ?? dirname(opts.configPath);
+    this.taskStore = new FileTaskStore(join(triggerRoot, 'tasks.v1.json'));
+    this.taskCoordinator = new TaskCoordinator(this.taskStore);
+    this.runIntent = new ProfileRunIntentStore(join(triggerRoot, 'supervisor', 'profile-run-intent.v1.json'));
     const triggerStateFile = join(triggerRoot, 'triggers', 'state.v1.json');
     const triggerResultFile = join(triggerRoot, 'triggers', 'result-deliveries.v1.json');
     const conversationAnchors = new FileConversationAnchorStore(
@@ -990,6 +1089,7 @@ export class Supervisor {
     );
     const resultRouter = new TriggerResultRouter({
       store: new FileTriggerResultDeliveryStore(triggerResultFile),
+      beforeCheckpoint: async (definition, intent) => { await this.managed.get(definition.profileId)?.spaces?.bindResult(definition, intent); },
       resolver: {
         resolve: (profileId, conversationRef) => conversationAnchors.resolve(profileId, conversationRef),
       },
@@ -1024,6 +1124,7 @@ export class Supervisor {
       rootDir: triggerRoot,
       store: triggerStore,
       onApplied: () => this.triggerManager.reconcile(),
+      beforeDefinitionWrite: async (definition) => { await this.managed.get(definition.profileId)?.spaces?.bindDefinition(definition); },
     });
     this.triggerReminders = new ConversationReminderService({
       api: this.triggerApi,
@@ -1032,7 +1133,9 @@ export class Supervisor {
   }
 
   private get startChannelFn(): StartChannelFn {
-    return this.opts.startChannelFn ?? realStartChannel;
+    return (deps) => (this.opts.startChannelFn ?? realStartChannel)({
+      ...deps, personalGroupPeers: this.personalGroupPeers,
+    });
   }
 
   isOnline(profile: string): boolean {
@@ -1110,9 +1213,42 @@ export class Supervisor {
     };
   }
 
+  /** Serialize host lifecycle changes, including two profiles sharing one app. */
+  private serializeLifecycle<T>(operation: () => Promise<T>): Promise<T> {
+    if (this.shuttingDown) return Promise.reject(new Error('Supervisor is shutting down'));
+    const result = this.lifecycle.then(operation);
+    this.lifecycle = result.then(() => undefined, () => undefined);
+    return result;
+  }
+
+  async restoreProfiles(fallback: string): Promise<void> {
+    // Queue restoration as one operation so a later explicit stop cannot be
+    // overwritten by a stale snapshot of the startup list.
+    return this.serializeLifecycle(async () => {
+      const root = await loadRootConfig(this.opts.configPath);
+      const profiles = await this.runIntent.running(fallback, Object.keys(root?.profiles ?? {}));
+      for (const profile of profiles) {
+        try {
+          await this.startProfileNow(profile);
+          console.log(`✓ profile「${profile}」已上线`);
+        } catch (error) {
+          console.warn(`⚠️ profile「${profile}」启动失败：${error instanceof Error ? error.message : String(error)}`);
+          log.warn('supervisor', 'restore-start-failed', { profile });
+        }
+      }
+    });
+  }
+
   /** Bring a profile online inside this process. Throws on lock/app conflict. */
   async startProfile(profile: string): Promise<void> {
-    if (this.managed.has(profile)) return;
+    return this.serializeLifecycle(() => this.startProfileNow(profile));
+  }
+
+  private async startProfileNow(profile: string): Promise<void> {
+    if (this.managed.has(profile)) {
+      if (this.opts.persistRunningIntent !== false) await this.runIntent.set(profile, true);
+      return;
+    }
 
     const runtime = await resolveProfileRuntime({
       config: this.opts.configPath,
@@ -1121,6 +1257,7 @@ export class Supervisor {
     });
     const { cfg, appPaths, profileConfig, configPath } = runtime;
     if (!isComplete(cfg)) throw new Error(`profile 配置不完整：${profile}`);
+    if (this.opts.persistRunningIntent !== false) await this.runIntent.set(profile, true);
     await loadExternalEnginePlugins(profileConfig.plugins ?? []);
 
     // Dedupe by app id — two channels for one app fight over event routing.
@@ -1130,7 +1267,11 @@ export class Supervisor {
       }
     }
 
-    if (this.opts.runPreflight !== false) {
+    // Prepared native environments do not expose the profile-global lark-cli
+    // home or user authorization. Its legacy install/bind/import preflight is
+    // not an appropriate space credential adapter. Channel API auth stays in
+    // the host; native tool access needs a separately admitted scoped adapter.
+    if (this.opts.runPreflight !== false && !this.opts.createExecutionSpaces && !profileConfig.executionSpaces) {
       await preFlightChecks({
         bridgeConfig: cfg,
         profileConfig,
@@ -1146,8 +1287,12 @@ export class Supervisor {
     }
 
     const engineRuntime = createProfileEngineRuntime(profileConfig, { ...appPaths, configPath });
+    let spaces: PreparedSpaceProfile | undefined;
     try {
-      if (this.opts.runPreflight !== false) {
+      spaces = this.opts.createExecutionSpaces
+        ? await this.opts.createExecutionSpaces({ profileId: appPaths.profile, profileConfig, appPaths })
+        : await createSelectedSpaceProfile({ profileId: appPaths.profile, profileConfig, appPaths });
+      if (this.opts.runPreflight !== false && !spaces) {
         const availability = await checkRuntimeAgentAvailability(engineRuntime.execution);
         if (!availability.ok) throw availability.error;
       }
@@ -1175,12 +1320,16 @@ export class Supervisor {
         this.reminderControlFor(appPaths.profile),
         this.opts.createNativeReadRuntime,
         this.opts.externalChannelPlugins,
+        this.taskStore,
+        this.taskCoordinator,
+        spaces,
       );
       await managed.bringUp(new Date().toISOString());
       this.managed.set(appPaths.profile, managed);
       this.triggerManager.start();
       await this.triggerManager.resumeProfile(appPaths.profile);
     } catch (err) {
+      await spaces?.services.close().catch(() => undefined);
       await engineRuntime.dispose().catch(() => undefined);
       throw err;
     }
@@ -1189,6 +1338,13 @@ export class Supervisor {
 
   /** Take a profile offline (in-process). The supervisor keeps running. */
   async stopProfile(profile: string): Promise<void> {
+    return this.serializeLifecycle(async () => {
+      if (this.opts.persistRunningIntent !== false) await this.runIntent.set(profile, false);
+      await this.stopProfileNow(profile);
+    });
+  }
+
+  private async stopProfileNow(profile: string): Promise<void> {
     const managed = this.managed.get(profile);
     if (!managed) return;
     this.managed.delete(profile);
@@ -1204,6 +1360,8 @@ export class Supervisor {
 
   /** Stop every profile — for process shutdown. */
   async shutdown(): Promise<void> {
+    this.shuttingDown = true;
+    await this.lifecycle;
     await this.triggerManager.close();
     const all = [...this.managed.values()];
     this.managed.clear();

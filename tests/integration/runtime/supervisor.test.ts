@@ -610,3 +610,65 @@ describe('Supervisor', () => {
     expect(createdAgents.filter((id) => id === 'switch-slow')).toHaveLength(1);
   });
 });
+
+
+describe('persistent Supervisor running intent', () => {
+  function replacement() {
+    return new Supervisor({ configPath: join(root, 'config.json'), rootDir: root,
+      runPreflight: false, startChannelFn: stubStartChannel });
+  }
+  it('restores online profiles after shutdown and honors a stopped default', async () => {
+    await sup.restoreProfiles('claude');
+    await sup.startProfile('work');
+    await sup.stopProfile('claude');
+    await sup.shutdown();
+    sup = replacement();
+    await sup.restoreProfiles('claude');
+    expect(sup.isOnline('work')).toBe(true);
+    expect(sup.isOnline('claude')).toBe(false);
+    await sup.stopProfile('work');
+    await sup.shutdown();
+    sup = replacement();
+    await sup.restoreProfiles('claude');
+    expect(sup.list()).toEqual([]);
+  });
+  it('serializes concurrent starts and same-app conflicts', async () => {
+    await Promise.all([sup.startProfile('claude'), sup.startProfile('claude')]);
+    expect(started.filter((p) => p === 'claude')).toHaveLength(1);
+    const results = await Promise.allSettled([sup.startProfile('work'), sup.startProfile('dup')]);
+    expect(results.map((r) => r.status)).toEqual(['fulfilled', 'rejected']);
+  });
+  it('honors an explicit stop queued during startup restoration', async () => {
+    await sup.startProfile('work');
+    await sup.shutdown();
+    sup = replacement();
+    await Promise.all([sup.restoreProfiles('claude'), sup.stopProfile('work')]);
+    expect(sup.isOnline('work')).toBe(false);
+    await sup.shutdown();
+    sup = replacement();
+    await sup.restoreProfiles('claude');
+    expect(sup.isOnline('work')).toBe(false);
+  });
+  it('does not enroll classic single-profile runs into global startup', async () => {
+    await sup.shutdown();
+    sup = new Supervisor({ configPath: join(root, 'config.json'), rootDir: root,
+      runPreflight: false, startChannelFn: stubStartChannel, persistRunningIntent: false });
+    await sup.startProfile('work');
+    await sup.shutdown();
+    sup = replacement();
+    await sup.restoreProfiles('claude');
+    expect(sup.isOnline('claude')).toBe(true);
+    expect(sup.isOnline('work')).toBe(false);
+  });
+  it('continues restoring other profiles when one desired profile fails', async () => {
+    await sup.startProfile('work');
+    await expect(sup.startProfile('dup')).rejects.toThrow();
+    await sup.startProfile('claude');
+    await sup.shutdown();
+    sup = replacement();
+    await sup.restoreProfiles('claude');
+    expect(sup.isOnline('claude')).toBe(true);
+    expect(sup.isOnline('work')).toBe(true);
+    expect(sup.isOnline('dup')).toBe(false);
+  });
+});

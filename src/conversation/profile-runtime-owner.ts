@@ -21,6 +21,7 @@ export class ProfileConversationRuntimeOwner {
   readonly runtime: ConversationRuntime;
 
   private readonly drainTimeoutMs: number;
+  private readonly spaces?: ProfileConversationRuntimeOwnerOptions['spaces'];
   private closePromise: Promise<void> | undefined;
 
   constructor(options: ProfileConversationRuntimeOwnerOptions) {
@@ -34,6 +35,7 @@ export class ProfileConversationRuntimeOwner {
       throw new Error('profile conversation drainTimeoutMs must be a positive integer');
     }
     this.profileId = options.profileId;
+    this.spaces = options.spaces;
     this.drainTimeoutMs =
       options.drainTimeoutMs ?? DEFAULT_PROFILE_CONVERSATION_DRAIN_MS;
     this.runtime = new ConversationRuntime(options);
@@ -64,6 +66,7 @@ export class ProfileConversationRuntimeOwner {
       this.closePromise = (async () => {
         this.runtime.pauseNewRuns(reason);
         await this.drainActiveRuns();
+        await this.spaces?.close();
       })();
     }
     return this.closePromise;

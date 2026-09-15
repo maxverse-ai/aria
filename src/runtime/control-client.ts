@@ -27,14 +27,19 @@ export async function requestRestartPreflight(
   profile: string,
   timeoutMs = 2000,
 ): Promise<RuntimeActivitySnapshotV1> {
+  return requestRuntimeControl(sidecarFile, profile, 'restart.preflight', timeoutMs);
+}
+
+export async function requestRuntimeControl(sidecarFile: string, profile: string,
+  method: RuntimeControlRequestV1['method'], timeoutMs = 60_000): Promise<RuntimeActivitySnapshotV1> {
   const sidecar = await readSidecar(sidecarFile, profile);
   const request: RuntimeControlRequestV1 = {
     schemaVersion: RUNTIME_CONTROL_PROTOCOL_VERSION,
-    method: 'restart.preflight',
+    method, timeoutMs,
     profile,
     token: sidecar.token,
   };
-  const response = await exchange(sidecar.endpoint, request, timeoutMs);
+  const response = await exchange(sidecar.endpoint, request, method === 'transition.drain' ? timeoutMs + 2000 : timeoutMs);
   if (!response.ok) {
     throw new RuntimeControlUnavailableError('PROTOCOL_ERROR', response.error.message);
   }

@@ -13,6 +13,8 @@ const mocks = vi.hoisted(() => ({
   loadExternalEnginePlugins: vi.fn(async () => []),
 }));
 
+vi.mock('../../../src/runtime/execution-profile', () => ({ resolveExecutionProfile: vi.fn(async () => undefined) }));
+vi.mock('../../../src/worker/profile-config', () => ({ resolveWorkerProfile: vi.fn(async () => undefined) }));
 vi.mock('../../../src/runtime/profile-runtime', () => ({
   resolveProfileRuntime: mocks.resolveProfileRuntime,
 }));
@@ -82,6 +84,7 @@ describe('createProfileConversationHost', () => {
     });
 
     const host = await createProfileConversationHost({
+      identity: { providerId: 'wechat-kf', accountId: 'kf', subjectId: 'support', displayName: 'Support' },
       configPath: join(root, 'config.json'),
       profile: 'pm-knowledge-bot',
       stateDirectory: join(root, 'wechat-state'),
@@ -109,6 +112,7 @@ describe('createProfileConversationHost', () => {
       }],
     })).resolves.toMatchObject({ ok: true, content: '微信最终回复' });
     expect(seen).toHaveLength(2);
+    expect(seen.every(run => run.identity?.subjectId === 'support' && run.identity?.providerId === 'wechat-kf')).toBe(true);
     expect(seen[0]?.prompt).toBe('你好');
     expect(seen[1]?.images).toEqual([join(root, 'image.png')]);
     await host.close();

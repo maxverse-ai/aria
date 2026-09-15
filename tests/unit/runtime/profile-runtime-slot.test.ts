@@ -7,13 +7,12 @@ import { ProfileRuntimeSlot } from '../../../src/runtime/profile-runtime-slot';
 import { FakeAgentAdapter } from '../../helpers/fake-agent';
 
 describe('ProfileRuntimeSlot', () => {
-  it('routes a stable adapter to the new runtime and carries bot identity across', () => {
+  it('routes a stable adapter to the new runtime with explicit run identity', () => {
     const first = runtime('first');
     const second = runtime('second');
     const slot = new ProfileRuntimeSlot(first);
     const stableAdapter = slot.execution;
 
-    stableAdapter.setBotIdentity?.({ openId: 'ou_bot', name: 'Aria' });
     expect(stableAdapter.id).toBe('first');
     expect(slot.descriptor().engineId).toBe('first');
 
@@ -22,10 +21,9 @@ describe('ProfileRuntimeSlot', () => {
     expect(stableAdapter.id).toBe('second');
     expect(slot.descriptor().engineId).toBe('second');
     expect(slot.currentGeneration()).toBe(2);
-    expect((second.execution as FakeAgentAdapter).botIdentity).toEqual({
-      openId: 'ou_bot',
-      name: 'Aria',
-    });
+    const identity = { providerId: 'test', accountId: 'profile', subjectId: 'jack', displayName: 'Jack' };
+    stableAdapter.run({ runId: 'after-switch', scopeId: 'chat', prompt: 'hello', identity });
+    expect((second.execution as FakeAgentAdapter).runOptions[0]?.identity).toEqual(identity);
   });
 
   it('caches and coalesces engine status snapshots per runtime generation', async () => {

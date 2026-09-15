@@ -1,25 +1,40 @@
 import { AgentPreflightError, type AgentAvailability } from '../agent/preflight';
-import { createEngineRuntime, requireEnginePlugin } from '../agent/plugin/registry';
+import { prepareEngineRuntime, requireEnginePlugin } from '../agent/plugin/registry';
+import type { PreparedEngineRuntime } from '../agent/runtime/construction';
 import type { EngineRuntime } from '../agent/runtime/types';
 import type { AgentAdapter } from '../agent/types';
 import type { AppPaths } from '../config/app-paths';
-import type { AgentKind, ProfileConfig } from '../config/profile-schema';
+import type { AgentKind, EngineProfileConfig } from '../config/profile-schema';
 import type { AcquiredRuntimeLock } from './locks';
+
+type ProfileEngineRuntimePaths = Pick<AppPaths, 'profileDir'> &
+  Partial<Pick<AppPaths, 'rootDir' | 'profile' | 'configFile' | 'larkCliConfigDir' | 'larkCliSourceConfigFile'>> & {
+    configPath?: string;
+  };
 
 /**
  * Build the agent adapter for a profile, wiring its per-profile lark-channel env
  * (so spawned agent processes see this profile's LARKSUITE_CLI_CONFIG_DIR etc.).
  * Shared by the foreground run path and the supervisor so both produce an
- * identically-configured adapter. Each profile MUST get its own adapter — the
- * adapter stores bot identity on itself (see `setBotIdentity`).
+ * identically-configured adapter. Each profile gets its own runtime and native state.
+ * Self identity is supplied with each run rather than stored on the adapter.
  */
 export function createProfileEngineRuntime(
-  profileConfig: ProfileConfig,
-  appPaths: Pick<AppPaths, 'profileDir'> &
-    Partial<Pick<AppPaths, 'rootDir' | 'profile' | 'configFile' | 'larkCliConfigDir' | 'larkCliSourceConfigFile'>> & {
-      configPath?: string;
-    },
+  profileConfig: EngineProfileConfig,
+  appPaths: ProfileEngineRuntimePaths,
 ): EngineRuntime {
+  return prepareProfileEngineRuntime(profileConfig, appPaths).create();
+}
+
+/**
+ * Resolve one immutable construction plan using the existing profile layout.
+ * Supervisor and the standalone host share this path through the create facade.
+ * Preparation does not launch an engine, create state, or change profile mode.
+ */
+export function prepareProfileEngineRuntime(
+  profileConfig: EngineProfileConfig,
+  appPaths: ProfileEngineRuntimePaths,
+): PreparedEngineRuntime {
   const ariaChannelConfigPath = appPaths.configPath ?? appPaths.configFile;
   const ariaChannel =
     appPaths.rootDir && appPaths.profile
@@ -33,7 +48,7 @@ export function createProfileEngineRuntime(
             : {}),
         }
       : undefined;
-  return createEngineRuntime(profileConfig.agentKind, {
+  return prepareEngineRuntime(profileConfig.agentKind, {
     profileConfig,
     appPaths,
     ariaChannel,

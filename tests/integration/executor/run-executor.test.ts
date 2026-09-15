@@ -323,7 +323,7 @@ describe('RunExecutor', () => {
 
     await execution.stop();
 
-    const run = execution.run as FakeAgentRun;
+    const run = h.agent.runs[0]!;
     expect(run.stopped).toBe(true);
     expect(run.waitForExitCalls).toBe(1);
   });
@@ -340,7 +340,7 @@ describe('RunExecutor', () => {
 
     await collect(execution.subscribe());
 
-    const run = execution.run as FakeAgentRun;
+    const run = h.agent.runs[0]!;
     expect(run.waitForExitCalls).toBe(1);
     expect(run.stopped).toBe(true);
     expect(h.activeRuns.get('scope-1')).toBeUndefined();

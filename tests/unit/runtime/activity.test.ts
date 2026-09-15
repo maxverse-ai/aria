@@ -2,6 +2,12 @@ import { describe, expect, it } from 'vitest';
 import { RuntimeActivityTracker } from '../../../src/runtime/activity.js';
 
 describe('RuntimeActivityTracker', () => {
+  it('keeps a flushed batch busy before its asynchronous preparation reserves a run', () => {
+    const tracker = new RuntimeActivityTracker('aria', 'instance-1', [
+      { snapshot: () => ({ pendingMessages: 0, blockedScopes: 1, activeRuns: 0, preparingRuns: 0 }) },
+    ]);
+    expect(tracker.snapshot()).toMatchObject({ decision: 'busy', blockers: [{ code: 'BLOCKED_SCOPES', count: 1 }] });
+  });
   it('aggregates providers into a versioned safe snapshot', () => {
     const tracker = new RuntimeActivityTracker(
       'aria',

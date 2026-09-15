@@ -63,6 +63,22 @@ function composition(packageSource = source()): ExternalChannelPluginComposition
 }
 
 describe('profile external channel runtime', () => {
+  it('prepared profiles never use an external plugin legacy ingress or another profile authority', async () => {
+    const spaces = { services: {} } as import('../../../src/space/profile').PreparedSpaceProfile;
+    const legacy = vi.fn(composition().createIngress);
+    const base = { profileId: 'fixture-profile', requests: [request], instances: [instance()], spaces };
+    await expect(startProfileExternalChannelRuntime({ ...base,
+      composition: { ...composition(), createIngress: legacy } })).rejects.toThrow('prepared space ingress authority');
+    expect(legacy).not.toHaveBeenCalled();
+    await expect(startProfileExternalChannelRuntime({ ...base, composition: { ...composition(),
+      createSpaceIngress: () => ({ ...composition().createIngress({ profileId: 'fixture-profile' }),
+        spaceAuthority: {} as import('../../../src/space/services').ExecutionSpaceServices }) } })).rejects.toThrow('prepared space ingress authority');
+    const runtime = await startProfileExternalChannelRuntime({ ...base, composition: { ...composition(), createIngress: legacy,
+      createSpaceIngress: input => ({ ...composition().createIngress({ profileId: input.profileId }), spaceAuthority: input.spaces.services }) } });
+    expect(runtime.snapshot().manager.readyCount).toBe(1);
+    expect(legacy).not.toHaveBeenCalled();
+    await runtime.close();
+  });
   it('loads exact trusted packages, starts only enabled instances, and unloads after close', async () => {
     const packageSource = source();
     const runtime = await startProfileExternalChannelRuntime({

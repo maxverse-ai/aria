@@ -1,3 +1,9 @@
+import { snapshotParticipantIdentity, type ParticipantIdentity } from '../conversation/participant-identity';
+import { withSourcePresentation } from '../conversation/presentation-context';
+import type { RunTools, RunToolLease } from './run-tools';
+import { bindAgentRun } from '../agent/runtime/bound-run';
+import { bindRunAuthorization } from '../agent/runtime/run-authorization';
+import type { AuthorizedSpaceContext } from '../space/authorization';
 import { randomUUID } from 'node:crypto';
 import type { AgentAdapter, AgentEvent, AgentRun } from '../agent/types';
 import { ActiveRuns, type RunHandle } from '../bot/active-runs';
@@ -6,9 +12,12 @@ import type { RunPolicyAllow } from '../policy/run-policy';
 import { log } from '../core/logger';
 import { observabilityFields } from '../observability/execution-context';
 import { RunRejected, SpawnFailed } from './errors';
+import { fixedAdapterRuntimeProvider, type RuntimeLease, type RuntimeProvider } from './runtime-provider';
 
 export interface RunExecutorDeps {
+  tools?: RunTools;
   agent: AgentAdapter;
+  runtimeProvider?: RuntimeProvider;
   pool: ProcessPool;
   activeRuns: ActiveRuns;
   createRunId?: () => string;
@@ -39,6 +48,9 @@ export interface RunAuditSink {
 }
 
 export interface SubmitRunInput {
+  identity?: ParticipantIdentity;
+  spaceContext?: AuthorizedSpaceContext;
+  assertAuthorized?: () => void;
   scopeId: string;
   policy: RunPolicyAllow;
   sessionId?: string;
@@ -70,24 +82,29 @@ const DEFAULT_POST_DONE_EXIT_GRACE_MS = 2000;
 
 export class RunExecutor {
   private readonly agent: AgentAdapter;
+  private readonly runtimeProvider: RuntimeProvider;
   private readonly pool: ProcessPool;
   private readonly activeRuns: ActiveRuns;
   private readonly createRunId: () => string;
   private readonly now: () => number;
   private readonly postDoneExitGraceMs: number;
   private readonly audit?: RunAuditSink;
+  private readonly tools?: RunTools;
 
   constructor(deps: RunExecutorDeps) {
     this.agent = deps.agent;
+    this.runtimeProvider = deps.runtimeProvider ?? fixedAdapterRuntimeProvider(deps.agent);
     this.pool = deps.pool;
     this.activeRuns = deps.activeRuns;
     this.createRunId = deps.createRunId ?? randomUUID;
     this.now = deps.now ?? Date.now;
     this.postDoneExitGraceMs = deps.postDoneExitGraceMs ?? DEFAULT_POST_DONE_EXIT_GRACE_MS;
     this.audit = deps.audit;
+    this.tools = deps.tools;
   }
 
   async submit(input: SubmitRunInput): Promise<RunExecution> {
+    const identity = snapshotParticipantIdentity(input.identity);
     const submittedAt = this.now();
     if (input.policy.expiresAt <= this.now()) {
       throw new RunRejected('policy-expired', 'run policy expired before spawn');
@@ -117,7 +134,9 @@ export class RunExecutor {
       pool: this.pool.snapshot(),
     });
 
-    const release = input.nowait ? this.pool.tryAcquire() : await this.pool.acquire();
+    let release: (() => void) | undefined;
+    try { release = input.nowait ? this.pool.tryAcquire() : await this.pool.acquire(); }
+    catch (error) { releaseScope(); throw error; }
     if (!release) {
       releaseScope();
       throw new RunRejected('pool-full', 'process pool is full');
@@ -132,9 +151,24 @@ export class RunExecutor {
     }
 
     const runId = this.createRunId();
+    let lease: RuntimeLease;
+    try {
+      lease = await this.runtimeProvider.acquire({ scopeId: input.scopeId, purpose: 'run', spaceContext: input.spaceContext, runId });
+    } catch (error) {
+      release(); releaseScope();
+      throw new SpawnFailed('runtime acquisition failed', error, 'agent-prepare-failed');
+    }
+    let tools: RunToolLease | undefined;
+    const releaseResources = (): void => {
+      tools?.close();
+      lease.release();
+      if (release) { const once = release; release = undefined; once(); }
+      releaseScope();
+    };
     const startedAt = this.now();
     const queueWaitMs = startedAt - submittedAt;
     const runOptions = {
+      identity,
       runId,
       scopeId: input.scopeId,
       prompt: input.policy.prompt,
@@ -149,28 +183,42 @@ export class RunExecutor {
       permissionMode: input.policy.permissionMode,
       stopGraceMs: input.stopGraceMs,
     };
+    if (input.assertAuthorized) bindRunAuthorization(runOptions, input.assertAuthorized);
+    const present = <T>(operation: () => T): T => withSourcePresentation(input.observability?.source, Boolean(input.spaceContext), operation,
+      [lease.instructions, tools?.prompt].filter(Boolean).join('\n') || undefined);
     let run: AgentRun;
     try {
-      await this.agent.prepareRun?.(runOptions);
+      if (input.policy.expiresAt <= this.now()) {
+        throw new RunRejected('policy-expired', 'run policy expired while queued');
+      }
+      input.assertAuthorized?.();
+      if (input.spaceContext) tools = await this.tools?.prepare(input.spaceContext, runId);
+      await present(() => lease.runtime.execution.prepareRun?.(runOptions));
+      input.assertAuthorized?.();
     } catch (err) {
-      release();
-      releaseScope();
+      releaseResources();
+      if (err instanceof RunRejected) throw err;
       if (err instanceof SpawnFailed) throw err;
       throw new SpawnFailed('agent prepare failed', err, 'agent-prepare-failed');
     }
     if (this.activeRuns.newRunsPaused()) {
-      release();
-      releaseScope();
+      releaseResources();
       throw new RunRejected(
         'reconnect-in-progress',
         this.activeRuns.newRunsPauseReason() ?? 'new runs are temporarily paused',
       );
     }
     try {
-      run = this.agent.run(runOptions);
+      const native = bindAgentRun(present(() => lease.runtime.execution.run(runOptions)), present);
+      run = input.assertAuthorized ? {
+        runId: native.runId, events: native.events, steering: native.steering,
+        ...(native.steer ? { steer: (request) => {
+          input.assertAuthorized!(); return native.steer!(request);
+        } } : {}),
+        stop: () => native.stop(), waitForExit: (timeout) => native.waitForExit(timeout),
+      } : native;
     } catch (err) {
-      release();
-      releaseScope();
+      releaseResources();
       throw new SpawnFailed('agent spawn failed', err);
     }
     const dimensions = {
@@ -189,10 +237,10 @@ export class RunExecutor {
     let handle: RunHandle;
     try {
       handle = this.activeRuns.register(input.scopeId, run);
-    } catch (err) {
       releaseScope();
-      release();
+    } catch (err) {
       await run.stop().catch(() => {});
+      releaseResources();
       throw new RunRejected(
         'run-already-active',
         err instanceof Error ? err.message : 'another run is already active for this scope',
@@ -202,27 +250,36 @@ export class RunExecutor {
       eventId: `${runId}:started`, sourceRunId: runId, action: 'run.started',
       occurredAt: new Date(startedAt).toISOString(), outcome: 'success',
     });
-    let cleaned = false;
-    const cleanup = async (waitForExit: boolean): Promise<void> => {
-      if (cleaned) return;
-      cleaned = true;
-      this.activeRuns.unregister(input.scopeId, run);
-      release();
-      if (waitForExit) {
-        const exited = await run.waitForExit(this.postDoneExitGraceMs);
-        if (!exited) {
-          log.warn('run', 'post-done-exit-timeout', {
-            ...dimensions,
-            graceMs: this.postDoneExitGraceMs,
-          });
-          await run.stop().catch((err) => {
-            log.warn('run', 'post-done-stop-failed', {
-              ...dimensions,
-              err: err instanceof Error ? err.message : String(err),
-            });
-          });
+    let cleanupPromise: Promise<void> | undefined;
+    let stopWork: Promise<void> | undefined;
+    let exitWork: Promise<boolean> | undefined;
+    const waitForNativeExit = () => exitWork ??= run.waitForExit(this.postDoneExitGraceMs);
+    const cleanup = (waitForExit: boolean): Promise<void> => {
+      cleanupPromise ??= (async () => {
+        try {
+          if (stopWork) await stopWork;
+          if (waitForExit) {
+            const exited = await waitForNativeExit();
+            if (!exited) {
+              log.warn('run', 'post-done-exit-timeout', {
+                ...dimensions,
+                graceMs: this.postDoneExitGraceMs,
+              });
+              await run.stop().catch((err) => {
+                log.warn('run', 'post-done-stop-failed', {
+                  ...dimensions,
+                  err: err instanceof Error ? err.message : String(err),
+                });
+              });
+            }
+          }
+          if (stopWork) await stopWork;
+        } finally {
+          this.activeRuns.unregister(input.scopeId, run);
+          releaseResources();
         }
-      }
+      })();
+      return cleanupPromise;
     };
     let terminalAudited = false;
     const recordTerminal = async (reason: 'normal' | 'failed' | 'interrupted' | 'timeout'): Promise<void> => {
@@ -248,6 +305,7 @@ export class RunExecutor {
     }), async () => {
       await cleanup(!handle.interrupted);
     });
+    fanout.start();
 
     return {
       runId,
@@ -257,10 +315,12 @@ export class RunExecutor {
       subscribe: () => fanout.subscribe(),
       stop: async () => {
         handle.interrupted = true;
-        await run.stop();
-        await run.waitForExit(this.postDoneExitGraceMs);
-        await recordTerminal('interrupted');
-        await cleanup(false);
+        stopWork ??= (async () => {
+          await run.stop();
+          await waitForNativeExit();
+          await recordTerminal('interrupted');
+        })();
+        try { await stopWork; } finally { await cleanup(false); }
       },
     };
   }
@@ -391,7 +451,7 @@ class EventFanout {
     };
   }
 
-  private start(): void {
+  start(): void {
     if (this.started) return;
     this.started = true;
     void this.pump();
@@ -407,9 +467,9 @@ class EventFanout {
     } catch (err) {
       this.error = err;
     } finally {
-      await this.onDone();
-      this.done = true;
-      this.wakeAll();
+      try { await this.onDone(); }
+      catch (error) { this.error ??= error; }
+      finally { this.done = true; this.wakeAll(); }
     }
   }
 

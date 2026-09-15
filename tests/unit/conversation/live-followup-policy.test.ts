@@ -19,6 +19,12 @@ describe('live follow-up policy', () => {
     });
   });
 
+  it('steers an admitted explicitly addressed peer, but never ambient messages', () => {
+    expect(decideLiveFollowup(facts({ senderType: 'bot', admittedPeer: true }))).toEqual({ kind: 'attempt' });
+    expect(decideLiveFollowup(facts({ senderType: 'bot', admittedPeer: true, addressedToAgent: false })))
+      .toEqual({ kind: 'queue', reason: 'not-addressed' });
+  });
+
   it('queues bot, attachment, non-text, empty, and oversized messages', () => {
     expect(decideLiveFollowup(facts({ senderType: 'bot' })))
       .toEqual({ kind: 'queue', reason: 'bot-sender' });

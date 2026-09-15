@@ -6,6 +6,7 @@ export interface FreshnessCandidate {
   senderId: string;
   senderType?: 'user' | 'bot';
   addressedToAgent: boolean;
+  admittedPeer?: boolean;
   text: string;
   attachmentCount: number;
   rawContentType?: string;
@@ -13,6 +14,7 @@ export interface FreshnessCandidate {
 
 export type FreshnessDecision =
   | { kind: 'fresh' }
+  | { kind: 'withheld'; reason: 'history-unavailable' | 'history-truncated' }
   | {
       kind: 'hold';
       source: FreshnessSource;
@@ -41,8 +43,8 @@ const NON_TEXT_INPUT_TYPES = new Set([
  * Decide whether a terminal answer is still current.
  *
  * Addressed human input has priority over duplicate suppression because it has
- * to remain owned by a future turn. Bot output never blocks on freshness; it
- * participates only in conservative exact-body duplicate detection.
+ * to remain owned by a future turn. Explicit, admitted peer input also invalidates a stale draft. Ambient bot
+ * output participates only in conservative exact-body duplicate detection.
  */
 export function evaluateFreshnessCandidates(input: {
   candidates: readonly FreshnessCandidate[];
@@ -93,7 +95,8 @@ function isUnseenAddressedInput(
   selfBotId?: string,
 ): boolean {
   if (!candidate.addressedToAgent) return false;
-  if (candidate.senderId === selfBotId || candidate.senderType === 'bot') return false;
+  if (candidate.senderId === selfBotId) return false;
+  if (candidate.senderType === 'bot' && !candidate.admittedPeer) return false;
   if (candidate.attachmentCount > 0) return true;
   if (candidate.rawContentType && NON_TEXT_INPUT_TYPES.has(candidate.rawContentType)) {
     return true;

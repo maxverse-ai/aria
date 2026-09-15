@@ -12,6 +12,8 @@ export interface LiveFollowupPolicyInput {
   support?: AgentSteeringSupport;
   addressedToAgent: boolean;
   senderType?: 'user' | 'bot';
+  /** Explicitly addressed peer input admitted by the host access policy. */
+  admittedPeer?: boolean;
   text: string;
   attachmentCount: number;
   rawContentType?: string;
@@ -40,7 +42,7 @@ export function decideLiveFollowup(
 ): LiveFollowupPolicyDecision {
   if (!input.support) return { kind: 'queue', reason: 'unsupported' };
   if (!input.addressedToAgent) return { kind: 'queue', reason: 'not-addressed' };
-  if (input.senderType === 'bot') return { kind: 'queue', reason: 'bot-sender' };
+  if (input.senderType === 'bot' && !input.admittedPeer) return { kind: 'queue', reason: 'bot-sender' };
   if (input.attachmentCount > 0) return { kind: 'queue', reason: 'attachments' };
   if (input.rawContentType && NON_TEXT_CONTENT_TYPES.has(input.rawContentType)) {
     return { kind: 'queue', reason: 'non-text' };

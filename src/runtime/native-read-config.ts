@@ -1,5 +1,6 @@
 import pkg from '../../package.json';
 import { readFile, stat } from 'node:fs/promises';
+import { createPublicKey } from 'node:crypto';
 import { join } from 'node:path';
 import type { NativeReadScope } from '../platform/native-read-http-server';
 import { DefaultNativeReadProfileRuntime } from './native-read-runtime';
@@ -53,11 +54,25 @@ export async function nativeReadFactoryFromEnvironment(
   if (!token) throw new Error('native read token file is empty');
 
   const scopes = parseScopes(env.ARIA_NATIVE_READ_SCOPES);
-  return ({ profile, appPaths, sessionCatalog }) => new DefaultNativeReadProfileRuntime({
+  const managementProfiles = new Set((env.ARIA_NATIVE_READ_MANAGEMENT_PROFILES ?? '').split(',').map(x => x.trim()).filter(Boolean));
+  const managementFile = env.ARIA_NATIVE_READ_MANAGEMENT_PUBLIC_KEY_FILE?.trim();
+  let managementPublicKey: string | undefined;
+  if (managementFile || managementProfiles.size) {
+    if (!managementFile || !managementProfiles.size) throw new Error('management read requires an explicit public key file and profile allowlist');
+    const info = await stat(managementFile).catch(() => { throw new Error('management public key file unavailable'); });
+    if (!info.isFile() || info.size > 4096) throw new Error('invalid management public key file');
+    managementPublicKey = (await readFile(managementFile, 'utf8')).trim();
+    if (!managementPublicKey.startsWith('-----BEGIN PUBLIC KEY-----') || createPublicKey(managementPublicKey).asymmetricKeyType !== 'ed25519') {
+      throw new Error('management read requires an Ed25519 public key, never a private key');
+    }
+  }
+  return ({ profile, appPaths, sessionCatalog, spaces }) => new DefaultNativeReadProfileRuntime({
     profileId: profile,
     appPaths,
     sessionCatalog,
+    ...(spaces ? { spaces } : {}),
     token,
+    ...(managementProfiles.has(profile) ? { managementPublicKey } : {}),
     scopes,
     serverVersion: options.serverVersion ?? pkg.version,
   });
