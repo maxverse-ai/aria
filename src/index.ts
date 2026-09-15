@@ -340,6 +340,10 @@ export type {
 // channel-neutral conversation runtime. Deployments own plugin composition.
 export { ConversationRuntime } from './conversation/runtime';
 export {
+  ConversationTaskRunner,
+  taskExecutionScope,
+} from './conversation/task-runner';
+export {
   DEFAULT_PROFILE_CONVERSATION_DRAIN_MS,
   ProfileConversationRuntimeOwner,
 } from './conversation/profile-runtime-owner';
@@ -349,6 +353,12 @@ export type {
   StartConversationInput,
   StartIntentInput,
 } from './conversation/runtime';
+export type {
+  ConversationTaskActiveRun,
+  ConversationTaskRunnerOptions,
+  ConversationTaskRuntime,
+  ConversationTaskStartResult,
+} from './conversation/task-runner';
 export type { ProfileConversationRuntimeOwnerOptions } from './conversation/profile-runtime-owner';
 export { createProfileConversationHost } from './conversation/profile-host';
 export type {
@@ -363,6 +373,20 @@ export type {
 export { FileAttachmentStore } from './media/file-store';
 export type { FileAttachmentInput } from './media/file-store';
 export type { ConversationSource } from './conversation/types';
+export {
+  TaskAdmissionService,
+  isTaskCommandText,
+  parseTaskCommand,
+} from './task/admission';
+export { TaskCoordinator } from './task/coordinator';
+export type {
+  InvalidTaskCommand,
+  ParsedTaskCommand,
+  TaskAdmissionInput,
+  TaskAdmissionOptions,
+  TaskCommandParseResult,
+  TaskCommandRequest,
+} from './task/admission';
 export { ChannelPluginRegistry } from './channel/plugin/registry';
 export {
   ExternalChannelPluginLoader,
@@ -524,6 +548,8 @@ export type {
   ChannelAnswerCheckpoint,
   ChannelAnswerProcessor,
   ChannelAnswerStore,
+  ChannelBatchCheckpoint,
+  ChannelBatchStore,
   ChannelCompletionReceipt,
   ChannelDeliveryLedgerEntry,
   ChannelDeliveryStore,
@@ -660,6 +686,7 @@ export { WechatKfNotificationProcessor } from './channel/wechat-kf/processor';
 export type {
   WechatKfMessageSink,
   WechatKfNotificationProcessorOptions,
+  WechatKfTurnHandler,
 } from './channel/wechat-kf/processor';
 export { FileWechatKfReceiptStore } from './channel/wechat-kf/receipt-store';
 export { wechatKfActorId, wechatKfScopeId } from './channel/wechat-kf/session';
@@ -701,6 +728,9 @@ export type {
 // Stable outbound contracts. Aria itself is pass-through; deployments may
 // observe or govern these envelopes without patching the channel SDK.
 export { OutboundBroker } from './outbound/broker';
+export type { ProgressPolicy, ProgressPolicyInput, ProgressFormat } from './outbound/progress-policy';
+export { resolvePresentation } from './outbound/presentation';
+export type { PresentationState } from './outbound/presentation';
 export {
   activeOutboundContext,
   activeOutboundIntent,
@@ -747,6 +777,33 @@ export type {
   NativeReadRuntimeFactoryContext,
 } from './runtime/native-read-runtime';
 export type { NativeReadScope } from './platform/native-read-http-server';
+export { SpaceManagementService } from './space/management';
+export { SpaceWorkspaces } from './space/workspace';
+export { inspectSelectedSpaceWorkspaces, prepareSelectedSpaceWorkspaces } from './space/workspace-status';
+export type { WorkspaceSetupPlan } from './space/workspace';
+export { normalizeSpaceWorkspaces, readSpaceWorkspaces } from './space/workspace-definition';
+export type { SpaceWorkspacesDefinition, WorkspaceBundle, WorkspaceFile } from './space/workspace-definition';
+export { executionSpaceMode, spaceEngineCapabilities } from './space/capabilities';
+export { SpaceTransitionCoordinator } from './space/transition';
+export type { SpaceTransitionRuntime } from './space/transition';
+export { requestRuntimeControl } from './runtime/control-client';
+export { SpaceNativeTools } from './space/native-tools';
+export type { SpaceNativeTool } from './space/native-tools';
+export type { SpaceToolExtensionDefinition, SpaceToolExtensionHost, SpaceToolExtensionModule } from './space/tool-extension';
+export { larkSpaceNativeTool } from './lark-cli/space-tool';
+export type { SpaceManagementOptions, SpaceMigrationAdapter } from './space/management';
+export type { SpaceDeploymentDefinition } from './space/deployment';
+export type { ExecutionSpaceSelection } from './config/execution-spaces';
+export { nativeSessionMigration } from './space/session-migration';
+export type { LegacySessionOwnership, VerifiedLegacySession } from './space/session-migration';
+export { openPreparedSpaceHost } from './space/host';
+export { SpaceOperationGate } from './space/operation-gate';
+export type { SpaceOperation, SpaceOperationCheckpoint } from './space/operation-gate';
+export { SpaceReadAccess } from './space/read-access';
+export { SpaceToolCredentials, SpaceToolProviderError } from './space/tool-credentials';
+export { LarkSpaceCredentialProvider } from './lark-cli/space-credentials';
+export type { SpaceCliCommand } from './lark-cli/space-credentials';
+export type { SpaceToolCredentialProvider, SpaceToolRequest, SpaceToolResult } from './space/tool-credentials';
 export type { RunAuditEvent, RunAuditSink } from './runtime/run-executor';
 export type { GovernanceAuditAction, GovernanceAuditEvent, GovernanceAuditSink } from './runtime/governance-audit';
 export type { MessageAuditEvent, MessageAuditSink } from './runtime/message-audit';
@@ -757,3 +814,6 @@ export type {
   MessageResourceSink,
   MessageSessionBinding,
 } from './runtime/message-resource';
+
+export type { SpaceEnvironmentPackageDefinition, SpaceEnvironmentPackageContext, SpaceEnvironmentPackageResult, SpaceEnvironmentPackageModule } from './space/environment-package';
+export { copyLegacyLarkCliState } from './lark-cli/local-migration';
