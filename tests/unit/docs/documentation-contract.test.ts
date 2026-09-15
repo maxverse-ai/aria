@@ -1,11 +1,16 @@
 import { readFile, readdir, stat } from 'node:fs/promises';
-import { dirname, join, relative, resolve } from 'node:path';
+import { dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 const repoRoot = fileURLToPath(new URL('../../../', import.meta.url));
 const docsDir = join(repoRoot, 'docs');
 const ROLES = ['current', 'in progress', 'historical', 'archived'] as const;
+
+/** Repository-relative path with forward slashes, as markdown links write them. */
+function repoPath(absolute: string): string {
+  return relative(repoRoot, absolute).split(sep).join('/');
+}
 
 async function markdownFiles(directory: string): Promise<string[]> {
   const entries = await readdir(directory, { withFileTypes: true });
@@ -38,8 +43,9 @@ describe('documentation contract', () => {
     const offenders: string[] = [];
     for (const file of await markdownFiles(docsDir)) {
       const text = await readFile(file, 'utf8');
-      const name = relative(repoRoot, file);
-      const lines = text.split('\n');
+      const name = repoPath(file);
+      // A Windows checkout writes these files back with CRLF.
+      const lines = text.split(/\r?\n/);
       if (!lines[0]!.startsWith('# ')) offenders.push(`${name}: first line is not a title`);
       const header = lines.find((line) => line.startsWith('> Status: '));
       if (!header) { offenders.push(`${name}: no '> Status: ' line`); continue; }
@@ -61,11 +67,11 @@ describe('documentation contract', () => {
     for (const source of sources) {
       const text = await readFile(source, 'utf8');
       for (const target of relativeLinks(text)) {
-        linked.add(relative(repoRoot, resolve(dirname(source), target)));
+        linked.add(repoPath(resolve(dirname(source), target)));
       }
     }
     const orphans = files
-      .map((file) => relative(repoRoot, file))
+      .map((file) => repoPath(file))
       .filter((name) => !linked.has(name));
     expect(orphans).toEqual([]);
   });
@@ -81,7 +87,7 @@ describe('documentation contract', () => {
       for (const target of relativeLinks(text)) {
         const resolved = resolve(dirname(source), target);
         const exists = await stat(resolved).then(() => true, () => false);
-        if (!exists) broken.push(`${relative(repoRoot, source)} -> ${target}`);
+        if (!exists) broken.push(`${repoPath(source)} -> ${target}`);
       }
     }
     expect(broken).toEqual([]);
