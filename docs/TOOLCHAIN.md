@@ -12,8 +12,8 @@ release or deployment automation.
   separately installed global pnpm.
 - `pnpm-workspace.yaml#allowBuilds` is the reviewed allowlist for dependency
   lifecycle scripts.
-- CI validates the supported Node 24 floor across Linux, macOS, and Windows. The
-  package artifact is built with the pinned runtime.
+- CI and the package artifact are built with the pinned runtime. `engines`
+  remains the supported floor, so the pin can advance ahead of it.
 
 Run the local prerequisite check with:
 
