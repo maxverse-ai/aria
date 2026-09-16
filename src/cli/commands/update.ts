@@ -5,21 +5,47 @@ export interface UpdateOutputOptions {
 }
 
 export async function runUpdateCheck(options: UpdateOutputOptions = {}): Promise<void> {
-  throw externalUpdatesDisabled(options);
+  const { service } = await createDistributionRuntime();
+  const result = await service.check();
+  if (options.json) return printJson(result);
+  if (!result.latest) {
+    console.log('没有可用的完整、不可变内部版本。');
+    return;
+  }
+  const current = result.current ? `${result.current.version} (${shortSha(result.current.commit)})` : '未托管';
+  console.log(`当前版本: ${current}`);
+  console.log(`最新版本: ${result.latest.version} (${shortSha(result.latest.commit)})`);
+  console.log(result.updateAvailable ? '可更新。运行 `aria update plan` 创建更新计划。' : '已经是最新版本。');
 }
 
 export async function runUpdatePlan(
   options: UpdateOutputOptions & { version?: string; force?: boolean } = {},
 ): Promise<void> {
-  throw externalUpdatesDisabled(options);
+  const { service } = await createDistributionRuntime();
+  const plan = await service.createPlan({ version: options.version, force: options.force });
+  if (options.json) return printJson(plan);
+  console.log(`✓ 更新计划已创建: ${plan.id}`);
+  console.log(`  目标: ${plan.target.version} (${shortSha(plan.target.commit)})`);
+  console.log(`  校验: SHA-256 ${plan.target.sha256}`);
+  console.log(`  到期: ${plan.expiresAt}`);
+  console.log(`  应用: aria update apply ${plan.id}`);
 }
 
 export async function runUpdateApply(
   planId: string,
   options: UpdateOutputOptions & { foreground?: boolean } = {},
 ): Promise<void> {
-  void planId;
-  throw externalUpdatesDisabled(options);
+  const { service, executor } = await createDistributionRuntime();
+  if (options.foreground) {
+    const operation = await service.apply(planId);
+    if (options.json) return printJson(operation);
+    console.log(`✓ Aria 已更新到 ${operation.installed?.version ?? '目标版本'}。`);
+    return;
+  }
+  const result = await executor.execute(planId);
+  if (options.json) return printJson(result);
+  console.log(`✓ 更新已交给独立执行器: ${result.operationId}`);
+  console.log(`  状态: aria update status ${result.operationId}`);
 }
 
 export async function runUpdateStatus(operationId: string | undefined, options: UpdateOutputOptions = {}): Promise<void> {
@@ -56,10 +82,6 @@ function printJson(value: unknown): void {
   console.log(JSON.stringify(value, null, 2));
 }
 
-function externalUpdatesDisabled(options: UpdateOutputOptions): Error {
-  const message = 'External updates are disabled for this local fork. Run `corepack pnpm local:rollout` from the canonical Aria main repository.';
-  if (options.json) {
-    return new Error(JSON.stringify({ code: 'EXTERNAL_UPDATES_DISABLED', message }));
-  }
-  return new Error(message);
+function shortSha(commit: string): string {
+  return commit === '0'.repeat(40) ? 'legacy' : commit.slice(0, 12);
 }
