@@ -63,7 +63,7 @@ export function classifyTransition(fromInput, toInput) {
   return "none";
 }
 
-function versionLine(version) {
+export function versionLine(version) {
   return `${version.major}.${version.minor}`;
 }
 
@@ -166,24 +166,40 @@ function readRepositoryState() {
   return { policy, packageVersion };
 }
 
-function latestTagVersion() {
+/**
+ * The newest published release tag.
+ *
+ * Internal snapshots are tagged `internal-v*`, so a `v*` pattern finds nothing
+ * in this repository and the plan baseline silently fell back to the working
+ * copy. The npm path would add `v*` tags if it is ever bootstrapped, so accept
+ * both namespaces and take the highest parsed version.
+ */
+export function latestReleaseTagVersion() {
   try {
-    const output = execFileSync("git", ["tag", "--list", "v*", "--sort=-version:refname"], {
+    const output = execFileSync("git", ["tag", "--list", "internal-v*", "v*"], {
       cwd: root,
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
     }).trim();
+    let newest = null;
     for (const tag of output.split("\n").filter(Boolean)) {
       try {
-        return parseVersion(tag.replace(/^v/, ""));
+        const version = parseVersion(tag.replace(/^internal-v/, "").replace(/^v/, ""));
+        if (!newest || comparesAfter(version, newest)) newest = version;
       } catch {
         // Ignore non-SemVer tags and continue to the next candidate.
       }
     }
-    return null;
+    return newest;
   } catch {
     return null;
   }
+}
+
+function comparesAfter(candidate, current) {
+  if (candidate.major !== current.major) return candidate.major > current.major;
+  if (candidate.minor !== current.minor) return candidate.minor > current.minor;
+  return candidate.patch > current.patch;
 }
 
 function argument(name) {
@@ -239,7 +255,7 @@ function main() {
 
   if (command === "plan") {
     const level = argument("--level") ?? "patch";
-    const tagged = latestTagVersion();
+    const tagged = latestReleaseTagVersion();
     const current = tagged ?? packageVersion;
     const target = nextVersion(current, level);
     const result = verifyTransition({ from: current.raw, to: target, policy, humanAuthorized: false });

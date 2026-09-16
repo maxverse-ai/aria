@@ -6,7 +6,7 @@ import { basename, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { sha256File, validateManifest, verifyStandaloneNodeAsset } from "./artifact.mjs";
-import { parseVersion, validatePolicy } from "./release-policy.mjs";
+import { latestReleaseTagVersion, parseVersion, validatePolicy, versionLine } from "./release-policy.mjs";
 
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const expectedRepository = "maxverse-ai/aria";
@@ -28,6 +28,40 @@ export function internalTagForVersion(version) {
   const parsed = parseVersion(version);
   if (parsed.prerelease) throw new Error("internal snapshots require a stable package version");
   return `internal-v${parsed.raw}`;
+}
+
+/**
+ * Decide whether this release may advance the release line.
+ *
+ * `RELEASE_POLICY.md` wants a durable human authorization for a line change.
+ * This repository cannot use protected branches or environment reviewers — the
+ * GitHub API answers "Upgrade to GitHub Pro" — and a required-status-check list
+ * that is empty cannot refuse anything. Publishing is the action that produces
+ * an external, immutable effect, so the refusal lives here: without a recorded
+ * authorization the release fails closed and creates nothing.
+ *
+ * The durable record is the exact commit, because it is the only artifact that
+ * survives every later rewrite of the working tree.
+ */
+export function releaseLineAuthorization({
+  stableLine,
+  previousLine,
+  commitMessage,
+  humanAuthorized = false,
+}) {
+  if (!previousLine || previousLine === stableLine || humanAuthorized) {
+    return { ok: true, required: null, failures: [] };
+  }
+  const required = `Authorized-Release-Line: ${stableLine}`;
+  if (commitMessage.includes(required)) return { ok: true, required, failures: [] };
+  return {
+    ok: false,
+    required,
+    failures: [
+      `release line ${previousLine} -> ${stableLine} requires '${required}' in the exact commit message`,
+      "or ARIA_RELEASE_HUMAN_AUTHORIZED=true from an approved job",
+    ],
+  };
 }
 
 export function validateInternalReleaseContext(env) {
@@ -129,6 +163,14 @@ function prepareInternalRelease() {
   const commit = assertExactMain();
   const packageJson = readJson("package.json");
   const policy = readJson(".release-policy.json");
+  const published = latestReleaseTagVersion();
+  const authorization = releaseLineAuthorization({
+    stableLine: policy.stableLine,
+    previousLine: published ? versionLine(published) : null,
+    commitMessage: run("git", ["log", "-1", "--format=%B", commit]),
+    humanAuthorized: process.env.ARIA_RELEASE_HUMAN_AUTHORIZED === "true",
+  });
+  if (!authorization.ok) throw new Error(authorization.failures.join("; "));
   const manifest = validateManifest(readJson("artifacts/manifest.json"));
   const tarball = resolve(root, "artifacts", manifest.tarball);
   const notes = `docs/releases/v${packageJson.version}.md`;

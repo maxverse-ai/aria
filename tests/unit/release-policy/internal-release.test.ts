@@ -6,6 +6,7 @@ import {
   createInternalReleasePlan,
   createReleaseManifest,
   internalTagForVersion,
+  releaseLineAuthorization,
   validateInternalReleaseContext,
 } from "../../../tools/internal-release.mjs";
 
@@ -139,5 +140,43 @@ describe("internal release workflow boundary", () => {
     expect(workflow).not.toContain("NODE_AUTH_TOKEN");
     expect(notes).toMatch(/not\r?\npublished to npm/);
     expect(notes).toContain("Physical state migration");
+  });
+});
+
+describe("release line authorization", () => {
+  const advance = "chore(release): prepare internal v0.4.0";
+
+  it("asks nothing when the release line does not move", () => {
+    expect(releaseLineAuthorization({ stableLine: "0.3", previousLine: "0.3", commitMessage: advance }))
+      .toEqual({ ok: true, required: null, failures: [] });
+  });
+
+  it("asks nothing for the first release, which has no previous line", () => {
+    expect(releaseLineAuthorization({ stableLine: "0.1", previousLine: null, commitMessage: advance }))
+      .toEqual({ ok: true, required: null, failures: [] });
+  });
+
+  it("refuses a line change the exact commit does not authorize", () => {
+    const result = releaseLineAuthorization({ stableLine: "0.4", previousLine: "0.3", commitMessage: advance });
+    expect(result.ok).toBe(false);
+    expect(result.required).toBe("Authorized-Release-Line: 0.4");
+    expect(result.failures.join(" ")).toContain("Authorized-Release-Line: 0.4");
+  });
+
+  it("accepts a line change the exact commit authorizes", () => {
+    const commitMessage = `${advance}\n\nAuthorized-Release-Line: 0.4\n`;
+    expect(releaseLineAuthorization({ stableLine: "0.4", previousLine: "0.3", commitMessage }))
+      .toEqual({ ok: true, required: "Authorized-Release-Line: 0.4", failures: [] });
+  });
+
+  it("does not accept an authorization for a different line", () => {
+    const commitMessage = `${advance}\n\nAuthorized-Release-Line: 0.5\n`;
+    expect(releaseLineAuthorization({ stableLine: "0.4", previousLine: "0.3", commitMessage }).ok).toBe(false);
+  });
+
+  it("still honours an approved job's environment authorization", () => {
+    expect(releaseLineAuthorization({
+      stableLine: "0.4", previousLine: "0.3", commitMessage: advance, humanAuthorized: true,
+    })).toEqual({ ok: true, required: null, failures: [] });
   });
 });

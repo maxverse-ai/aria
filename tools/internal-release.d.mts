@@ -15,6 +15,17 @@ export function validateInternalReleaseContext(env: Record<string, string | unde
   ok: boolean;
   failures: string[];
 };
+/**
+ * Whether this release may advance the release line. The refusal lives in the
+ * release path because publishing is the action that produces an external,
+ * immutable effect.
+ */
+export function releaseLineAuthorization(input: {
+  stableLine: string;
+  previousLine: string | null;
+  commitMessage: string;
+  humanAuthorized?: boolean;
+}): { ok: boolean; required: string | null; failures: string[] };
 export function createInternalReleasePlan(input: {
   packageJson: { name: string; version: string };
   policy: ReleasePolicy;

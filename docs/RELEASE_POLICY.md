@@ -22,10 +22,18 @@ For `0.x`, a MINOR change is treated as a release-line change and therefore
 requires human authorization. An agent may recommend a new line but must not
 authorize it, edit `stableLine`, or publish it on its own.
 
-Human authorization must be durable: a reviewed change to
-`.release-policy.json` and, for a publishing workflow, approval through a
-protected GitHub Environment. A statement copied from chat is not a durable
-authorization record.
+Human authorization must be durable. This repository cannot use protected
+branches, rulesets, or environment reviewers — the GitHub API answers "Upgrade
+to GitHub Pro" for a private repository on this plan, and the required-status
+check list is empty, so a failing check cannot refuse anything. The durable
+record is therefore the release commit itself: a release that advances the
+release line must carry `Authorized-Release-Line: <new line>` in its exact
+commit message, and the internal release fails closed without it. A statement
+copied from chat is not a durable authorization record.
+
+If the repository is ever moved to a plan with protected environments, approval
+through one can be added as a second signal; it does not replace the recorded
+line.
 
 ## Automatic patch eligibility
 
@@ -73,9 +81,14 @@ CI supplies the pull-request base or previous push commit to `release:check`.
 The check compares both `package.json` and `.release-policy.json` with that base,
 so an unauthorized release-line change cannot pass merely by editing both files.
 
-For MINOR, MAJOR, or stable-promotion verification, the protected release job
-must inject `ARIA_RELEASE_HUMAN_AUTHORIZED=true` after human approval. Agents
-must not set that variable to manufacture authorization.
+For MINOR, MAJOR, or stable-promotion verification, an approved job may inject
+`ARIA_RELEASE_HUMAN_AUTHORIZED=true` instead of recording the line in the commit.
+Agents must not set that variable to manufacture authorization.
+
+The refusal lives in the internal release, not in CI: `ci.yml` compares against
+the previous commit and can only redden a run, while
+`.github/workflows/internal-release.yml` runs the action that produces an
+immutable public artifact and can refuse to perform it.
 
 ## Publishing architecture
 
@@ -85,9 +98,10 @@ tags, rerun all gates, call `release:verify`, build from the merged `origin/main
 commit, ensure the tag and registry version are unused, publish, then verify the
 published artifact. npm credentials must exist only in the protected workflow.
 
-Repository settings must require human review for changes to
-`.release-policy.json` and for the protected environment used by MINOR, MAJOR,
-and stable-promotion releases.
+Where the plan allows it, repository settings should require human review for
+changes to `.release-policy.json` and for the environment used by MINOR, MAJOR,
+and stable-promotion releases. On the current plan neither is available, so the
+recorded release line is the only durable authorization signal.
 
 ## Private internal GitHub snapshots
 
