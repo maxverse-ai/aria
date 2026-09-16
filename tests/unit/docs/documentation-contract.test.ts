@@ -50,6 +50,14 @@ describe('documentation contract', () => {
       const header = lines.find((line) => line.startsWith('> Status: '));
       if (!header) { offenders.push(`${name}: no '> Status: ' line`); continue; }
       const rest = header.slice('> Status: '.length);
+      // A second role after the first separator is a header written over
+      // itself: the role is stated once, and what follows it is evidence.
+      const separator = rest.indexOf(' — ');
+      const evidence = separator === -1 ? '' : rest.slice(separator + ' — '.length);
+      if (ROLES.some((role) => evidence.startsWith(`${role} — `))) {
+        offenders.push(`${name}: states its role twice — "${rest}"`);
+        continue;
+      }
       const role = ROLES.find((candidate) => rest === candidate || rest.startsWith(`${candidate} —`));
       if (!role) { offenders.push(`${name}: role is not one of ${ROLES.join(', ')}`); continue; }
       if (role !== 'current' && !rest.startsWith(`${role} — `)) {
