@@ -48,11 +48,12 @@ These rules apply to every remaining stage:
 
 ## Current baseline
 
-Execution-space Phase 1 is documentation only and does not change the stage
-statuses below. Its [delivery plan](EXECUTION_SPACE_DELIVERY_PLAN.md) owns the
-default-space compatibility refactor, trusted audience/identity extension and
-later profile composition change. Do not infer team isolation or provider
-activation from that separate plan.
+Execution spaces are implemented through E5.3 for explicitly prepared hosts and
+still do not change the stage statuses below. Their
+[delivery plan](EXECUTION_SPACE_DELIVERY_PLAN.md) owns the default-space
+compatibility refactor, trusted audience/identity extension and later profile
+composition change. Do not infer team isolation or provider activation from
+that separate plan.
 
 | Stage | State | Shipped boundary |
 | --- | --- | --- |
