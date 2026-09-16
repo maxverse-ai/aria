@@ -202,6 +202,52 @@ function comparesAfter(candidate, current) {
   return candidate.patch > current.patch;
 }
 
+/**
+ * Whether a release may advance the release line.
+ *
+ * `RELEASE_POLICY.md` wants a durable human authorization for a line change.
+ * This repository cannot use protected branches or environment reviewers — the
+ * GitHub API answers "Upgrade to GitHub Pro" — and an empty required-check list
+ * cannot refuse anything, so the durable record is the exact commit.
+ *
+ * `check` reports a violation; the internal release refuses to publish on one.
+ * Both read this single rule so a recorded authorization is not contradicted by
+ * the other.
+ */
+export function releaseLineAuthorization({
+  stableLine,
+  previousLine,
+  commitMessage,
+  humanAuthorized = false,
+}) {
+  if (!previousLine || previousLine === stableLine || humanAuthorized) {
+    return { ok: true, required: null, failures: [] };
+  }
+  const required = `Authorized-Release-Line: ${stableLine}`;
+  if (commitMessage.includes(required)) return { ok: true, required, failures: [] };
+  return {
+    ok: false,
+    required,
+    failures: [
+      `release line ${previousLine} -> ${stableLine} requires '${required}' in the exact commit message`,
+      "or ARIA_RELEASE_HUMAN_AUTHORIZED=true from an approved job",
+    ],
+  };
+}
+
+/** The exact commit's full message, or an empty string outside a repository. */
+function headCommitMessage() {
+  try {
+    return execFileSync("git", ["log", "-1", "--format=%B"], {
+      cwd: root,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+  } catch {
+    return "";
+  }
+}
+
 function argument(name) {
   const index = process.argv.indexOf(name);
   return index >= 0 ? process.argv[index + 1] : undefined;
@@ -228,8 +274,14 @@ function main() {
       const humanAuthorized = process.env.ARIA_RELEASE_HUMAN_AUTHORIZED === "true";
       if (basePolicyValue) {
         const basePolicy = validatePolicy(basePolicyValue);
-        if (basePolicy.stableLine !== policy.stableLine && !humanAuthorized) {
-          throw new Error("changing stableLine requires protected human authorization");
+        if (basePolicy.stableLine !== policy.stableLine) {
+          const authorization = releaseLineAuthorization({
+            stableLine: policy.stableLine,
+            previousLine: basePolicy.stableLine,
+            commitMessage: headCommitMessage(),
+            humanAuthorized,
+          });
+          if (!authorization.ok) throw new Error(authorization.failures.join("; "));
         }
       }
       if (basePackage.version !== packageVersion.raw) {

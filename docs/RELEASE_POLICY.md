@@ -85,10 +85,10 @@ For MINOR, MAJOR, or stable-promotion verification, an approved job may inject
 `ARIA_RELEASE_HUMAN_AUTHORIZED=true` instead of recording the line in the commit.
 Agents must not set that variable to manufacture authorization.
 
-The refusal lives in the internal release, not in CI: `ci.yml` compares against
-the previous commit and can only redden a run, while
+Both read the same rule. `ci.yml` compares against the previous commit and can
+only redden a run, so it reports an unauthorized line change;
 `.github/workflows/internal-release.yml` runs the action that produces an
-immutable public artifact and can refuse to perform it.
+immutable public artifact, so it refuses to perform one.
 
 ## Publishing architecture
 

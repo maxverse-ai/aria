@@ -36,6 +36,16 @@ export function latestReleaseTagVersion(): {
   patch: number;
   prerelease: string | null;
 } | null;
+/**
+ * Whether a release may advance the release line. `check` reports a violation;
+ * the internal release refuses to publish on one.
+ */
+export function releaseLineAuthorization(input: {
+  stableLine: string;
+  previousLine: string | null;
+  commitMessage: string;
+  humanAuthorized?: boolean;
+}): { ok: boolean; required: string | null; failures: string[] };
 export function classifyTransition(from: string, to: string): VersionTransitionResult["level"];
 export function nextVersion(current: string, level: "patch" | "minor" | "major"): string;
 export function verifyTransition(input: {
