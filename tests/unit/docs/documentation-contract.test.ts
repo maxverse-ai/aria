@@ -100,4 +100,29 @@ describe('documentation contract', () => {
     };
     expect(await index('README.zh.md')).toEqual(await index('README.md'));
   });
+
+  it('names only files this repository has as a single source of truth', async () => {
+    // A definition that names a file the repository does not carry — most often
+    // a private-fork artifact that never came across — is a source of truth
+    // nobody can read.
+    const text = await readFile(join(docsDir, 'DOCUMENTATION_POLICY.md'), 'utf8');
+    const section = text
+      .split(/^## /m)
+      .find((part) => part.startsWith('Single sources of truth'));
+    expect(section).toBeDefined();
+
+    const missing: string[] = [];
+    for (const row of section!.split(/\r?\n/)) {
+      if (!row.startsWith('|')) continue;
+      const definition = row.split('|')[2] ?? '';
+      for (const match of definition.matchAll(/`([^`]+)`/g)) {
+        const target = match[1]!.split('#')[0]!;
+        // Only backticked names that read as paths; a command is not a path.
+        if (!/[./]/.test(target)) continue;
+        const exists = await stat(join(repoRoot, target)).then(() => true, () => false);
+        if (!exists) missing.push(`${target} — named by "${definition.trim()}"`);
+      }
+    }
+    expect(missing).toEqual([]);
+  });
 });
