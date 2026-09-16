@@ -248,6 +248,18 @@ function headCommitMessage() {
   }
 }
 
+/**
+ * The release line the exact commit authorizes, if it records one.
+ *
+ * The recorded line is the durable authorization for both halves of a line
+ * change: `stableLine` moving, and a MINOR version transition that
+ * `requireHumanForMinor` would otherwise refuse.
+ */
+function recordedReleaseLine() {
+  const match = /^Authorized-Release-Line:[ \t]*(\d+\.\d+)[ \t]*$/m.exec(headCommitMessage());
+  return match ? match[1] : null;
+}
+
 function argument(name) {
   const index = process.argv.indexOf(name);
   return index >= 0 ? process.argv[index + 1] : undefined;
@@ -271,7 +283,10 @@ function main() {
       const basePackage = readJsonAtRef(baseRef, "package.json");
       if (!basePackage?.version) throw new Error(`cannot read package.json at base ref ${baseRef}`);
       const basePolicyValue = readJsonAtRef(baseRef, ".release-policy.json");
-      const humanAuthorized = process.env.ARIA_RELEASE_HUMAN_AUTHORIZED === "true";
+      // An approved job authorizes through the environment; otherwise the exact
+      // commit's recorded line authorizes the line it names.
+      const humanAuthorized = process.env.ARIA_RELEASE_HUMAN_AUTHORIZED === "true"
+        || recordedReleaseLine() === policy.stableLine;
       if (basePolicyValue) {
         const basePolicy = validatePolicy(basePolicyValue);
         if (basePolicy.stableLine !== policy.stableLine) {
