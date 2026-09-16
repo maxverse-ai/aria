@@ -131,7 +131,7 @@ The current product boundary is deliberately explicit:
 
 ### Prerequisites
 
-- Node.js **>= 20.12.0**
+- Node.js **>= 24.0.0**
 - At least one local agent installed and logged in:
   - Claude Code: `claude`, see https://docs.anthropic.com/en/docs/claude-code/quickstart
   - Codex CLI: `codex`, see https://developers.openai.com/codex/cli

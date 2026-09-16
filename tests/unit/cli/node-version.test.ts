@@ -4,7 +4,7 @@ import { nodeVersionNotice } from '../../../src/cli/node-version';
 
 describe('node version deprecation notice', () => {
   it('announces the next required runtime on older ones', () => {
-    expect(nodeVersionNotice('22.22.3')).toContain('will require Node 24');
+    expect(nodeVersionNotice('22.22.3')).toContain('requires Node 24');
     expect(nodeVersionNotice('22.22.3')).toContain('v22.22.3');
     expect(nodeVersionNotice('20.12.0')).toContain('v20.12.0');
   });

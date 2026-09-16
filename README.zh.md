@@ -125,7 +125,7 @@ Aria 的通用“加速开关”：只有 Codex App Server 为所选模型上报
 
 ### 前置条件
 
-- Node.js **>= 20.12.0**
+- Node.js **>= 24.0.0**
 - 本机至少安装并登录一个 agent：
   - Claude Code：`claude`，安装说明：https://docs.anthropic.com/en/docs/claude-code/quickstart
   - Codex CLI：`codex`，安装说明：https://developers.openai.com/codex/cli
