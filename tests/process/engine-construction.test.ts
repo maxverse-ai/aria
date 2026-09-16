@@ -11,10 +11,12 @@ const allEngines = ['claude', 'codex', 'grok', 'opencode', 'dsh', 'kimi', 'pi'] 
 type Engine = typeof allEngines[number];
 // Two engines cannot be exercised through this file's Windows fixture:
 // `dsh` reports progress over an extra stdio descriptor, which Node only
-// supports on POSIX hosts, and `pi` receives its prompt as an argv element while
-// the fixture reaches Windows through a `.cmd` shim, which re-parses arguments
-// through cmd.exe and cannot carry a multi-line prompt. Both keep full coverage
-// on POSIX hosts.
+// supports on POSIX hosts, and `pi` receives its prompt as an argv element.
+// That second one is not merely a fixture limit: on Windows every npm-installed
+// CLI is a `.cmd` shim, cross-spawn reaches it through `cmd.exe /d /s /c`, and
+// its escaping covers metacharacters but not newlines — so a multi-line argv
+// prompt cannot survive there either. See ARIA-PI-001 in the bug ledger.
+// Both engines keep full coverage on POSIX hosts.
 const engines: readonly Engine[] = process.platform === 'win32'
   ? allEngines.filter((engine) => engine !== 'dsh' && engine !== 'pi')
   : allEngines;

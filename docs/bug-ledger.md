@@ -2,6 +2,26 @@
 
 > Status: current — append-only ledger; entries are never rewritten.
 
+## ARIA-PI-001 — A multi-line prompt cannot reach the `pi` engine on Windows
+
+- Evidence: `tests/process/engine-construction.test.ts` cannot exercise `pi`
+  through its Windows fixture. `buildPiArgs` appends the whole prompt — which
+  includes the multi-line bridge system prompt — as the last argv element.
+- Cause: on Windows an npm-installed CLI is a `.cmd` shim, `cross-spawn` reaches
+  it through `cmd.exe /d /s /c`, and its argument escaping covers cmd
+  metacharacters but has no handling for newlines, which terminate a cmd
+  command. The prompt is truncated at its first newline. This is not only a
+  fixture artifact: spawning the real `pi` takes the same path.
+- Fix: not attempted. `pi` may accept its prompt on stdin the way `claude -p`
+  does, but `pi` is not installed on the machine this was written from, so its
+  CLI contract could not be verified. Changing the transport blind would risk
+  breaking the engine where it currently works.
+- Validation: the mechanism is confirmed from the argv builder and cross-spawn's
+  Windows escaping; the engine itself was not run.
+- Scope: Windows only. `pi` is unaffected on Linux and macOS.
+- Status: open. Verify `pi`'s stdin contract, move the prompt off argv, then
+  restore the Windows launch cases.
+
 ## ARIA-PROBE-001 — Engine version probe intermittently reported installed without a version
 
 - Evidence: on 2026-09-15, two CI runs failed `plugin-probe` on different
