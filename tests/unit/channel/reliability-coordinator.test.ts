@@ -1,16 +1,19 @@
 import { describe, expect, it, vi } from 'vitest';
+import type { Mock } from 'vitest';
 import { ChannelPluginError } from '../../../src/channel/plugin/errors';
 import { CHANNEL_PLUGIN_ABI_VERSION } from '../../../src/channel/plugin/types';
 import type {
   ChannelInboundEnvelope,
   ChannelOutboundIntent,
 } from '../../../src/channel/plugin/types';
+import type { ChannelDeliveryReceipt } from '../../../src/channel/plugin/types';
 import { ChannelReliabilityCoordinator } from '../../../src/channel/reliability/coordinator';
 import {
   channelReceiptId,
   reliabilityKeyFromEnvelope,
 } from '../../../src/channel/reliability/key';
 import { InMemoryChannelReliabilityStores } from '../../../src/channel/reliability/memory-store';
+import type { ChannelAnswerProcessor } from '../../../src/channel/reliability/types';
 
 describe('ChannelReliabilityCoordinator', () => {
   it('durably accepts once and isolates equal provider ids by profile, plugin, and instance', async () => {
@@ -443,8 +446,8 @@ describe('ChannelReliabilityCoordinator', () => {
 
 function createCoordinator(options: {
   stores: InMemoryChannelReliabilityStores;
-  processor?: { process(envelope: ChannelInboundEnvelope): Promise<readonly ChannelOutboundIntent[]> } | ReturnType<typeof vi.fn>;
-  deliver?: ReturnType<typeof vi.fn>;
+  processor?: ChannelAnswerProcessor | Mock<ChannelAnswerProcessor['process']>;
+  deliver?: Mock<(intent: ChannelOutboundIntent) => Promise<ChannelDeliveryReceipt>>;
   now?: () => number;
   leaseMs?: number;
   retryPolicy?: { maxAttempts: number; baseDelayMs: number; maxDelayMs: number; jitterRatio: number };

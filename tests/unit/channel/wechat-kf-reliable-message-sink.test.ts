@@ -2,6 +2,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { Mock } from 'vitest';
 import { ChannelPluginError } from '../../../src/channel/plugin/errors';
 import { FileChannelReliabilityStores } from '../../../src/channel/reliability/file-store';
 import { FileWechatKfMessageInbox } from '../../../src/channel/wechat-kf/message-inbox';
@@ -19,7 +20,21 @@ afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
 
-async function harness(handler = { accept: vi.fn(async () => undefined) }) {
+/**
+ * A turn handler whose calls the test can inspect. The declared signature is
+ * the handler's, not the mock's, so a spy that ignores its argument and one
+ * that reads it are both assignable.
+ */
+type TurnHandlerMocks = {
+  accept: Mock<(message: WechatKfMessage) => Promise<void>>;
+  acceptTurn?: Mock<(messages: readonly WechatKfMessage[]) => Promise<void>>;
+};
+
+async function harness(
+  handler: TurnHandlerMocks = {
+    accept: vi.fn<(message: WechatKfMessage) => Promise<void>>(async () => undefined),
+  },
+) {
   const root = await mkdtemp(join(tmpdir(), 'aria-wxkf-reliable-'));
   roots.push(root);
   const inbox = new FileWechatKfMessageInbox(join(root, 'messages'));

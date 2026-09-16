@@ -2,6 +2,7 @@ import type { NormalizedMessage } from '@larksuite/channel';
 import { realpath } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { Mock } from 'vitest';
 import type { AgentSteeringRequest } from '../../../src/agent/steering.js';
 import type { AgentEvent, AgentRun, AgentRunOptions } from '../../../src/agent/types.js';
 import type { FakeAgentEvents, FakeAgentRun } from '../../helpers/fake-agent.js';
@@ -56,8 +57,8 @@ interface FakeLarkChannel {
           list: ReturnType<typeof vi.fn>;
         };
         messageReaction: {
-          create: ReturnType<typeof vi.fn>;
-          delete: ReturnType<typeof vi.fn>;
+          create: Mock<(args: unknown) => Promise<{ data?: { reaction_id?: string } }>>;
+          delete: Mock<(args: unknown) => Promise<unknown>>;
         };
       };
     };
