@@ -174,3 +174,30 @@
   receipts determine installed status.
 - Workaround: none verified for the ordinary workspace-enabled message path.
 - Status: fixed in candidate; awaiting validation and deployment.
+
+## ARIA-UPDATE-001 — The released CLI refused the update lifecycle it documents
+
+- Evidence: on 2026-09-16, the published `internal-v0.4.0` artifact answered
+  `aria update check` with `External updates are disabled for this local fork.
+  Run \`corepack pnpm local:rollout\` from the canonical Aria main repository.`
+  Both READMEs and `docs/DISTRIBUTION.md` list `aria update check|plan|apply` as
+  the consumer upgrade path, and `package.json` carries no `local:rollout`
+  script, so the message named a command this repository does not have.
+- Cause: private-fork intake. A machine-private checkout is rolled out by hand,
+  so its fork disables external updates; `518b490` copied that decision over the
+  boundary and replaced three working CLI functions with throwing stubs. The
+  private and public lineages genuinely disagree here, and this file was not on
+  the intake boundary list. Nothing failed, because no test covered the wiring.
+- Fix: restore `runUpdateCheck`, `runUpdatePlan` and `runUpdateApply` to drive
+  the distribution service and the detached executor. The service API
+  (`check`, `createPlan`, `apply`) was intact throughout.
+- Validation: `aria update check` against the real internal channel reports
+  `0.4.0 (c40d5e7add27)` for both current and latest; `--json` returns the full
+  state; `--target-version 0.3.2` is refused as an older target and
+  `--target-version 0.4.0` as already active, both with exit 1. Five CLI tests
+  now fail if the stubs return.
+- Scope: the CLI wiring only. Adoption of the invoking legacy installation,
+  which `includeLegacyCurrent` governs inside `check` and `createPlan`, is
+  unchanged, as is the detached-executor handoff.
+- Status: fixed. The published `internal-v0.4.0` was built before this fix and
+  is immutable, so the first artifact carrying it is the next release.
