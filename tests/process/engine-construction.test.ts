@@ -212,7 +212,9 @@ describe('prepared profile runtime process compatibility', () => {
     }
   });
 
-  it('runs the standalone host without channel credentials through the same prepared factory', async () => {
+  // Runs `pi`, whose prompt always carries the multi-line bridge system prompt
+  // once prefixed, so Windows refuses it at the adapter. See ARIA-PI-001.
+  it.runIf(process.platform !== 'win32')('runs the standalone host without channel credentials through the same prepared factory', async () => {
     const root = await temporaryRoot();
     const binary = await fakeBinary(root, 'pi');
     const configPath = join(root, 'worker.json');
