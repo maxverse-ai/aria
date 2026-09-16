@@ -1,6 +1,6 @@
 # Documentation policy
 
-> Status: current — current — governs every document under `docs/` and the two READMEs.
+> Status: current — governs every document under `docs/` and the two READMEs.
 
 Documentation drifts because nothing distinguishes a description of the present
 from a record of the past, and because the same fact is restated in several
