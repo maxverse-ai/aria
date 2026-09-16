@@ -2,6 +2,30 @@
 
 > Status: current — append-only ledger; entries are never rewritten.
 
+## ARIA-PROBE-001 — Engine version probe intermittently reported installed without a version
+
+- Evidence: on 2026-09-15, two CI runs failed `plugin-probe` on different
+  platforms with different engines — Ubuntu/`opencode` and macOS/`kimi` — each
+  reading `{ installed: true, version: undefined }` while the same fake binary
+  passed on every other attempt. The failing test file took 215ms, so the 30s
+  probe timeout never fired, and 50 consecutive local runs did not reproduce it.
+- Cause: not established. `readVersion` collapsed three distinct outcomes —
+  timeout, non-zero exit, silent output — into the same `undefined`, which made
+  the report undiagnosable. The child failed fast on a binary that works.
+- Fix: partial. The probe now records which outcome occurred in
+  `EngineProbeStatus.error` while leaving `installed` true, and retries once for
+  any failure other than a timeout. The retry is a mitigation: a binary that
+  genuinely cannot report a version fails both attempts, so nothing persistent
+  is hidden.
+- Validation: a fake engine that exits non-zero records `exited with code …`
+  plus its stderr, a silent one records `produced no output`, and a fake that
+  fails only on its first run is reported with its version and no error.
+- Scope: engine availability reporting only; it does not change which engines
+  can run.
+- Status: open. The retry has not yet been observed under the conditions that
+  produced the original failure. If `plugin-probe` fails again, `error` now names
+  the outcome, which is the evidence needed to close this.
+
 ## ARIA-TOOLS-003 — Historical socket arguments broke current native tool calls
 
 - Evidence: on 2026-09-09, a retained ***REMOVED*** Codex conversation repeatedly used

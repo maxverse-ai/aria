@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -71,6 +71,64 @@ describe('engine probe', () => {
     const statuses = await probeEngineStatus(true);
     for (const status of statuses) {
       expect(status.installed).toBe(false);
+    }
+  });
+
+  it('records why a present engine reported no version', async () => {
+    for (const key of ENV_KEYS) savedEnv.set(key, process.env[key]);
+    const dir = await mkdtemp(join(tmpdir(), 'plugin-probe-failure-'));
+    try {
+      const fake = async (name: string, body: string): Promise<string> => {
+        const file = join(dir, name);
+        await writeFile(file, `#!${process.execPath}\n${body}\n`);
+        await chmod(file, 0o755);
+        return file;
+      };
+      const missing = (name: string): string => join(dir, `${name}-missing`);
+      process.env.LARK_CHANNEL_CLAUDE_BIN = missing('claude');
+      process.env.LARK_CHANNEL_CODEX_BIN = missing('codex');
+      process.env.LARK_CHANNEL_GROK_BIN = await fake('grok', 'console.error("boom"); process.exit(3);');
+      process.env.LARK_CHANNEL_OPENCODE_BIN = await fake('opencode', 'process.exit(0);');
+      process.env.LARK_CHANNEL_DSH_BIN = missing('dsh');
+      process.env.LARK_CHANNEL_KIMI_BIN = missing('kimi');
+      process.env.LARK_CHANNEL_PI_BIN = missing('pi');
+
+      const byId = new Map((await probeEngineStatus(true)).map((status) => [status.id, status]));
+
+      // The binary exists, so it stays "installed"; the reason it has no version
+      // is what an intermittent failure needs to be diagnosable.
+      expect(byId.get('grok')).toMatchObject({ installed: true, version: undefined });
+      expect(byId.get('grok')?.error).toContain('exited with code 3');
+      expect(byId.get('grok')?.error).toContain('boom');
+      expect(byId.get('opencode')).toMatchObject({ installed: true, version: undefined });
+      expect(byId.get('opencode')?.error).toContain('produced no output');
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('retries a transient probe failure instead of reporting no version', async () => {
+    for (const key of ENV_KEYS) savedEnv.set(key, process.env[key]);
+    const dir = await mkdtemp(join(tmpdir(), 'plugin-probe-retry-'));
+    try {
+      const missing = (name: string): string => join(dir, `${name}-missing`);
+      for (const key of ENV_KEYS) process.env[key] = missing(key);
+      // Fails the first time it runs, succeeds afterwards.
+      const marker = join(dir, 'ran');
+      const flaky = join(dir, 'flaky');
+      await writeFile(flaky, `#!${process.execPath}\n`
+        + 'const fs = require("node:fs");\n'
+        + `if (!fs.existsSync(${JSON.stringify(marker)})) { fs.writeFileSync(${JSON.stringify(marker)}, "1"); process.exit(7); }\n`
+        + 'console.log("2.5.0");\n');
+      await chmod(flaky, 0o755);
+      process.env.LARK_CHANNEL_CLAUDE_BIN = flaky;
+
+      const byId = new Map((await probeEngineStatus(true)).map((status) => [status.id, status]));
+
+      expect(byId.get('claude')).toMatchObject({ installed: true, version: '2.5.0' });
+      expect(byId.get('claude')?.error).toBeUndefined();
+    } finally {
+      await rm(dir, { recursive: true, force: true });
     }
   });
 });

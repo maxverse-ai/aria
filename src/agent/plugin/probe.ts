@@ -19,6 +19,19 @@ const PROBE_TTL_MS = 60_000;
 // a genuinely hung binary.
 const VERSION_TIMEOUT_MS = 30_000;
 
+/**
+ * The outcome of a version probe.
+ *
+ * A binary can be present and still fail to report a version, and the three
+ * ways that happens — timeout, non-zero exit, silent output — used to collapse
+ * into the same `undefined`, which made an intermittent failure impossible to
+ * diagnose from a test report. Record which one it was.
+ */
+interface VersionProbe {
+  version?: string;
+  failure?: string;
+}
+
 const cache = new Map<string, EngineProbeStatus>();
 let inflight: Promise<EngineProbeStatus[]> | undefined;
 
@@ -61,13 +74,14 @@ export async function probeEngineStatus(force = false): Promise<EngineProbeStatu
           plugin.id;
         try {
           const binaryPath = await resolveExecutablePath(command);
-          const version = await readVersion(binaryPath);
+          const probe = await readVersion(binaryPath);
           return {
             id: plugin.id,
             displayName: plugin.displayName,
             installed: true,
             binaryPath,
-            version,
+            version: probe.version,
+            ...(probe.failure ? { error: probe.failure } : {}),
             checkedAt: Date.now(),
           } satisfies EngineProbeStatus;
         } catch (err) {
@@ -93,7 +107,23 @@ export async function probeEngineStatus(force = false): Promise<EngineProbeStatu
   }
 }
 
-function readVersion(binaryPath: string): Promise<string | undefined> {
+/**
+ * Read a version, tolerating one transient spawn failure.
+ *
+ * This is a mitigation, not a fix: an intermittent probe failure on a loaded CI
+ * host was observed as "installed but no version" with the child failing fast.
+ * A second attempt cannot hide a persistent problem — a binary that genuinely
+ * cannot report a version fails both times — and the recorded `failure` still
+ * names what the last attempt saw. A timeout is not retried, because it has
+ * already spent the whole budget.
+ */
+async function readVersion(binaryPath: string): Promise<VersionProbe> {
+  const first = await readVersionOnce(binaryPath);
+  if (!first.failure || first.failure.startsWith("version probe timed out")) return first;
+  return readVersionOnce(binaryPath);
+}
+
+function readVersionOnce(binaryPath: string): Promise<VersionProbe> {
   return new Promise((resolve, reject) => {
     const child = spawnProcess(binaryPath, ['--version'], {
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -105,7 +135,7 @@ function readVersion(binaryPath: string): Promise<string | undefined> {
       child.kill('SIGTERM');
       if (!settled) {
         settled = true;
-        resolve(undefined);
+        resolve({ failure: `version probe timed out after ${VERSION_TIMEOUT_MS}ms` });
       }
     }, VERSION_TIMEOUT_MS);
     child.stdout?.on('data', (chunk: Buffer) => {
@@ -121,16 +151,20 @@ function readVersion(binaryPath: string): Promise<string | undefined> {
         reject(err);
       }
     });
-    child.once('exit', (code) => {
+    child.once('exit', (code, signal) => {
       clearTimeout(timer);
       if (settled) return;
       settled = true;
       if (code !== 0) {
-        resolve(undefined);
+        const detail = stderr.trim().split('\n')[0]?.trim();
+        resolve({
+          failure: `version probe exited with code ${code}${signal ? ` (${signal})` : ''}`
+            + (detail ? `: ${detail}` : ''),
+        });
         return;
       }
       const version = (stdout.trim() || stderr.trim()).split('\n')[0]?.trim();
-      resolve(version || undefined);
+      resolve(version ? { version } : { failure: 'version probe produced no output' });
     });
   });
 }
