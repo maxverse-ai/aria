@@ -133,4 +133,28 @@ describe('documentation contract', () => {
     }
     expect(missing).toEqual([]);
   });
+
+  it('lists every channel command each README promises to list', async () => {
+    // The registry is the surface; the quick-reference table is how a reader
+    // learns it exists. `weixin-ilink` and the meeting commands arrived without
+    // the table following, so the table quietly stopped being the list.
+    const source = await readFile(join(repoRoot, 'src/commands/index.ts'), 'utf8');
+    const table = source.slice(source.indexOf('const handlers: Record<string, Handler>'));
+    const commands = [...table.matchAll(/^ {2}'(\/[a-z-]+)':/gm)].map((match) => match[1]!);
+    expect(commands.length).toBeGreaterThan(20);
+
+    const offenders: string[] = [];
+    for (const name of ['README.md', 'README.zh.md']) {
+      const markdown = await readFile(join(repoRoot, name), 'utf8');
+      const rows = markdown
+        .split(/\r?\n/)
+        .filter((line) => /^\| `\//.test(line))
+        .map((line) => line.split('|')[1] ?? '');
+      for (const command of commands) {
+        const listed = rows.some((row) => new RegExp(`\`${command}(?=[\\s\`,]|$)`).test(row));
+        if (!listed) offenders.push(`${name}: ${command}`);
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
 });

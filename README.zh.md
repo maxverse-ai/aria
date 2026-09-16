@@ -328,6 +328,7 @@ Supervisor 重启会恢复明确要求运行的 profile，主动停止的保持�
 | 命令 | 作用 |
 |---|---|
 | `/new [任务]`, `/reset` | 开始新会话，也可立即提交新任务 |
+| `/task <目标> [--target <agent>] [--participants <id>] [--max-rounds <n>]` | 创建任务并进入任务线程 |
 | `/cd <path>` | 切换工作目录并重置会话 |
 | `/ws list` | 列出命名工作空间 |
 | `/ws save <name>` | 把当前工作目录保存为命名工作空间 |
@@ -335,7 +336,11 @@ Supervisor 重启会恢复明确要求运行的 profile，主动停止的保持�
 | `/ws remove <name>` | 删除命名工作空间 |
 | `/resume` | 恢复同 agent、工作目录、权限模式兼容的历史会话 |
 | `/status` | 查看 profile、agent、工作目录、会话、lark-cli 身份和运行状态 |
+| `/agent` | 切换该 profile 使用的引擎，先让当前 run 结束再切换 |
+| `/models` | 查看并选择模型 |
+| `/effort` | 查看并选择推理强度 |
 | `/config` | 调整展示偏好、访问控制和 lark-cli 身份策略 |
+| `/account` | 查看当前绑定的应用；`/account change` 换 appId、secret 并重连 |
 | `/fast [on\|off\|status\|reset]` | 管理 Codex Fast 模式；仅支持服务档位的模型显示（管理员） |
 | `/invite user @某人` | 允许用户私聊使用 bot |
 | `/invite admin @某人` | 添加访问控制管理员 |
@@ -348,6 +353,9 @@ Supervisor 重启会恢复明确要求运行的 profile，主动停止的保持�
 | `/exit <id\|#>` | 停止指定 bridge 进程 |
 | `/reconnect` | 强制 WebSocket 重连 |
 | `/doctor [描述]` | 执行低敏诊断 |
+| `/doc` | 说明云文档评论如何触发 Agent |
+| `/remind at <ISO时间> <任务>` | 在当前会话创建提醒；`list`、`snooze`、`update`、`cancel`、`history` 管理它 |
+| `/meeting` | 按会议号加入飞书视频会议、离开、查看已捕获内容和带转写上下文提问（仅管理员） |
 | `/help` | 帮助卡片 |
 
 私聊、以及只有一名用户和当前 bot 的群，会被视为天然指向 Agent。其他群和话题群只有结构化的 `@bot` 才算明确寻址；只回复 Agent 的消息而不 @，仅提供上下文，不算寻址。群内环境消息默认忽略；若主动开启接收环境消息，应用需具备 `im:message.group_msg` 权限。`@all` 会被忽略。支持的云文档评论里 @bot 会触发回复。

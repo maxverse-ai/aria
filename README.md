@@ -342,6 +342,7 @@ If a profile was created with the wrong agent kind, stop or unregister any match
 | Command | Effect |
 |---|---|
 | `/new [task]`, `/reset` | Start a fresh session; optionally submit a new task immediately |
+| `/task <goal> [--target <agent>] [--participants <ids>] [--max-rounds <n>]` | Create a task and enter its task thread |
 | `/cd <path>` | Switch working directory and reset the session |
 | `/ws list` | List named workspaces |
 | `/ws save <name>` | Save the current working directory as a named workspace |
@@ -349,7 +350,11 @@ If a profile was created with the wrong agent kind, stop or unregister any match
 | `/ws remove <name>` | Delete a named workspace |
 | `/resume` | Resume compatible history for the same agent, working directory, and permission mode |
 | `/status` | Show profile, agent, working directory, session, lark-cli identity, and run state |
+| `/agent` | Switch the engine this profile runs, staged so the current run finishes first |
+| `/models` | Inspect and select the model |
+| `/effort` | Inspect and select the reasoning effort |
 | `/config` | Adjust presentation preferences, access settings, and lark-cli identity policy |
+| `/account` | Show the bound app; `/account change` replaces its appId and secret and reconnects |
 | `/fast [on\|off\|status\|reset]` | Manage Codex Fast for models that expose service tiers (admin only) |
 | `/invite user @name` | Allow a user to use the bot in DMs |
 | `/invite admin @name` | Add an access-control admin |
@@ -362,6 +367,9 @@ If a profile was created with the wrong agent kind, stop or unregister any match
 | `/exit <id\|#>` | Stop a bridge process |
 | `/reconnect` | Force a WebSocket reconnect |
 | `/doctor [description]` | Run low-sensitive diagnostics |
+| `/doc` | Explain how cloud-document comments reach the agent |
+| `/remind at <ISO time> <task>` | Create a session-anchored reminder; `list`, `snooze`, `update`, `cancel`, and `history` manage it |
+| `/meeting` | Join a Feishu video meeting by number, leave it, inspect what was captured, or ask with the transcript as context (admin only) |
 | `/help` | Help card |
 
 DMs and groups containing exactly one human plus the current bot are addressed implicitly. In every other group or topic group, only a structured `@bot` addresses the agent; replying to an agent message without @ adds context but does not address it. Ambient group messages are ignored by default. Opting into ambient group intake requires the app scope `im:message.group_msg`; `@all` is ignored. Cloud-doc comments in supported document types run when the bot is mentioned.
