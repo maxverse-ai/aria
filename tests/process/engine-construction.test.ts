@@ -9,16 +9,10 @@ import { prepareProfileEngineRuntime } from '../../src/runtime/agent-runtime';
 
 const allEngines = ['claude', 'codex', 'grok', 'opencode', 'dsh', 'kimi', 'pi'] as const;
 type Engine = typeof allEngines[number];
-// Two engines cannot be exercised through this file's Windows fixture:
 // `dsh` reports progress over an extra stdio descriptor, which Node only
-// supports on POSIX hosts, and `pi` receives its prompt as an argv element.
-// That second one is not merely a fixture limit: on Windows every npm-installed
-// CLI is a `.cmd` shim, cross-spawn reaches it through `cmd.exe /d /s /c`, and
-// its escaping covers metacharacters but not newlines — so a multi-line argv
-// prompt cannot survive there either. See ARIA-PI-001 in the bug ledger.
-// Both engines keep full coverage on POSIX hosts.
+// supports on POSIX hosts, so its launch cases do not apply on Windows.
 const engines: readonly Engine[] = process.platform === 'win32'
-  ? allEngines.filter((engine) => engine !== 'dsh' && engine !== 'pi')
+  ? allEngines.filter((engine) => engine !== 'dsh')
   : allEngines;
 const roots: string[] = [];
 const envKeys = [
@@ -168,11 +162,14 @@ describe('prepared profile runtime process compatibility', () => {
           }
           break;
         case 'pi':
-          expect(record.argv.slice(0, -1)).toEqual([
+          expect(record.argv).toEqual([
             '-p', '--mode', 'json', '--session', 'session-old', '--model', 'test-model',
             '--thinking', 'high', ...(custom ? ['--approve'] : []),
             '--session-dir', join(root, custom ? 'custom-pi' : 'state/pi-sessions'),
           ]);
+          // The prefixed prompt carries the bridge system prompt, so the user
+          // text is contained in what arrives on stdin.
+          expect(record.stdin).toContain('construction prompt');
           break;
         case 'dsh':
           expect(record.argv.slice(0, 2)).toEqual(['--profile', 'headless']);
@@ -212,9 +209,7 @@ describe('prepared profile runtime process compatibility', () => {
     }
   });
 
-  // Runs `pi`, whose prompt always carries the multi-line bridge system prompt
-  // once prefixed, so Windows refuses it at the adapter. See ARIA-PI-001.
-  it.runIf(process.platform !== 'win32')('runs the standalone host without channel credentials through the same prepared factory', async () => {
+  it('runs the standalone host without channel credentials through the same prepared factory', async () => {
     const root = await temporaryRoot();
     const binary = await fakeBinary(root, 'pi');
     const configPath = join(root, 'worker.json');
@@ -377,7 +372,7 @@ function fakeMain(input: { engine: Engine; recordPath: string; envKeys: string[]
       process.stdout.write('fixture answer\n');
     }
   };
-  if (input.engine === 'pi' || input.engine === 'dsh') {
+  if (input.engine === 'dsh') {
     complete();
   } else {
     process.stdin.on('data', (chunk) => { record.stdin += chunk.toString(); });

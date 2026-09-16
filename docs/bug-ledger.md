@@ -14,17 +14,20 @@
   `argtest.cmd -p "line1\nline2"` with a shell delivered `ARGS=[-p line1]` and
   exited 0, so the engine would have run on a truncated system prompt rather
   than failing.
-- Fix: partial. The `pi` adapter now refuses the run when the platform is
-  Windows, the prompt contains a newline, and the binary is not a native
-  `.exe`/`.com` — the same condition under which `cross-spawn` routes through
-  cmd.exe. A truncated prompt is worse than a refused one. The prompt still
-  travels in argv, so the underlying transport is unchanged.
-- Validation: unit cases for POSIX, a native `.exe`, a single-line prompt, and
-  `.cmd`/`.bat`/extensionless shims; plus the Windows shim experiment above.
-- Scope: Windows only. `pi` is unaffected on Linux and macOS.
-- Status: open. Verify whether `pi` accepts its prompt on stdin the way
-  `claude -p` does, move the prompt off argv, then lift the guard and restore
-  the Windows launch cases.
+- Fix: `pi` now receives its prompt on stdin. That matches its declared
+  `promptInjection: 'stdin-prefix'` and the same fix the `claude` and `codex`
+  adapters already carry; the declaration was right and this adapter was the
+  outlier. `buildPiArgs` no longer takes a prompt, and no argv element ever
+  contains one, so the cmd.exe path cannot truncate anything. An interim
+  fail-closed guard for Windows shims was removed with the transport change.
+- Validation: against the real CLI (`@earendil-works/pi-coding-agent@0.85.1`,
+  which ships the `pi` binary), piping the prompt to stdin produced the same
+  `message_start` user message as passing it as a positional argument. Unit
+  coverage asserts the argv contract stays prompt-free, and the Windows launch
+  cases are restored in `engine-construction.test.ts`.
+- Scope: all platforms; transport only. Flags, session handling and the model
+  catalog are unchanged.
+- Status: fixed.
 
 ## ARIA-PROBE-001 — Engine version probe intermittently reported installed without a version
 

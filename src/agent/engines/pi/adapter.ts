@@ -12,7 +12,7 @@ import type {
   AgentRun,
   AgentRunOptions,
 } from '../../types';
-import { buildPiArgs, piPromptCannotTravelInArgv } from './argv';
+import { buildPiArgs } from './argv';
 import { PiJsonlTranslator, type PiFinishReason } from './jsonl';
 
 export interface PiAdapterOptions {
@@ -74,15 +74,11 @@ export class PiAdapter implements AgentAdapter {
       throw new Error('cwd is required for PiAdapter.run');
     }
     const prompt = prefixBridgeSystemPrompt(opts.prompt, opts.identity);
-    if (piPromptCannotTravelInArgv(process.platform, this.binary, prompt)) {
-      throw new Error(
-        `pi: a multi-line prompt cannot reach '${this.binary}' on Windows, because cmd.exe `
-        + 'drops everything after the first newline of an argument. Point pi.binaryPath at a '
-        + 'native executable, or run this engine on Linux or macOS. See ARIA-PI-001.',
-      );
-    }
+    // The prompt goes on stdin, matching this engine's declared
+    // `promptInjection: 'stdin-prefix'` and the same fix the claude and codex
+    // adapters carry: a Windows `.cmd` shim reaches the engine through cmd.exe,
+    // which drops everything after the first newline of an argument. ARIA-PI-001.
     const args = buildPiArgs({
-      prompt,
       sessionId: opts.sessionId,
       model: opts.model,
       thinking: opts.reasoningEffort,
@@ -92,8 +88,12 @@ export class PiAdapter implements AgentAdapter {
     const child = spawnProcess(this.binary, args, {
       cwd: opts.cwd,
       env: mergeProcessEnv(process.env, buildChannelEnv(this.ariaChannel)),
-      stdio: ['ignore', 'pipe', 'pipe'],
+      stdio: ['pipe', 'pipe', 'pipe'],
     }) as PiChild;
+    child.stdin.on('error', (err) => {
+      log.warn('agent', 'stdin-error', { message: err.message });
+    });
+    child.stdin.end(prompt, 'utf8');
 
     log.info('agent', 'spawn', {
       pid: child.pid ?? null,
