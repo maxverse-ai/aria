@@ -52,7 +52,7 @@ definition instead of copying it.
 | Build and CI runtime | `.node-version` |
 | Supported runtime floor | `package.json#engines.node` |
 | Supported CLI surface | `src/cli/index.ts` (and `aria <command> --help`) |
-| Required validation gates | `.***REMOVED***/checks.toml`, `.github/workflows/ci.yml` |
+| Required validation gates | `package.json` scripts, run by `.github/workflows/ci.yml` |
 
 When a document must state one of these, state it as a reference — for example
 "the runtime pinned in `.node-version`" — or name the version and note that the
