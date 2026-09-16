@@ -74,7 +74,7 @@ const program = new Command();
 
 program
   .name('aria')
-  .description('Aria — bridge Feishu/Lark messenger with local CLI coding agents')
+  .description('Aria — a local-first control plane for CLI coding agents')
   .version(pkg.version, '-v, --version');
 
 // === process-level commands (work directly on bridge processes) ===
