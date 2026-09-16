@@ -10,17 +10,21 @@
 - Cause: on Windows an npm-installed CLI is a `.cmd` shim, `cross-spawn` reaches
   it through `cmd.exe /d /s /c`, and its argument escaping covers cmd
   metacharacters but has no handling for newlines, which terminate a cmd
-  command. The prompt is truncated at its first newline. This is not only a
-  fixture artifact: spawning the real `pi` takes the same path.
-- Fix: not attempted. `pi` may accept its prompt on stdin the way `claude -p`
-  does, but `pi` is not installed on the machine this was written from, so its
-  CLI contract could not be verified. Changing the transport blind would risk
-  breaking the engine where it currently works.
-- Validation: the mechanism is confirmed from the argv builder and cross-spawn's
-  Windows escaping; the engine itself was not run.
+  command. Reproduced against a real shim: spawning
+  `argtest.cmd -p "line1\nline2"` with a shell delivered `ARGS=[-p line1]` and
+  exited 0, so the engine would have run on a truncated system prompt rather
+  than failing.
+- Fix: partial. The `pi` adapter now refuses the run when the platform is
+  Windows, the prompt contains a newline, and the binary is not a native
+  `.exe`/`.com` — the same condition under which `cross-spawn` routes through
+  cmd.exe. A truncated prompt is worse than a refused one. The prompt still
+  travels in argv, so the underlying transport is unchanged.
+- Validation: unit cases for POSIX, a native `.exe`, a single-line prompt, and
+  `.cmd`/`.bat`/extensionless shims; plus the Windows shim experiment above.
 - Scope: Windows only. `pi` is unaffected on Linux and macOS.
-- Status: open. Verify `pi`'s stdin contract, move the prompt off argv, then
-  restore the Windows launch cases.
+- Status: open. Verify whether `pi` accepts its prompt on stdin the way
+  `claude -p` does, move the prompt off argv, then lift the guard and restore
+  the Windows launch cases.
 
 ## ARIA-PROBE-001 — Engine version probe intermittently reported installed without a version
 

@@ -12,7 +12,7 @@ import type {
   AgentRun,
   AgentRunOptions,
 } from '../../types';
-import { buildPiArgs } from './argv';
+import { buildPiArgs, piPromptCannotTravelInArgv } from './argv';
 import { PiJsonlTranslator, type PiFinishReason } from './jsonl';
 
 export interface PiAdapterOptions {
@@ -73,8 +73,16 @@ export class PiAdapter implements AgentAdapter {
     if (!opts.cwd) {
       throw new Error('cwd is required for PiAdapter.run');
     }
+    const prompt = prefixBridgeSystemPrompt(opts.prompt, opts.identity);
+    if (piPromptCannotTravelInArgv(process.platform, this.binary, prompt)) {
+      throw new Error(
+        `pi: a multi-line prompt cannot reach '${this.binary}' on Windows, because cmd.exe `
+        + 'drops everything after the first newline of an argument. Point pi.binaryPath at a '
+        + 'native executable, or run this engine on Linux or macOS. See ARIA-PI-001.',
+      );
+    }
     const args = buildPiArgs({
-      prompt: prefixBridgeSystemPrompt(opts.prompt, opts.identity),
+      prompt,
       sessionId: opts.sessionId,
       model: opts.model,
       thinking: opts.reasoningEffort,
