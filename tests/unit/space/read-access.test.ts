@@ -6,6 +6,11 @@ import { PreparedSpaceProfile } from '../../../src/space/profile';
 import { SpaceOperationGate } from '../../../src/space/operation-gate';
 import { createDefaultProfileConfig } from '../../../src/config/profile-schema';
 
+// This fixture observes on the real clock. No case here asserts that a lease
+// expires, so the lease only has to outlive the slowest host the suite runs on;
+// a tight one turns a loaded machine into "space binding is stale or suspended".
+const OBSERVATION_LEASE_MS = 60 * 60_000;
+
 const cleanups: Array<() => Promise<unknown>> = [];
 afterEach(async () => { for (const close of cleanups.splice(0).reverse()) await close(); });
 async function fixture(directory?: string) {
@@ -25,7 +30,7 @@ async function fixture(directory?: string) {
     observe: async request => source.observe({ conversationId: request.conversationId, actorId: request.senderId,
       actorKind: request.senderKind, kind: request.kind, selfId: 'bot', authenticated: true, complete: true,
       humans: shared && request.kind === 'group' ? ['a', 'b'] : [request.senderId], agents: ['bot'],
-      revision: ++revision, observedAt: Date.now(), expiresAt: Date.now() + 15_000 }) }, spaces.grants,
+      revision: ++revision, observedAt: Date.now(), expiresAt: Date.now() + OBSERVATION_LEASE_MS }) }, spaces.grants,
     () => ({ admitted, accessCeiling: 'workspace' }), Date.now, spaces.resources);
   await spaces.registerGate({ pluginId: 'fixture', instanceId: 'source' }, gate);
   const enter = (user: string, group = false) => gate.enter({ conversationId: (group ? 'group-' : 'dm-') + user,

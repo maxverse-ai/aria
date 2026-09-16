@@ -14,6 +14,10 @@ import type { NativeReadRepository } from '../../../src/application/control/nati
 import { FileNativeReadRepository } from '../../../src/platform/file-native-read-repository';
 
 const cleanups: Array<() => Promise<unknown>> = [];
+// This fixture observes on the real clock. No case here asserts that a lease
+// expires, so the lease only has to outlive the slowest host the suite runs on;
+// a tight one turns a loaded machine into "space binding is stale or suspended".
+const OBSERVATION_LEASE_MS = 60 * 60_000;
 const managementKeys = generateKeyPairSync('ed25519');
 const managementPublicKey = managementKeys.publicKey.export({ format: 'pem', type: 'spki' }).toString();
 function managementProof(path: string): string {
@@ -36,7 +40,7 @@ async function fixture() {
   const gate = new SpaceOperationGate(spaces.services, { contractVersion: 1, invalidate: () => {},
     observe: async r => source.observe({ conversationId: r.conversationId, actorId: r.senderId, actorKind: r.senderKind,
       kind: r.kind, selfId: 'bot', authenticated: true, complete: true, humans: [r.senderId], agents: ['bot'],
-      revision: 1, observedAt: Date.now(), expiresAt: Date.now() + 60_000 }) }, spaces.grants,
+      revision: 1, observedAt: Date.now(), expiresAt: Date.now() + OBSERVATION_LEASE_MS }) }, spaces.grants,
     () => ({ admitted: true, accessCeiling: 'full' }), Date.now, spaces.resources);
   await spaces.registerGate({ pluginId: 'fixture', instanceId: 'source' }, gate);
   const enter = (id: string) => gate.enter({ conversationId: 'dm-' + id, senderId: id, senderKind: 'user', kind: 'direct' }, 'dm-' + id);

@@ -19,13 +19,17 @@ import { spacePolicyProfile } from '../../../src/space/policy-profile';
 import { codexCapability } from '../../../src/agent/capability';
 
 const cleanups: Array<() => Promise<unknown>> = [];
+// This fixture observes on the real clock. No case here asserts that a lease
+// expires, so the lease only has to outlive the slowest host the suite runs on;
+// a tight one turns a loaded machine into "space binding is stale or suspended".
+const OBSERVATION_LEASE_MS = 60 * 60_000;
 afterEach(async () => { for (const close of cleanups.splice(0).reverse()) await close(); });
 const actor = { source: 'local-cli' as const, principal: 'fixture-admin' };
 function authorize(authorization: SpaceAuthorization, scope: string, owner: string) {
   const source = authorization.registerSource({ profileId: 'p', providerId: 'fixture', accountId: 'bot', instanceId: 'source' });
   return authorization.authorize({ observation: source.observe({ conversationId: scope, actorId: owner, actorKind: 'user',
     selfId: 'bot', kind: scope.startsWith('solo') ? 'group' : 'direct', authenticated: true, complete: true,
-    humans: [owner], agents: ['bot'], revision: 1, observedAt: Date.now(), expiresAt: Date.now() + 60_000 }),
+    humans: [owner], agents: ['bot'], revision: 1, observedAt: Date.now(), expiresAt: Date.now() + OBSERVATION_LEASE_MS }),
     scopeRef: scope, admitted: true, mode: 'team', accessCeiling: 'workspace' });
 }
 it('verified histories migrate per user, solo and DM share storage, unknown history stays sealed and the next request resumes the old ID', async () => {
