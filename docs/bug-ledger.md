@@ -201,3 +201,75 @@
   unchanged, as is the detached-executor handoff.
 - Status: fixed. The published `internal-v0.4.0` was built before this fix and
   is immutable, so the first artifact carrying it is the next release.
+
+## ARIA-COT-001 — COT bubbles failed on every resumed Devin session
+
+- Found on installed Aria 0.4.0 builds, 2026-09-17 18:33–20:15 北京时间, devin
+  profile. Evidence: every run on a resumed session failed its first
+  `PUT /open-apis/im/v1/message_cot` with HTTP 400 `99992402 field validation
+  failed` once the first 600ms window carried ≥86 events; fresh sessions with 0
+  replayed events always succeeded. Five consecutive runs degraded.
+- Cause: `session/load` replays the whole conversation as `session/update`
+  notifications. `EventFanout` multicast fed them to `consumeCotEvents`, and
+  `CotPublisher.flush` did not split batches, so the first update carried the
+  entire replay burst. The same replay events also polluted the run's audit
+  stream as if they were live tool calls.
+- Fix: `b5591fa` marks notifications arriving while `session/load` is in flight
+  as `replay`; COT and run-executor consumers skip them, and flush batches are
+  bounded (≤20 events / 32KB). Errors now log `field_violations`.
+- Validation: after the 20:45 北京时间 rollout of `7cd762a` (which contains the
+  fix), resumed-session runs complete `reason=done` with no `update-failed` or
+  `degraded` events in `bridge-20260917.jsonl`.
+- Status: fixed and deployed. Continued observation on long resumed sessions.
+
+## ARIA-COT-002 — Degraded COT bubbles could not close, and the orphan sweeper lost their refs
+
+- Found 2026-09-17 on the devin profile. Evidence: `complete` with
+  `reason='interrupted'` returned HTTP 500/2200 for every degraded bubble;
+  `sweepOrphanedCots` deleted the state file before completing, so four stuck
+  bubbles permanently lost their refs and kept spinning in chat.
+- Cause: `interrupted` is not an accepted terminal reason for a zero-event
+  bubble, and the sweep ordering dropped refs before retryable failures.
+- Fix: `7cd762a` closes degraded bubbles with `error` instead of `interrupted`,
+  and the sweeper completes entries first, writing back only the failures.
+- Validation: on the 20:45 北京时间 restart the sweeper closed all four orphan
+  bubbles (`orphan-swept` ×4, zero failures).
+- Status: fixed and deployed.
+
+## ARIA-INTAKE-001 — Handled slash commands were replayed as prompts and withheld the in-flight reply
+
+- Found on the devin profile, 2026-09-17 18:56 北京时间. Evidence: `/effort`
+  sent during an active run was executed as a command, then
+  `FinalReplyFreshness.inspect` rediscovered it in remote history, held the
+  in-flight run's reply (`held-remote`), and flushed the command text as a
+  472-character prompt into a new run.
+- Cause: the history backstop had no record of intake-consumed messages, so
+  every handled command looked like unseen remote input.
+- Fix: `7cd762a` records consumed messageIds in `intakeMessage`; the backstop
+  skips them, so commands no longer requeue and `held-remote` only fires for
+  genuinely unprocessed user input.
+- Validation: post-20:45 log shows no `held-remote` and no command re-flush.
+- Status: fixed and deployed.
+
+## ARIA-ROSTER-001 — Every inbound message spent one failing members API call
+
+- Found on the devin profile, 2026-09-17. Evidence: `readLarkRoster` ran
+  `GET /im/v1/chats/{chat}/members` on every inbound message including p2p
+  chats; all returned 400 `99991672` because the app lacks chat-member scopes.
+- Cause: no negative caching for a permanent permission denial.
+- Fix: `7cd762a` adds `resolveChatMembers`, which serves an empty roster after
+  the first denial (`roster-scope-denied` logged once per process).
+- Validation: post-20:45 log shows exactly one denial event, then silence.
+- Status: fixed and deployed. Granting the app `im:chat:readonly` would restore
+  a real roster and remains an open operator decision.
+
+## ARIA-DAEMON-001 — systemd unit crash-looped on a missing log directory
+
+- Found 2026-09-17 17:53 北京时间. Evidence: `aria.bot.*.service` failed with
+  `status=209/STDOUT` 89 times over ~8 minutes because
+  `StandardOutput=append:.../logs/daemon/daemon-stdout.log` pointed at a
+  directory that did not exist; manually creating it ended the loop.
+- Fix: `writeUnit` now creates `daemonLogDir` before installing the unit
+  (`src/daemon/systemd.ts`), so new installs cannot hit this. Existing units
+  are fine once the directory exists.
+- Status: fixed in source and deployed. Watch new profile installs once.
