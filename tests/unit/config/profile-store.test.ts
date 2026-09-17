@@ -59,6 +59,32 @@ describe('profile store canonical serialization', () => {
     expect(loaded?.profiles.grok?.grok).toEqual(profile.grok);
   });
 
+  it('preserves Devin engine configuration across save and load', async () => {
+    const root = await tmpRoot();
+    const configPath = join(root, 'config.json');
+    const profile = createDefaultProfileConfig({
+      agentKind: 'devin',
+      accounts: { app },
+      devin: {
+        binaryPath: '/usr/local/bin/devin',
+        apiKeyEnv: 'ACME_DEVIN_KEY',
+        model: 'opus',
+      },
+    });
+
+    await saveRootConfig({
+      schemaVersion: 2,
+      activeProfile: 'devin',
+      preferences: {},
+      profiles: { devin: profile },
+    }, configPath);
+
+    const saved = JSON.parse(await readFile(configPath, 'utf8'));
+    expect(saved.profiles.devin.devin).toEqual(profile.devin);
+    const loaded = await loadRootConfig(configPath);
+    expect(loaded?.profiles.devin?.devin).toEqual(profile.devin);
+  });
+
   it('uses root desired state instead of a stale active-profile projection', async () => {
     const root = await tmpRoot();
     const profile = createDefaultProfileConfig({ agentKind: 'claude', accounts: { app } });

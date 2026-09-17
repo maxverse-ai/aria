@@ -27,6 +27,6 @@ export function executionSpaceFingerprint(profile: EngineProfileConfig): string 
   const p = profile as EngineProfileConfig & { accounts?: unknown };
   const input = { engine: p.agentKind, accounts: p.accounts,
     workspaces: p.workspaces, permissions: p.permissions, plugins: p.plugins, channels: p.channels, meeting: (p as EngineProfileConfig & { meeting?: unknown }).meeting,
-    codex: p.codex, grok: p.grok, opencode: p.opencode, kimi: p.kimi, pi: p.pi, dsh: p.dsh };
+    codex: p.codex, grok: p.grok, opencode: p.opencode, kimi: p.kimi, pi: p.pi, dsh: p.dsh, devin: p.devin };
   return createHash('sha256').update(JSON.stringify(input)).digest('hex');
 }
