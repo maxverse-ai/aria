@@ -1,9 +1,27 @@
 import type { EngineHistoryEntry } from '../plugin/types';
+import type { AgentRun } from '../types';
 import type { EngineRuntime } from './types';
 
 export interface RuntimeQueries {
   listHistory?(input: { cwd: string; limit: number; signal?: AbortSignal }): Promise<EngineHistoryEntry[]>;
   goal?: EngineGoalControl;
+  /**
+   * Attaches to a turn the engine started on its own. Callers learn about such
+   * a turn from {@link RuntimeQueries.engineTurns}; a run started here never
+   * sends a prompt, because the engine already has one.
+   */
+  adoptedTurn?(input: EngineAdoptedTurnInput): Promise<AgentRun>;
+  /** Announces engine-started turns so a caller can attach and deliver them. */
+  engineTurns?: { subscribe(listener: (turn: EngineTurnRef) => void): () => void };
+}
+
+export interface EngineTurnRef {
+  threadId: string;
+  turnId: string;
+}
+
+export interface EngineAdoptedTurnInput extends EngineTurnRef {
+  cwd: string;
 }
 
 /**

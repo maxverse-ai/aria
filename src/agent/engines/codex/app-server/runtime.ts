@@ -1,4 +1,9 @@
-import { registerRuntimeQueries, type EngineGoalSnapshot } from '../../../runtime/queries';
+import {
+  registerRuntimeQueries,
+  type EngineAdoptedTurnInput,
+  type EngineGoalSnapshot,
+  type EngineTurnRef,
+} from '../../../runtime/queries';
 import { readCodexImportedHistory } from '../imported-history';
 import { parseThreadListResponse } from '../../../../session/codex-history';
 import type { SandboxMode } from '../../../../config/profile-schema';
@@ -66,6 +71,9 @@ export class CodexAppServerRuntime implements EngineRuntime {
   private latestModel: string | undefined;
   private latestContext: EngineStatusSnapshot['contextWindow'];
   private readonly activeRuns = new Set<AppServerRun>();
+  private readonly claimedThreads = new Set<string>();
+  private readonly engineTurnListeners = new Set<(turn: EngineTurnRef) => void>();
+  private watchingEngineTurns = false;
 
   constructor(private readonly options: CodexAppServerRuntimeOptions) {
     this.execution = new CodexAppServerAdapter(this);
@@ -117,6 +125,20 @@ export class CodexAppServerRuntime implements EngineRuntime {
           await client.request<ThreadGoalClearResponse>('thread/goal/clear', { threadId });
         },
       },
+      engineTurns: {
+        subscribe: (listener) => this.onEngineTurn(listener),
+      },
+      adoptedTurn: async (input) => {
+        const run = AppServerRun.adopted(this, input);
+        this.track(run);
+        try {
+          await run.attach();
+        } catch (error) {
+          this.untrack(run);
+          throw error;
+        }
+        return run;
+      },
     });
   }
 
@@ -134,6 +156,7 @@ export class CodexAppServerRuntime implements EngineRuntime {
       this.clientPromise = started;
       void started.then(
         (client) => {
+          this.watchEngineTurns(client);
           client.onClosed(() => {
             if (this.clientPromise === started) this.clientPromise = undefined;
           });
@@ -148,6 +171,38 @@ export class CodexAppServerRuntime implements EngineRuntime {
 
   track(run: AppServerRun): void {
     this.activeRuns.add(run);
+  }
+
+  /**
+   * Threads a caller asked the engine to work on. An engine-started turn on a
+   * thread nobody claimed is a goal continuation, and is announced rather than
+   * ignored.
+   */
+  claimThread(threadId: string): void {
+    this.claimedThreads.add(threadId);
+  }
+
+  releaseThread(threadId: string): void {
+    this.claimedThreads.delete(threadId);
+  }
+
+  onEngineTurn(listener: (turn: EngineTurnRef) => void): () => void {
+    this.engineTurnListeners.add(listener);
+    return () => this.engineTurnListeners.delete(listener);
+  }
+
+  private watchEngineTurns(client: CodexAppServerClient): void {
+    if (this.watchingEngineTurns) return;
+    this.watchingEngineTurns = true;
+    client.onNotification((notification) => {
+      if (notification.method !== 'turn/started') return;
+      const params = isRecord(notification.params) ? notification.params : {};
+      const threadId = typeof params.threadId === 'string' ? params.threadId : undefined;
+      const turn = isRecord(params.turn) ? params.turn : undefined;
+      const turnId = turn && typeof turn.id === 'string' ? turn.id : undefined;
+      if (!threadId || !turnId || this.claimedThreads.has(threadId)) return;
+      for (const listener of this.engineTurnListeners) listener({ threadId, turnId });
+    });
   }
 
   untrack(run: AppServerRun): void {
@@ -297,6 +352,8 @@ export class AppServerRun implements AgentRun {
   private threadId: string | undefined;
   private turnId: string | undefined;
   private client: CodexAppServerClient | undefined;
+  private queue: NotificationQueue | undefined;
+  private unsubscribe: (() => void) | undefined;
   private stopRequested = false;
   private interruptSent = false;
   private turnClosing = false;
@@ -308,12 +365,37 @@ export class AppServerRun implements AgentRun {
   constructor(
     private readonly runtime: CodexAppServerRuntime,
     private readonly options: AgentRunOptions,
+    private readonly adopted?: EngineAdoptedTurnInput,
   ) {
     this.runId = options.runId;
     this.exitPromise = new Promise((resolve) => {
       this.resolveExit = resolve;
     });
     this.events = this.stream();
+  }
+
+  /**
+   * A run for a turn this process never asked for. The engine already has a
+   * prompt, so this attaches before it can miss anything the turn emits.
+   */
+  static adopted(runtime: CodexAppServerRuntime, input: EngineAdoptedTurnInput): AppServerRun {
+    const run = new AppServerRun(runtime, {
+      runId: `engine-turn:${input.turnId}`,
+      scopeId: input.threadId,
+      prompt: '',
+      cwd: input.cwd,
+      threadId: input.threadId,
+    }, input);
+    run.threadId = input.threadId;
+    run.turnId = input.turnId;
+    return run;
+  }
+
+  /** Subscribe now, so the stream starts from the turn's first notification. */
+  async attach(): Promise<void> {
+    this.client = await this.runtime.client();
+    this.queue = new NotificationQueue();
+    this.unsubscribe = this.client.onNotification((notification) => this.queue!.push(notification));
   }
 
   async stop(): Promise<void> {
@@ -380,8 +462,6 @@ export class AppServerRun implements AgentRun {
   }
 
   private async *stream(): AsyncGenerator<AgentEvent> {
-    const queue = new NotificationQueue();
-    let unsubscribe: (() => void) | undefined;
     const messages = new AppServerMessageTranslator();
     const generation = new CodexGenerationMeter();
     let latestUsage: TokenUsageBreakdown | undefined;
@@ -390,8 +470,14 @@ export class AppServerRun implements AgentRun {
     let model: string | undefined;
 
     try {
+      if (this.adopted) {
+        // `attach()` already subscribed and fixed the thread and turn ids.
+        this.runtime.claimThread(this.adopted.threadId);
+        yield { type: 'system', threadId: this.adopted.threadId, cwd: this.options.cwd };
+      } else {
       this.client = await this.runtime.client();
-      unsubscribe = this.client.onNotification((notification) => queue.push(notification));
+      this.queue = new NotificationQueue();
+      this.unsubscribe = this.client.onNotification((notification) => this.queue!.push(notification));
       const thread = this.options.threadId
         ? await this.client.request<ThreadResumeResponse>('thread/resume', {
             threadId: this.options.threadId,
@@ -441,6 +527,8 @@ export class AppServerRun implements AgentRun {
           path,
         })),
       ];
+      // Claim before the request: `turn/started` can beat its own response.
+      this.runtime.claimThread(this.threadId);
       const started = await this.client.request<TurnStartResponse>('turn/start', {
         threadId: this.threadId,
         input,
@@ -456,7 +544,9 @@ export class AppServerRun implements AgentRun {
       });
       this.turnId = started.turn.id;
       if (this.stopRequested) await this.stop();
+      }
 
+      const queue = this.queue!;
       for await (const notification of queue) {
         const params = isRecord(notification.params) ? notification.params : {};
         if (notification.method === 'aria/appServerClosed') {
@@ -576,8 +666,9 @@ export class AppServerRun implements AgentRun {
       };
     } finally {
       this.turnClosing = true;
-      unsubscribe?.();
-      queue.end();
+      this.unsubscribe?.();
+      this.queue?.end();
+      if (this.threadId) this.runtime.releaseThread(this.threadId);
       this.exited = true;
       this.resolveExit();
       this.runtime.untrack(this);
