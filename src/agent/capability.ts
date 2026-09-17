@@ -26,6 +26,8 @@ export interface AgentCapability {
   supportsImages?: boolean;
   /** Engine accepts model-scoped service tiers such as Codex Fast. */
   supportsServiceTiers?: boolean;
+  /** Engine carries a long-running thread goal (`/goal`). Codex only. */
+  supportsGoal?: boolean;
   /** Static capability advertisement; the concrete run still owns delivery. */
   steering?: AgentSteeringSupport;
 }
@@ -66,6 +68,7 @@ export function codexCapability(profile: Pick<ProfileConfig, 'permissions'>): Ag
     finalReply: 'separate',
     supportsImages: true,
     supportsServiceTiers: true,
+    supportsGoal: true,
     steering: { mode: 'direct', textOnly: true },
   };
 }

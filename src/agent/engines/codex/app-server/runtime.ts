@@ -1,4 +1,4 @@
-import { registerRuntimeQueries } from '../../../runtime/queries';
+import { registerRuntimeQueries, type EngineGoalSnapshot } from '../../../runtime/queries';
 import { readCodexImportedHistory } from '../imported-history';
 import { parseThreadListResponse } from '../../../../session/codex-history';
 import type { SandboxMode } from '../../../../config/profile-schema';
@@ -25,6 +25,10 @@ import {
   type JsonRpcNotification,
   type ModelListResponse,
   type RateLimitSnapshot,
+  type ThreadGoal,
+  type ThreadGoalClearResponse,
+  type ThreadGoalGetResponse,
+  type ThreadGoalSetResponse,
   type ThreadResumeResponse,
   type ThreadStartResponse,
   type TokenUsageBreakdown,
@@ -50,7 +54,7 @@ export class CodexAppServerRuntime implements EngineRuntime {
       inputs: ['text', 'image'],
       liveInput: { mode: 'direct', inputs: ['text'] },
       sessions: ['resume'],
-      controls: ['interrupt', 'model', 'reasoning', 'service-tier'],
+      controls: ['interrupt', 'model', 'reasoning', 'service-tier', 'goal'],
       interactions: [],
       telemetry: ['usage', 'context', 'rate-limits'],
     },
@@ -91,6 +95,27 @@ export class CodexAppServerRuntime implements EngineRuntime {
         }
         return entries.slice(0, limit).map((entry) => ({ id: entry.threadId, preview: entry.name || entry.preview,
           updatedAtMs: entry.updatedAtMs, detail: 'Codex' }));
+      },
+      goal: {
+        get: async (threadId) => {
+          const client = await this.client();
+          const response = await client.request<ThreadGoalGetResponse>('thread/goal/get', { threadId });
+          return response.goal ? goalSnapshot(response.goal) : null;
+        },
+        set: async (threadId, input) => {
+          const client = await this.client();
+          const response = await client.request<ThreadGoalSetResponse>('thread/goal/set', {
+            threadId,
+            ...(input.objective === undefined ? {} : { objective: input.objective }),
+            ...(input.status === undefined ? {} : { status: input.status }),
+            ...(input.tokenBudget === undefined ? {} : { tokenBudget: input.tokenBudget }),
+          });
+          return goalSnapshot(response.goal);
+        },
+        clear: async (threadId) => {
+          const client = await this.client();
+          await client.request<ThreadGoalClearResponse>('thread/goal/clear', { threadId });
+        },
       },
     });
   }
@@ -708,4 +733,17 @@ function appendRateLimitWindows(result: EngineUsageWindow[], snapshot: RateLimit
       ...(window.resetsAt !== null ? { resetsAt: window.resetsAt } : {}),
     });
   }
+}
+
+/** Drop the App Server's thread id: callers already hold the thread they asked about. */
+function goalSnapshot(goal: ThreadGoal): EngineGoalSnapshot {
+  return {
+    objective: goal.objective,
+    status: goal.status,
+    tokenBudget: goal.tokenBudget,
+    tokensUsed: goal.tokensUsed,
+    timeUsedSeconds: goal.timeUsedSeconds,
+    createdAt: goal.createdAt,
+    updatedAt: goal.updatedAt,
+  };
 }

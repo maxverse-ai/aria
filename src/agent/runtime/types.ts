@@ -17,7 +17,7 @@ export type EngineInputKind = 'text' | 'image' | 'file';
 export type EngineLiveInputMode = 'none' | 'gated' | 'direct';
 
 export type EngineSessionFeature = 'resume' | 'list' | 'fork';
-export type EngineControlFeature = 'interrupt' | 'model' | 'reasoning' | 'service-tier';
+export type EngineControlFeature = 'interrupt' | 'model' | 'reasoning' | 'service-tier' | 'goal';
 export type EngineInteractionFeature = 'approval' | 'question';
 export type EngineTelemetryFeature = 'usage' | 'context' | 'rate-limits';
 
@@ -109,7 +109,7 @@ export function assertEngineRuntimeDescriptor(
   assertFeatureList(capabilities.sessions, ['resume', 'list', 'fork'], 'sessions');
   assertFeatureList(
     capabilities.controls,
-    ['interrupt', 'model', 'reasoning', 'service-tier'],
+    ['interrupt', 'model', 'reasoning', 'service-tier', 'goal'],
     'controls',
   );
   assertFeatureList(capabilities.interactions, ['approval', 'question'], 'interactions');

@@ -41,6 +41,38 @@ export interface TurnSteerResponse {
   turnId: string;
 }
 
+/** App Server reports these six states; the runtime only ever sets the first two. */
+export type ThreadGoalStatus =
+  | 'active'
+  | 'paused'
+  | 'blocked'
+  | 'usageLimited'
+  | 'budgetLimited'
+  | 'complete';
+
+export interface ThreadGoal {
+  threadId: string;
+  objective: string;
+  status: ThreadGoalStatus;
+  tokenBudget: number | null;
+  tokensUsed: number;
+  timeUsedSeconds: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface ThreadGoalGetResponse {
+  goal: ThreadGoal | null;
+}
+
+export interface ThreadGoalSetResponse {
+  goal: ThreadGoal;
+}
+
+export interface ThreadGoalClearResponse {
+  cleared: boolean;
+}
+
 export interface TokenUsageBreakdown {
   totalTokens: number;
   inputTokens: number;
