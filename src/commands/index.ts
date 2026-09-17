@@ -197,6 +197,11 @@ export interface Controls {
   engineModels?(signal: AbortSignal): Promise<ModelOption[] | undefined>;
   /** Read or change the live engine's long-running goal for one native thread. */
   engineGoal?: import('../agent/runtime/queries').EngineGoalControl;
+  /** Bridge-side `/loop` state, keyed by session scope. */
+  loops?: {
+    get(scope: string): import('../bot/loop-store').LoopState | undefined;
+    stop(scope: string): import('../bot/loop-store').LoopState | undefined;
+  };
   /** Announces turns the engine started on its own, which nothing replied to. */
   engineTurns?: { subscribe(listener: (turn: import('../agent/runtime/queries').EngineTurnRef) => void): () => void };
   /** Attaches to one of those turns instead of starting a new one. */
@@ -272,6 +277,9 @@ export interface CommandContext {
   fromCardAction?: boolean;
   /** Intake hook used by `/new <task>` after the old session is cleared. */
   onNewTask?: (content: string) => void;
+  /** Intake hook used by `/loop`: registers the loop and queues its first
+   * iteration against the invoking message's conversation. */
+  onLoopStart?: (prompt: string, max: number) => void;
   /** Explicit task admission hook. Ordinary messages never call this. */
   onTask?: (request: TaskCommandRequest) => Promise<{ taskId: string }>;
 }
@@ -316,6 +324,7 @@ const handlers: Record<string, Handler> = {
   '/reconnect': handleReconnect,
   '/doc': handleDoc,
   '/goal': handleGoal,
+  '/loop': handleLoop,
   '/invite': handleInvite,
   '/remove': handleRemove,
   '/meeting': handleMeeting,
@@ -539,6 +548,7 @@ async function handleNew(args: string, ctx: CommandContext): Promise<void> {
 
   const taskContent = trimmed || undefined;
   const wasRunning = ctx.activeRuns.interrupt(ctx.scope);
+  ctx.controls.loops?.stop(ctx.scope);
   if (ctx.sessionCatalog && ctx.sessionCatalogIdentity) {
     ctx.sessionCatalog.archiveActive({
       ...ctx.sessionCatalogIdentity,
@@ -883,6 +893,94 @@ async function handleGoal(args: string, ctx: CommandContext): Promise<void> {
     ...(budget === undefined ? {} : { tokenBudget: budget }),
   });
   await reply(ctx, `✓ 已设置目标（已暂停，不会自动推进）。\n${goalLine(updated)}`);
+}
+
+// ─── /loop ────────────────────────────────────────────────────────────────
+
+const LOOP_USAGE = [
+  '**循环执行（引擎无关）**',
+  '- `/loop <任务>` — 把同一任务反复提交为新的 run（默认最多 10 轮）',
+  '- `/loop --max <n> <任务>` — 自定义轮数上限（最大 100）',
+  '- `/loop status` — 查看当前会话的 loop 状态',
+  '- `/loop stop` — 停止 loop；`/stop`、`/new`、`/reset` 也会停掉它',
+].join('\n');
+
+const LOOP_DEFAULT_MAX = 10;
+const LOOP_MAX_CAP = 100;
+
+function loopLine(state: import('../bot/loop-store').LoopState): string {
+  return [
+    `任务：${state.prompt}`,
+    `进度：第 ${state.total - state.remaining + 1} / ${state.total} 轮`,
+    `开始于：${new Date(state.startedAt).toISOString()}`,
+  ].join('\n');
+}
+
+/**
+ * `/loop` drives iteration from the bridge, not the engine: the prompt is
+ * re-queued as an ordinary run each time the previous one ends `done`, so it
+ * works for every engine and each round keeps its own reply, progress stream,
+ * and `/stop` boundary. Runs that end interrupted or in error stop the loop —
+ * repeating a broken run would only burn the remaining budget.
+ */
+async function handleLoop(args: string, ctx: CommandContext): Promise<void> {
+  const loops = ctx.controls.loops;
+  if (!loops || !ctx.onLoopStart) {
+    await reply(ctx, '当前运行模式不支持 `/loop`。');
+    return;
+  }
+
+  const tokens = args.trim().split(/\s+/).filter(Boolean);
+  const sub = tokens[0] ?? '';
+
+  if (sub === '' || sub === 'status') {
+    const current = loops.get(ctx.scope);
+    await reply(ctx, current ? `${loopLine(current)}\n\n\`/loop stop\` 停止。` : `当前会话没有运行中的 loop。\n\n${LOOP_USAGE}`);
+    return;
+  }
+
+  if (sub === 'stop' || sub === 'clear' || sub === 'cancel') {
+    const stopped = loops.stop(ctx.scope);
+    await reply(ctx, stopped ? `✓ 已停止 loop。\n${loopLine(stopped)}` : '当前会话没有运行中的 loop。');
+    return;
+  }
+
+  if (!canRunAdminCommand(ctx.controls.profileConfig, ctx.controls, ctx.msg.senderId).ok) {
+    await reply(ctx, '❌ 启动 loop 仅管理员可用（它会无人值守地连续消耗额度）。');
+    return;
+  }
+
+  let max = LOOP_DEFAULT_MAX;
+  const prompt: string[] = [];
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index]!;
+    if (token === '--max') {
+      const raw = tokens[index + 1];
+      const parsed = raw === undefined ? Number.NaN : Number.parseInt(raw.replace(/_/g, ''), 10);
+      if (!Number.isFinite(parsed) || parsed <= 0 || parsed > LOOP_MAX_CAP) {
+        await reply(ctx, `轮数需要是 1–${LOOP_MAX_CAP} 的整数，例如 \`/loop --max 20 <任务>\`。`);
+        return;
+      }
+      max = parsed;
+      index += 1;
+      continue;
+    }
+    prompt.push(token);
+  }
+  const text = prompt.join(' ').trim();
+  if (!text) {
+    await reply(ctx, LOOP_USAGE);
+    return;
+  }
+
+  const replaced = loops.stop(ctx.scope);
+  ctx.onLoopStart(text, max);
+  await reply(
+    ctx,
+    `✓ 已开始 loop，共 ${max} 轮；每轮结果会发到本会话，\`/loop stop\` 或 \`/stop\` 随时停。` +
+      (replaced ? `\n（替换了之前还剩 ${replaced.remaining} 轮的 loop。）` : '') +
+      `\n任务：${text}`,
+  );
 }
 
 const WORKSPACE_NAME_SEPARATOR = '\u001f';
@@ -1949,6 +2047,7 @@ async function handleStop(args: string, ctx: CommandContext): Promise<void> {
     return;
   }
   const scope = targetScope || ctx.scope;
+  ctx.controls.loops?.stop(scope);
   const ok = ctx.activeRuns.interrupt(scope);
   log.info('command', 'stop', {
     scope,

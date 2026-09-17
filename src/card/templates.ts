@@ -450,6 +450,7 @@ export function helpCard(agentName = 'Agent', team = false): object {
         '- `/models` — 查看并选择模型',
         '- `/effort` — 查看并选择推理强度',
         '- `/goal` — 查看或设置当前会话的长期目标（Codex，默认暂停）',
+        '- `/loop [--max <n>] <任务>` — 同一任务循环跑多轮，每轮独立回复；`/loop stop` 停止（管理员）',
         '- `/fast [on|off|status]` — 管理 Codex Fast 模式（管理员）',
         '- `/status` — 当前状态',
         '- `/remind at <ISO时间> <任务>` — 在当前会话创建提醒；`/remind list` 查看',

@@ -40,6 +40,7 @@ import {
   markInterrupted,
   reduce,
   type RunState,
+  type Terminal,
 } from '../card/run-state';
 import { renderText } from '../card/text-renderer';
 import { tryHandleCommand, type Controls } from '../commands';
@@ -125,6 +126,7 @@ import { decideLiveFollowup } from '../conversation/live-followup-policy';
 import { commandSessionCatalogIdentity } from './session-catalog-identity';
 import { startKeepalive } from './keepalive';
 import { PendingQueue } from './pending-queue';
+import { LoopStore } from './loop-store';
 import { FinalReplyCommit, type FinalReplyArtifact } from './final-reply-commit';
 import {
   FinalReplyFreshness,
@@ -528,6 +530,11 @@ export async function startChannel(deps: StartChannelDeps): Promise<BridgeChanne
   // chat in flight, and everything sent during a run merges into the next
   // batch (only flushed once 600ms of silence has passed *after* the run).
   let finalReplyFreshness!: FinalReplyFreshness;
+  const loops = new LoopStore();
+  controls.loops = {
+    get: (loopScope) => loops.get(loopScope),
+    stop: (loopScope) => loops.stop(loopScope),
+  };
   const pending = new PendingQueue(DEBOUNCE_MS, (scope, inputs) => {
     const firstInput = inputs[0];
     const firstMsg = firstInput?.message;
@@ -545,6 +552,7 @@ export async function startChannel(deps: StartChannelDeps): Promise<BridgeChanne
         threadId: firstMsg.threadId,
         msgId: firstMsg.messageId,
       });
+      let flushTerminal: Terminal | undefined;
       try {
         const resolvedMode = await chatModeCache.resolve(channel, firstMsg.chatId);
         // Feishu/Lark converted topic groups may still resolve as `group` from
@@ -597,12 +605,31 @@ export async function startChannel(deps: StartChannelDeps): Promise<BridgeChanne
           const operation = firstInput.spaceOperation;
           if (!operation || inputs.some((input) => !input.spaceOperation || input.spaceOperation.bindingRef !== operation.bindingRef || input.spaceOperation.executionScope !== scope)) throw new Error('queued inputs changed space binding');
           await spaceGate.batch(inputs.map(input => input.spaceOperation!));
-          await spaceGate.run(operation, runBatch);
-        } else await runBatch();
+          flushTerminal = await spaceGate.run(operation, runBatch);
+        } else flushTerminal = await runBatch();
       } catch (err) {
         log.fail('flush', err);
       } finally {
         pending.unblock(scope);
+        // `/loop` continuation: a `done` run queues the next iteration as an
+        // ordinary input; any other terminal ends the loop with a notice.
+        const loopNext = loops.afterRun(scope, flushTerminal);
+        if (loopNext?.kind === 'continue') {
+          const size = pending.push(scope, loopNext.input);
+          log.info('loop', 'iteration-queued', {
+            scope,
+            remaining: loopNext.state.remaining,
+            queueSize: size,
+          });
+        } else if (loopNext) {
+          const notice = loopNext.kind === 'finished'
+            ? `✅ loop 完成，共 ${loopNext.state.total} 轮。`
+            : `⏹ loop 已停止：上一轮未正常结束（${loopNext.terminal}）。`;
+          void channel.send(firstMsg.chatId, { markdown: notice }, {
+            replyTo: loopNext.replyTo,
+          }).catch((err) => log.warn('loop', 'notify-failed', { scope, err: String(err) }));
+          log.info('loop', loopNext.kind, { scope, total: loopNext.state.total });
+        }
         log.info('flush', 'end');
       }
     });
@@ -712,6 +739,7 @@ export async function startChannel(deps: StartChannelDeps): Promise<BridgeChanne
               workspaces: scoped?.workspaces ?? workspaces,
               activeRuns,
               pending,
+              loops,
               conversation,
               controls: scoped?.controls ?? controls,
               chatTopology,
@@ -1283,6 +1311,7 @@ interface IntakeDeps {
   workspaces: WorkspaceStore;
   activeRuns: ActiveRuns;
   pending: PendingQueue;
+  loops: LoopStore;
   conversation: ResolvedMessageConversation;
   controls: Controls;
   chatTopology: ChatTopologyResolver;
@@ -1443,6 +1472,7 @@ async function intakeMessage(deps: IntakeDeps): Promise<void> {
     ...(controls.spaceGate ? { spaceOperation: controls.spaceGate.active() } : {}) };
 
   let newTaskContent: string | undefined;
+  let loopStart: { prompt: string; max: number } | undefined;
   const handled = await tryHandleCommand({
     channel,
     msg: emsg,
@@ -1470,6 +1500,9 @@ async function intakeMessage(deps: IntakeDeps): Promise<void> {
     outboundControlChannel,
     onNewTask: (content) => {
       newTaskContent = content;
+    },
+    onLoopStart: (prompt, max) => {
+      loopStart = { prompt, max };
     },
     onTask: taskAdmission
       ? async (request: TaskCommandRequest) => {
@@ -1513,6 +1546,25 @@ async function intakeMessage(deps: IntakeDeps): Promise<void> {
         queueSize: size,
         debounceMs: DEBOUNCE_MS,
       });
+    }
+    if (loopStart) {
+      if (conversationInput.personalGroup || conversationInput.spaceOperation) {
+        await channel.send(emsg.chatId, { markdown: '当前会话模式暂不支持 `/loop`。' }, {
+          replyTo: emsg.messageId,
+        }).catch((err) => log.warn('intake', 'loop-reject-failed', { err: String(err) }));
+      } else {
+        const loopInput = {
+          ...conversationInput,
+          message: { ...emsg, content: loopStart.prompt },
+        };
+        deps.loops.start(scope, loopInput, loopStart.prompt, loopStart.max);
+        const size = pending.push(scope, loopInput);
+        log.info('intake', 'loop-started', {
+          scope,
+          queueSize: size,
+          max: loopStart.max,
+        });
+      }
     }
     return;
   }
@@ -1613,7 +1665,15 @@ interface RunBatchDeps {
   personalGroups?: PersonalAgentGroups;
 }
 
-async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
+async function runAgentBatch(deps: RunBatchDeps): Promise<Terminal | undefined> {
+  // `/loop` continuation is decided from the run's terminal state, so every
+  // stream drain below reports through this wrapper.
+  let lastTerminal: Terminal | undefined;
+  const trackedStream: typeof processAgentStream = async (...args) => {
+    const state = await processAgentStream(...args);
+    lastTerminal = state.terminal;
+    return state;
+  };
   const admissions = deps.inputs.flatMap(input => input.personalGroup ? [input.personalGroup] : []);
   const refreshPersonalGroup = async () => {
     for (const proof of admissions) {
@@ -2063,11 +2123,11 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
   try {
     if (!admissions.length && presentation.reasons.length) await channel.send(chatId, { text: presentationDescription(presentation) }, sendOpts);
     if (cooperative) {
-      const finalState = await processAgentStream(handle, eventStream, scope, idleTimeoutMs,
+      const finalState = await trackedStream(handle, eventStream, scope, idleTimeoutMs,
         recordSession, async () => {}, runInitialState);
       await sendFinalReply({ channel, chatId, scope, state: finalAnswerOnlyState(filterForPrefs(finalState)),
         replyMode, sendOpts, cardRenderOptions, commit: finalReplyCommit });
-      return;
+      return lastTerminal;
     }
     if (cotEnabled) {
       const cotPublisher = new CotPublisher({
@@ -2089,7 +2149,7 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
           detail: cotMessages,
           showToolCalls: getShowToolCalls(controls.cfg),
         });
-        const finalState = await processAgentStream(
+        const finalState = await trackedStream(
           handle,
           eventStream,
           scope,
@@ -2118,7 +2178,7 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
           cardRenderOptions,
           commit: finalReplyCommit,
         });
-        return;
+        return lastTerminal;
       }
       log.warn('cot', 'fallback-existing-reply', { reason: 'create-disabled' });
       await sendCotDegradedNotice({ channel, chatId, scope, sendOpts, reason: 'create-disabled' });
@@ -2134,7 +2194,7 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
         progressFailed = true;
         await progressCard!.close().catch(() => log.warn('progress', 'card-cleanup-pending'));
       };
-      const finalState = await processAgentStream(handle, eventStream, scope, idleTimeoutMs, recordSession,
+      const finalState = await trackedStream(handle, eventStream, scope, idleTimeoutMs, recordSession,
         async (state) => {
           if (!progressFailed && (progressCard!.opened() || shouldOpenProgressStream(filterForPrefs(state)))) {
             try { progressCard!.queue(renderCard(filterForPrefs(state), cardRenderOptions)); }
@@ -2157,7 +2217,7 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
           replyMode, sendOpts, cardRenderOptions, commit: finalReplyCommit });
       }
     } else if ((outboundFinalOnly || gate) && (replyMode === 'card' || replyMode === 'markdown')) {
-      const finalState = await processAgentStream(
+      const finalState = await trackedStream(
         handle,
         eventStream,
         scope,
@@ -2203,7 +2263,7 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
           sendOpts,
         ),
       );
-      const renderDone = processAgentStream(
+      const renderDone = trackedStream(
         handle,
         eventStream,
         scope,
@@ -2280,7 +2340,7 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
           sendOpts,
         ),
       );
-      const renderDone = processAgentStream(
+      const renderDone = trackedStream(
         handle,
         eventStream,
         scope,
@@ -2343,7 +2403,7 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
       // text mode: drain the agent stream without sending anything during
       // the run, then post the final rendered text once as a plain markdown
       // (msg_type=post) message — no card, no streaming, no typewriter.
-      const finalState = await processAgentStream(
+      const finalState = await trackedStream(
         handle,
         eventStream,
         scope,
@@ -2400,6 +2460,7 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
     activePolicyFingerprints.delete(scope);
     scheduleWorkingReactionCleanup(channel, lastMsg.messageId, reactionPromise);
   }
+  return lastTerminal;
 }
 
 async function settleWithin<T>(
