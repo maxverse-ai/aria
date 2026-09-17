@@ -2,7 +2,11 @@ import { PersonalGroupPeers } from '../bot/personal-agent-group';
 import { ProfileRunIntentStore } from './profile-run-intent';
 import { createLarkSpaceGate } from '../bot/space-context';
 import { requireEnginePlugin } from '../agent/plugin/registry';
-import { runtimeQueries } from '../agent/runtime/queries';
+import {
+  runtimeQueries,
+  type EngineGoalControl,
+  type EngineGoalSetInput,
+} from '../agent/runtime/queries';
 import type { PreparedSpaceProfile } from '../space/profile';
 import { createSelectedSpaceProfile } from '../space/selected-profile';
 import { pendingSpaceTransition } from '../space/transition';
@@ -606,6 +610,17 @@ class ManagedProfile {
         if (self.spaces) throw new Error('engine models require a bound space operation');
         return self.runtimeSlot.listModels(signal);
       },
+      // Space profiles take the goal control from their bound operation instead.
+      ...(self.spaces ? {} : {
+        engineGoal: {
+          // Each call takes its own lease: a goal read or write is a live App
+          // Server request, and the runtime slot may be replaced between them.
+          get: (threadId: string) => withGoalControl(self.runtimeSlot, (goal) => goal.get(threadId)),
+          set: (threadId: string, input: EngineGoalSetInput) =>
+            withGoalControl(self.runtimeSlot, (goal) => goal.set(threadId, input)),
+          clear: (threadId: string) => withGoalControl(self.runtimeSlot, (goal) => goal.clear(threadId)),
+        },
+      }),
       async engineHistory(cwd, limit) {
         if (self.spaces) throw new Error('native history requires a bound space operation');
         const lease = await self.runtimeSlot.acquire({ scopeId: 'native-history', purpose: 'query' });
@@ -1371,5 +1386,24 @@ export class Supervisor {
   /** Sync best-effort unregister of all entries (for the process 'exit' hook). */
   unregisterAllSync(): void {
     for (const m of this.managed.values()) m.unregisterSelfSync();
+  }
+}
+
+/**
+ * Run one goal operation against the currently leased engine runtime. The
+ * runtime slot can be replaced between calls, so the control the caller holds
+ * never captures a runtime of its own.
+ */
+async function withGoalControl<T>(
+  slot: ProfileRuntimeSlot,
+  run: (goal: EngineGoalControl) => Promise<T>,
+): Promise<T> {
+  const lease = await slot.acquire({ scopeId: 'engine-goal', purpose: 'query' });
+  try {
+    const goal = runtimeQueries(lease.runtime).goal;
+    if (!goal) throw new Error('this engine runtime does not carry goals');
+    return await run(goal);
+  } finally {
+    lease.release();
   }
 }

@@ -26,6 +26,7 @@ import {
 } from '../agent/models';
 import type { AgentAdapter } from '../agent/types';
 import type { EngineStatusSnapshot } from '../agent/runtime/types';
+import type { EngineGoalSnapshot, EngineGoalStatus } from '../agent/runtime/queries';
 import {
   ConfigChangeService,
   ControlChangeError,
@@ -194,6 +195,8 @@ export interface Controls {
   engineStatus?(): Promise<EngineStatusSnapshot | undefined>;
   /** Optional live model catalog from the profile-owned engine runtime. */
   engineModels?(signal: AbortSignal): Promise<ModelOption[] | undefined>;
+  /** Read or change the live engine's long-running goal for one native thread. */
+  engineGoal?: import('../agent/runtime/queries').EngineGoalControl;
   /** Changes whenever the managed engine runtime is replaced. */
   engineGeneration?(): number;
   /** Stop this whole process gracefully (disconnect + exit). Used by /exit
@@ -308,6 +311,7 @@ const handlers: Record<string, Handler> = {
   '/doctor': handleDoctor,
   '/reconnect': handleReconnect,
   '/doc': handleDoc,
+  '/goal': handleGoal,
   '/invite': handleInvite,
   '/remove': handleRemove,
   '/meeting': handleMeeting,
@@ -723,6 +727,125 @@ async function handleWsRemove(name: string, ctx: CommandContext): Promise<void> 
 async function handleDoc(args: string, ctx: CommandContext): Promise<void> {
   void args;
   await reply(ctx, '云文档评论现在不需要绑定工作区；在支持的文档评论里 @bot 即可触发回复。');
+}
+
+// ─── /goal ────────────────────────────────────────────────────────────────
+
+const GOAL_USAGE = [
+  '**长期目标（Codex）**',
+  '- `/goal` — 查看当前会话的目标',
+  '- `/goal <目标>` — 设置目标，状态为已暂停，不会自动推进',
+  '- `/goal --budget <tokens> <目标>` — 同时设置 token 预算',
+  '- `/goal pause` — 暂停',
+  '- `/goal clear` — 清除',
+  '- `/goal resume` — 恢复自动推进（尚未开放）',
+].join('\n');
+
+const GOAL_STATUS_LABELS: Record<EngineGoalStatus, string> = {
+  active: '进行中',
+  paused: '已暂停',
+  blocked: '受阻',
+  usageLimited: '额度耗尽',
+  budgetLimited: '超出预算',
+  complete: '已完成',
+};
+
+function goalLine(goal: EngineGoalSnapshot): string {
+  const budget = goal.tokenBudget === null ? '未设' : goal.tokenBudget.toLocaleString('en-US');
+  const tokens = goal.tokensUsed.toLocaleString('en-US');
+  const minutes = Math.round(goal.timeUsedSeconds / 60);
+  return [
+    `目标：${goal.objective}`,
+    `状态：${GOAL_STATUS_LABELS[goal.status] ?? goal.status}`,
+    `预算：${budget} ｜ 已用：${tokens} tokens ｜ ${minutes} 分钟`,
+  ].join('\n');
+}
+
+/**
+ * Codex carries one goal per thread, and a thread without a run does not exist
+ * yet, so this refuses before the first message exactly like Codex does.
+ */
+async function handleGoal(args: string, ctx: CommandContext): Promise<void> {
+  if (!capabilityFor(ctx.controls.profileConfig.agentKind, ctx.controls.profileConfig).supportsGoal) {
+    await reply(ctx, '当前 Agent 没有长期目标能力；`/goal` 目前仅由 Codex Runtime 提供。');
+    return;
+  }
+  const goal = ctx.controls.engineGoal;
+  if (!goal) {
+    await reply(ctx, '当前运行模式没有可用的引擎目标通道。');
+    return;
+  }
+
+  const tokens = args.trim().split(/\s+/).filter(Boolean);
+  const sub = tokens[0] ?? '';
+  const mutating = sub === 'pause' || sub === 'resume' || sub === 'clear' || sub !== '';
+  if (mutating && !canRunAdminCommand(ctx.controls.profileConfig, ctx.controls, ctx.msg.senderId).ok) {
+    await reply(ctx, '❌ `/goal` 的修改操作仅管理员可用。');
+    return;
+  }
+
+  const threadId = ctx.sessions.getRaw(ctx.scope)?.sessionId;
+  if (!threadId) {
+    await reply(ctx, '这个会话还没有 Codex 线程，先发一条消息，再设置目标。');
+    return;
+  }
+
+  if (sub === '' || sub === 'show') {
+    const current = await goal.get(threadId);
+    await reply(ctx, current ? goalLine(current) : '当前会话还没有目标。设置：`/goal <目标>`');
+    return;
+  }
+  if (sub === 'clear' || sub === 'remove') {
+    await goal.clear(threadId);
+    await reply(ctx, '✓ 已清除当前会话的目标。');
+    return;
+  }
+  if (sub === 'resume' || sub === 'active') {
+    await reply(ctx, '自动推进尚未开放：目标置为进行中后，Codex 会在没有消息时自行继续工作，而这条链路还没有接好。用 `/goal pause` 保持暂停，或先发消息推进。');
+    return;
+  }
+  if (sub === 'pause') {
+    const current = await goal.get(threadId);
+    if (!current) {
+      await reply(ctx, '当前会话还没有目标。设置：`/goal <目标>`');
+      return;
+    }
+    const updated = await goal.set(threadId, { status: 'paused' });
+    await reply(ctx, `✓ 已暂停。\n${goalLine(updated)}`);
+    return;
+  }
+
+  let budget: number | undefined;
+  const objective: string[] = [];
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index]!;
+    if (token === '--budget') {
+      const raw = tokens[index + 1];
+      const parsed = raw === undefined ? Number.NaN : Number.parseInt(raw.replace(/_/g, ''), 10);
+      if (!Number.isFinite(parsed) || parsed <= 0) {
+        await reply(ctx, '预算需要一个正整数，例如 `/goal --budget 50000 <目标>`。');
+        return;
+      }
+      budget = parsed;
+      index += 1;
+      continue;
+    }
+    objective.push(token);
+  }
+  const text = objective.join(' ').trim();
+  if (!text) {
+    await reply(ctx, GOAL_USAGE);
+    return;
+  }
+
+  const updated = await goal.set(threadId, {
+    objective: text,
+    // `active` lets the engine start turns on its own; nothing here delivers
+    // those yet, so a new goal always starts paused.
+    status: 'paused',
+    ...(budget === undefined ? {} : { tokenBudget: budget }),
+  });
+  await reply(ctx, `✓ 已设置目标（已暂停，不会自动推进）。\n${goalLine(updated)}`);
 }
 
 const WORKSPACE_NAME_SEPARATOR = '\u001f';

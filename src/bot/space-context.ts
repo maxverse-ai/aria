@@ -7,6 +7,7 @@ import { SpaceOperationGate } from '../space/operation-gate';
 import { clampAccess, permissionsToLegacySandbox } from '../config/permissions';
 import { LarkSpaceCredentialProvider } from '../lark-cli/space-credentials';
 import { larkSpaceNativeTool } from '../lark-cli/space-tool';
+import { runtimeQueries, type EngineGoalSetInput } from '../agent/runtime/queries';
 import type { AppPaths } from '../config/app-paths';
 import { join } from 'node:path';
 
@@ -24,6 +25,23 @@ export async function spaceChannelContext(controls: Controls, gate: SpaceOperati
   const scopedControls: Controls = { ...controls, profileConfig, spaceGate: gate,
     engineStatus: () => gate.services.query(operation.context, async (runtime) => runtime.statusSnapshot?.()),
     engineModels: (signal) => gate.services.query(operation.context, async (runtime) => runtime.listModels?.(signal) ?? []),
+    engineGoal: {
+      get: (threadId: string) => gate.services.query(operation.context, async (runtime) => {
+        const goal = runtimeQueries(runtime).goal;
+        if (!goal) throw new Error('this engine runtime does not carry goals');
+        return goal.get(threadId);
+      }),
+      set: (threadId: string, input: EngineGoalSetInput) => gate.services.query(operation.context, async (runtime) => {
+        const goal = runtimeQueries(runtime).goal;
+        if (!goal) throw new Error('this engine runtime does not carry goals');
+        return goal.set(threadId, input);
+      }),
+      clear: (threadId: string) => gate.services.query(operation.context, async (runtime) => {
+        const goal = runtimeQueries(runtime).goal;
+        if (!goal) throw new Error('this engine runtime does not carry goals');
+        return goal.clear(threadId);
+      }),
+    },
     engineHistory: (cwd, limit) => gate.services.history(operation.context, cwd, limit),
     // Cache partitions include the space, never a profile-global account result.
     engineGeneration: () => Number.parseInt(snapshot.binding.spaceId.slice(0, 12), 16),

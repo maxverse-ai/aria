@@ -449,6 +449,7 @@ export function helpCard(agentName = 'Agent', team = false): object {
         '- `/agent` — 查看并切换该 profile 使用的引擎',
         '- `/models` — 查看并选择模型',
         '- `/effort` — 查看并选择推理强度',
+        '- `/goal` — 查看或设置当前会话的长期目标（Codex，默认暂停）',
         '- `/fast [on|off|status]` — 管理 Codex Fast 模式（管理员）',
         '- `/status` — 当前状态',
         '- `/remind at <ISO时间> <任务>` — 在当前会话创建提醒；`/remind list` 查看',
