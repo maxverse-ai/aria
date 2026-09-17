@@ -94,3 +94,18 @@ export async function scopeForMessage(
 ): Promise<string> {
   return (await resolveMessageConversation(channel, msg, cache)).key;
 }
+
+/**
+ * Inverse of the topic part of {@link scopeFor}. A caller that only holds a
+ * scope — an engine-started turn knows its thread, not its chat — still has to
+ * name the chat it delivers to. Lark chat ids never contain `:`.
+ */
+export function chatIdFromScope(scope: string): string {
+  const separator = scope.indexOf(':');
+  return separator === -1 ? scope : scope.slice(0, separator);
+}
+
+/** True when the scope names a topic inside its chat rather than the chat itself. */
+export function scopeHasThread(scope: string): boolean {
+  return scope.includes(':');
+}

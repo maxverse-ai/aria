@@ -339,7 +339,7 @@ Supervisor 重启会恢复明确要求运行的 profile，主动停止的保持�
 | `/agent` | 切换该 profile 使用的引擎，先让当前 run 结束再切换 |
 | `/models` | 查看并选择模型 |
 | `/effort` | 查看并选择推理强度 |
-| `/goal [目标] [--budget <tokens>]`, `/goal pause\|clear` | 查看、设置、暂停或清除当前会话的 Codex 长期目标；在自动续跑接入聊天之前目标保持暂停 |
+| `/goal [目标] [--budget <tokens>]`, `/goal resume --budget <tokens>`, `/goal pause\|clear` | 查看、设置、暂停或清除当前会话的 Codex 长期目标。新目标默认为暂停；`resume` 开启自动推进且必须给预算上限，每一轮的结果会发到本会话 |
 | `/config` | 调整展示偏好、访问控制和 lark-cli 身份策略 |
 | `/account` | 查看当前绑定的应用；`/account change` 换 appId、secret 并重连 |
 | `/fast [on\|off\|status\|reset]` | 管理 Codex Fast 模式；仅支持服务档位的模型显示（管理员） |

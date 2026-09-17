@@ -4,8 +4,10 @@ import { createLarkSpaceGate } from '../bot/space-context';
 import { requireEnginePlugin } from '../agent/plugin/registry';
 import {
   runtimeQueries,
+  type EngineAdoptedTurnInput,
   type EngineGoalControl,
   type EngineGoalSetInput,
+  type EngineTurnRef,
 } from '../agent/runtime/queries';
 import type { PreparedSpaceProfile } from '../space/profile';
 import { createSelectedSpaceProfile } from '../space/selected-profile';
@@ -200,6 +202,8 @@ class ManagedProfile {
     promise: Promise<AgentSwitchResult>;
   };
   private runtimeSlot: ProfileRuntimeSlot;
+  private readonly engineTurnSubscribers = new Set<(turn: EngineTurnRef) => void>();
+  private engineTurnWatch?: () => void;
   private runtimeControl?: RuntimeControlServerHandle;
   private nativeReadRuntime?: NativeReadProfileRuntime;
   private conversationRuntime?: ProfileConversationRuntimeOwner;
@@ -620,6 +624,17 @@ class ManagedProfile {
             withGoalControl(self.runtimeSlot, (goal) => goal.set(threadId, input)),
           clear: (threadId: string) => withGoalControl(self.runtimeSlot, (goal) => goal.clear(threadId)),
         },
+        engineTurns: {
+          subscribe: (listener: (turn: EngineTurnRef) => void) => self.subscribeEngineTurns(listener),
+        },
+        adoptEngineTurn: async (input: EngineAdoptedTurnInput) => {
+          const lease = await self.runtimeSlot.acquire({ scopeId: input.threadId, purpose: 'query' });
+          try {
+            const adopt = runtimeQueries(lease.runtime).adoptedTurn;
+            if (!adopt) throw new Error('this engine runtime cannot adopt engine turns');
+            return await adopt(input);
+          } finally { lease.release(); }
+        },
       }),
       async engineHistory(cwd, limit) {
         if (self.spaces) throw new Error('native history requires a bound space operation');
@@ -640,6 +655,28 @@ class ManagedProfile {
       ...(this.triggerReminders ? { triggerReminders: this.triggerReminders } : {}),
     };
     return currentControls;
+  }
+
+  /**
+   * The engine runtime is replaced on an engine switch or a space transition,
+   * and the subscription to engine-started turns has to follow it. Re-binding
+   * is idempotent, so both swap sites can call it unconditionally.
+   */
+  private subscribeEngineTurns(listener: (turn: EngineTurnRef) => void): () => void {
+    this.engineTurnSubscribers.add(listener);
+    this.rebindEngineTurns();
+    return () => this.engineTurnSubscribers.delete(listener);
+  }
+
+  private rebindEngineTurns(): void {
+    this.engineTurnWatch?.();
+    this.engineTurnWatch = undefined;
+    if (this.engineTurnSubscribers.size === 0) return;
+    const watch = runtimeQueries(this.engineRuntime).engineTurns;
+    if (!watch) return;
+    this.engineTurnWatch = watch.subscribe((turn) => {
+      for (const listener of this.engineTurnSubscribers) listener(turn);
+    });
   }
 
   /**
@@ -785,6 +822,7 @@ class ManagedProfile {
           this.cfg = next;
           this.profileConfig = committedProfile;
           this.engineRuntime = candidate;
+          this.rebindEngineTurns();
           this.controls.cfg = this.cfg;
           this.controls.profileConfig = this.profileConfig;
           modelCatalog.invalidate({ profileId: this.profile, engineId: previousAgentKind });
@@ -1031,6 +1069,7 @@ class ManagedProfile {
       const activatedEngineRuntime = nextEngineRuntime;
       const previousEngineRuntime = this.runtimeSlot.swap(activatedEngineRuntime);
       this.engineRuntime = activatedEngineRuntime;
+      this.rebindEngineTurns();
       modelCatalog.invalidate({
         profileId: this.profile,
         engineId: nextRuntime.profileConfig.agentKind,

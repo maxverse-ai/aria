@@ -24,7 +24,7 @@ import {
   supportedModels,
   type ModelOption,
 } from '../agent/models';
-import type { AgentAdapter } from '../agent/types';
+import type { AgentAdapter, AgentRun } from '../agent/types';
 import type { EngineStatusSnapshot } from '../agent/runtime/types';
 import type { EngineGoalSnapshot, EngineGoalStatus } from '../agent/runtime/queries';
 import {
@@ -197,6 +197,10 @@ export interface Controls {
   engineModels?(signal: AbortSignal): Promise<ModelOption[] | undefined>;
   /** Read or change the live engine's long-running goal for one native thread. */
   engineGoal?: import('../agent/runtime/queries').EngineGoalControl;
+  /** Announces turns the engine started on its own, which nothing replied to. */
+  engineTurns?: { subscribe(listener: (turn: import('../agent/runtime/queries').EngineTurnRef) => void): () => void };
+  /** Attaches to one of those turns instead of starting a new one. */
+  adoptEngineTurn?: (input: import('../agent/runtime/queries').EngineAdoptedTurnInput) => Promise<AgentRun>;
   /** Changes whenever the managed engine runtime is replaced. */
   engineGeneration?(): number;
   /** Stop this whole process gracefully (disconnect + exit). Used by /exit
@@ -738,7 +742,7 @@ const GOAL_USAGE = [
   '- `/goal --budget <tokens> <目标>` — 同时设置 token 预算',
   '- `/goal pause` — 暂停',
   '- `/goal clear` — 清除',
-  '- `/goal resume` — 恢复自动推进（尚未开放）',
+  '- `/goal resume --budget <tokens>` — 开始自动推进；必须给预算上限',
 ].join('\n');
 
 const GOAL_STATUS_LABELS: Record<EngineGoalStatus, string> = {
@@ -759,6 +763,19 @@ function goalLine(goal: EngineGoalSnapshot): string {
     `状态：${GOAL_STATUS_LABELS[goal.status] ?? goal.status}`,
     `预算：${budget} ｜ 已用：${tokens} tokens ｜ ${minutes} 分钟`,
   ].join('\n');
+}
+
+/** `--budget <tokens>` for the subcommands that need a spend ceiling. */
+function parseGoalBudget(tokens: string[]): { budget?: number; error?: string } {
+  if (tokens.length === 0) return {};
+  if (tokens[0] !== '--budget') return { error: `无法识别的参数：\`${tokens[0]}\`` };
+  const parsed = tokens[1] === undefined ? Number.NaN : Number.parseInt(tokens[1].replace(/_/g, ''), 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return {
+      error: '预算需要一个正整数，例如 `/goal resume --budget 200000`。',
+    };
+  }
+  return { budget: parsed };
 }
 
 /**
@@ -801,7 +818,27 @@ async function handleGoal(args: string, ctx: CommandContext): Promise<void> {
     return;
   }
   if (sub === 'resume' || sub === 'active') {
-    await reply(ctx, '自动推进尚未开放：目标置为进行中后，Codex 会在没有消息时自行继续工作，而这条链路还没有接好。用 `/goal pause` 保持暂停，或先发消息推进。');
+    const current = await goal.get(threadId);
+    if (!current) {
+      await reply(ctx, '当前会话还没有目标。设置：`/goal <目标>`');
+      return;
+    }
+    const requested = parseGoalBudget(tokens.slice(1));
+    if (requested.error) {
+      await reply(ctx, requested.error);
+      return;
+    }
+    const budget = requested.budget ?? current.tokenBudget;
+    if (budget === null) {
+      // 进行中意味着引擎会在没人说话时自己继续工作；没有上限就可能整晚烧额度。
+      await reply(ctx, '自动推进需要一个预算上限，例如 `/goal resume --budget 200000`。');
+      return;
+    }
+    const updated = await goal.set(threadId, {
+      status: 'active',
+      ...(requested.budget === undefined ? {} : { tokenBudget: requested.budget }),
+    });
+    await reply(ctx, `✓ 已开始自动推进；每轮的结果会发到本会话，超预算或想停下时用 \`/goal pause\`。\n${goalLine(updated)}`);
     return;
   }
   if (sub === 'pause') {

@@ -353,7 +353,7 @@ If a profile was created with the wrong agent kind, stop or unregister any match
 | `/agent` | Switch the engine this profile runs, staged so the current run finishes first |
 | `/models` | Inspect and select the model |
 | `/effort` | Inspect and select the reasoning effort |
-| `/goal [objective] [--budget <tokens>]`, `/goal pause\|clear` | Show, set, pause, or clear the session's Codex goal; the goal stays paused until automatic continuation is delivered to chat |
+| `/goal [objective] [--budget <tokens>]`, `/goal resume --budget <tokens>`, `/goal pause\|clear` | Show, set, pause, or clear the session's Codex goal. A new goal starts paused; `resume` starts automatic continuation and needs a spend ceiling, and each continuation turn's answer is posted to this conversation |
 | `/config` | Adjust presentation preferences, access settings, and lark-cli identity policy |
 | `/account` | Show the bound app; `/account change` replaces its appId and secret and reconnects |
 | `/fast [on\|off\|status\|reset]` | Manage Codex Fast for models that expose service tiers (admin only) |

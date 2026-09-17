@@ -117,15 +117,40 @@ describe('/goal command', () => {
     expect(sent(clear.send)).toContain('已清除');
   });
 
-  // Auto-continuation is not wired to the chat yet: an `active` goal would make
-  // the engine work and spend quota with nothing delivered here.
-  it('refuses resume until engine-initiated turns are delivered', async () => {
-    const { ctx, send, goal } = context('/goal resume');
+  // An active goal makes the engine start turns on its own and spend quota, so
+  // it needs a ceiling.
+  it('refuses to start automatic continuation without a budget', async () => {
+    const current = goalSnapshot({ objective: 'x', status: 'paused', tokenBudget: null });
+    const { ctx, send, goal } = context('/goal resume', {
+      goal: { get: vi.fn(async () => current), set: vi.fn(async () => goalSnapshot()), clear: vi.fn(async () => undefined) },
+    });
 
     await tryHandleCommand(ctx);
 
     expect(goal.set).not.toHaveBeenCalled();
-    expect(sent(send)).toContain('自动推进尚未开放');
+    expect(sent(send)).toContain('需要一个预算上限');
+  });
+
+  it('starts automatic continuation when a budget is given', async () => {
+    const current = goalSnapshot({ objective: 'x', status: 'paused', tokenBudget: null });
+    const { ctx, goal } = context('/goal resume --budget 200000', {
+      goal: { get: vi.fn(async () => current), set: vi.fn(async () => goalSnapshot({ status: 'active' })), clear: vi.fn(async () => undefined) },
+    });
+
+    await tryHandleCommand(ctx);
+
+    expect(goal.set).toHaveBeenCalledWith('thread-1', { status: 'active', tokenBudget: 200000 });
+  });
+
+  it('reuses a stored budget when resuming', async () => {
+    const current = goalSnapshot({ objective: 'x', status: 'paused', tokenBudget: 5000 });
+    const { ctx, goal } = context('/goal resume', {
+      goal: { get: vi.fn(async () => current), set: vi.fn(async () => goalSnapshot({ status: 'active' })), clear: vi.fn(async () => undefined) },
+    });
+
+    await tryHandleCommand(ctx);
+
+    expect(goal.set).toHaveBeenCalledWith('thread-1', { status: 'active' });
   });
 
   it('refuses before a Codex thread exists', async () => {

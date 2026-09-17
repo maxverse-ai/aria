@@ -250,6 +250,73 @@ export class RunExecutor {
       eventId: `${runId}:started`, sourceRunId: runId, action: 'run.started',
       occurredAt: new Date(startedAt).toISOString(), outcome: 'success',
     });
+    return this.buildExecution({ run, runId, scopeId: input.scopeId, handle, startedAt, dimensions, releaseResources });
+  }
+
+  /**
+   * Wraps a run this process did not start — an engine-started goal
+   * continuation — in the same execution shape `submit` returns, so the
+   * ordinary consumers (audit, stop, subscription) need no special case.
+   */
+  async adopt(input: {
+    run: AgentRun;
+    scopeId: string;
+    observability?: { profile?: string; agent?: string; source?: string };
+  }): Promise<RunExecution> {
+    if (this.activeRuns.newRunsPaused()) {
+      throw new RunRejected(
+        'reconnect-in-progress',
+        this.activeRuns.newRunsPauseReason() ?? 'new runs are temporarily paused',
+      );
+    }
+    const releaseScope = this.activeRuns.reserve(input.scopeId);
+    if (!releaseScope) {
+      throw new RunRejected('run-already-active', 'another run is already active for this scope');
+    }
+    const { run } = input;
+    const runId = run.runId;
+    const startedAt = this.now();
+    const dimensions = {
+      ...observabilityFields(),
+      runId,
+      profile: input.observability?.profile ?? 'unknown',
+      agent: input.observability?.agent ?? this.agent.id,
+      scope: input.scopeId,
+      source: input.observability?.source ?? 'unknown',
+      stage: 'engine-turn',
+    };
+    let handle: RunHandle;
+    try {
+      handle = this.activeRuns.register(input.scopeId, run);
+      releaseScope();
+    } catch (err) {
+      await run.stop().catch(() => {});
+      releaseScope();
+      throw new RunRejected(
+        'run-already-active',
+        err instanceof Error ? err.message : 'another run is already active for this scope',
+      );
+    }
+    await this.recordAudit({
+      eventId: `${runId}:started`, sourceRunId: runId, action: 'run.started',
+      occurredAt: new Date(startedAt).toISOString(), outcome: 'success',
+    });
+    return this.buildExecution({
+      run, runId, scopeId: input.scopeId, handle, startedAt, dimensions,
+      releaseResources: () => undefined,
+    });
+  }
+
+  private buildExecution(input: {
+    run: AgentRun;
+    runId: string;
+    scopeId: string;
+    handle: RunHandle;
+    startedAt: number;
+    dimensions: Record<string, unknown>;
+    releaseResources: () => void;
+  }): RunExecution {
+    const { run, runId, scopeId, handle, startedAt, dimensions, releaseResources } = input;
     let cleanupPromise: Promise<void> | undefined;
     let stopWork: Promise<void> | undefined;
     let exitWork: Promise<boolean> | undefined;
@@ -275,7 +342,7 @@ export class RunExecutor {
           }
           if (stopWork) await stopWork;
         } finally {
-          this.activeRuns.unregister(input.scopeId, run);
+          this.activeRuns.unregister(scopeId, run);
           releaseResources();
         }
       })();
@@ -309,7 +376,7 @@ export class RunExecutor {
 
     return {
       runId,
-      scopeId: input.scopeId,
+      scopeId,
       run,
       handle,
       subscribe: () => fanout.subscribe(),

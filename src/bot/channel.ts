@@ -111,6 +111,8 @@ import {
   type ConversationInput,
 } from './conversation-input';
 import { ChatModeCache, type ChatMode } from './chat-mode-cache';
+import { chatIdFromScope, scopeHasThread } from './scope';
+import type { EngineTurnRef } from '../agent/runtime/queries';
 import { ChatTopologyResolver } from './chat-topology';
 import {
   resolveMessageConversation,
@@ -966,11 +968,31 @@ export async function startChannel(deps: StartChannelDeps): Promise<BridgeChanne
     forceReconnect: () => controls.restart(),
   });
 
+  const deliverEngineTurn = createEngineTurnDelivery({
+    channel,
+    controls,
+    conversations,
+    executor,
+    ...(sessionCatalog ? { sessionCatalog } : {}),
+    finalReplyFreshness,
+    chatModeCache,
+    ...(messageRead ? { messageRead } : {}),
+  });
+  const engineTurnSubscription = controls.engineTurns?.subscribe((turn) => {
+    void deliverEngineTurn(turn).catch((error) => log.warn('goal', 'engine-turn-delivery-failed', {
+      ...observabilityFields(),
+      threadId: turn.threadId,
+      turnId: turn.turnId,
+      err: error instanceof Error ? error.message : String(error),
+    }));
+  });
+
   return {
     channel,
     activitySnapshot: () => ({ ...activityTracker.snapshot(), presentation: controls.presentationStatus?.() }),
     quiesceAgentRuns: (reason: string) => conversationRuntime.quiesce(reason),
     disconnect: async () => {
+      engineTurnSubscription?.();
       unregisterPeer?.();
       delete controls.personalGroupStatus;
       ownerRefresh.stop();
@@ -1072,6 +1094,93 @@ async function consumeTaskExecution(input: {
       }));
     }
   }
+}
+
+export interface EngineTurnDeliveryDeps {
+  channel: LarkChannel;
+  controls: Controls;
+  conversations: ConversationRuntime;
+  executor: RunExecutor;
+  sessionCatalog?: SessionCatalog;
+  finalReplyFreshness: FinalReplyFreshness;
+  chatModeCache: ChatModeCache;
+  messageRead?: MessageResourceSink;
+}
+
+/**
+ * Deliver a turn the engine started with no message behind it — a goal
+ * continuation. There is no inbound message to reply to, so the delivery is
+ * that turn's final answer published into the conversation that owns the
+ * thread; the freshness commit still applies, so a human who speaks first
+ * holds it.
+ *
+ * Space profiles never expose the subscription: their runs are bound to an
+ * authorization a self-starting turn does not carry.
+ */
+export function createEngineTurnDelivery(
+  deps: EngineTurnDeliveryDeps,
+): (turn: EngineTurnRef) => Promise<void> {
+  const { channel, controls, conversations, executor, sessionCatalog, finalReplyFreshness, chatModeCache, messageRead } = deps;
+  return async (turn) => {
+    const adopt = controls.adoptEngineTurn;
+    if (!adopt || !sessionCatalog) return;
+    const entry = sessionCatalog.entries().find((candidate) => candidate.status === 'active' &&
+      (candidate.threadId === turn.threadId || candidate.sessionId === turn.threadId));
+    if (!entry) {
+      log.warn('goal', 'engine-turn-scope-unknown', {
+        ...observabilityFields(),
+        threadId: turn.threadId,
+        turnId: turn.turnId,
+      });
+      return;
+    }
+    const scope = entry.scopeId;
+    const chatId = chatIdFromScope(scope);
+    const threadId = scopeHasThread(scope) ? scope.slice(scope.indexOf(':') + 1) : undefined;
+    await conversations.ingress.run(async () => {
+      const adopted = await adopt({ threadId: turn.threadId, turnId: turn.turnId, cwd: entry.cwdRealpath });
+      const execution = await executor.adopt({
+        run: adopted,
+        scopeId: scope,
+        observability: { source: 'engine-turn' },
+      });
+      const mode = await chatModeCache.resolve(channel, chatId);
+      const commit = new FinalReplyCommit({
+        conversations,
+        freshness: finalReplyFreshness,
+        context: {
+          scope,
+          runId: execution.runId,
+          publicationKey: `${controls.cfg.accounts.app.tenant}:${chatId}:${threadId ?? ''}`,
+          cooperative: false,
+          chatId,
+          chatType: mode === 'p2p' ? 'p2p' : 'group',
+          ...(threadId ? { threadId } : {}),
+        },
+        retract: (artifact) => recallReplyMessage(channel, artifact, scope, 'freshness', messageRead),
+      });
+      const scopeOverride = conversations.idleTimeoutMinutes(scope);
+      const finalState = await processAgentStream(
+        execution.handle,
+        execution.subscribe(),
+        scope,
+        scopeOverride !== undefined
+          ? scopeOverride > 0 ? scopeOverride * 60_000 : undefined
+          : getRunIdleTimeoutMs(controls.cfg),
+        async () => {},
+        async () => {},
+      );
+      // An engine turn carries no interactive context, so it is always a plain
+      // reply — no card, no callbacks, nothing to click — published through the
+      // same freshness commit as any other run final.
+      const draft = renderText(finalAnswerOnlyState(finalState), { includeRunStatus: false });
+      if (!draft.trim()) return;
+      await commit.publish(draft, async () => {
+        const sent = await channel.send(chatId, { markdown: draft }, threadId ? { replyInThread: true } : {});
+        return finalReplyArtifactFromResult(sent);
+      });
+    });
+  };
 }
 
 function startKnownChatsRefreshTimer(
