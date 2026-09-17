@@ -36,6 +36,7 @@ describe('engine plugin registry', () => {
     expect(ids).toContain('dsh');
     expect(ids).toContain('kimi');
     expect(ids).toContain('pi');
+    expect(ids).toContain('devin');
   });
 
   it('requires each engine plugin to opt in to scheduled-trigger automation', () => {

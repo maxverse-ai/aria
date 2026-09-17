@@ -37,7 +37,7 @@ it.each(SPACE_ENGINE_IDS)('%s trusted process: explicit shared host, independent
       expect(events.filter((event) => event.type === 'error')).toEqual([]);
       expect(events).toContainEqual(expect.objectContaining({ type: 'done', terminationReason: 'normal' }));
       expect(await run.waitForExit(1000)).toBe(true);
-      if (['codex', 'grok'].includes(engineId)) {
+      if (['codex', 'grok', 'devin'].includes(engineId)) {
         await runtimeQueries(runtime).listHistory!({ cwd: paths.workspace, limit: 5 });
         expect((await readFile(join(paths.state, 'spawns'), 'utf8')).trim().split('\n')).toHaveLength(1);
       }

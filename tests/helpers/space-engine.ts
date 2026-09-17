@@ -21,7 +21,7 @@ export function spaceEngineMain(input: { engine: string; envKeys: string[]; sent
   save();
 
   if (input.engine === 'opencode' && ['session', 'models'].includes(record.argv[0]!)) { send([]); return; }
-  if (input.engine === 'codex' || input.engine === 'grok') {
+  if (input.engine === 'codex' || input.engine === 'grok' || input.engine === 'devin') {
     const rl = require('node:readline').createInterface({ input: process.stdin });
     rl.on('line', (line: string) => {
       const message = JSON.parse(line);
@@ -30,9 +30,9 @@ export function spaceEngineMain(input: { engine: string; envKeys: string[]; sent
       if (message.id === undefined) return;
       const reply = (result: unknown) => send({ jsonrpc: '2.0', id: message.id, result });
       if (message.method === 'initialize') {
-        reply(input.engine === 'grok'
-          ? { protocolVersion: 1, agentCapabilities: { loadSession: true }, authMethods: [] }
-          : { userAgent: 'fixture' });
+        reply(input.engine === 'codex'
+          ? { userAgent: 'fixture' }
+          : { protocolVersion: 1, agentCapabilities: { loadSession: true }, authMethods: [] });
       } else if (message.method === 'thread/list') {
         reply({ data: [], nextCursor: null });
       } else if (message.method === 'thread/start' || message.method === 'thread/resume') {

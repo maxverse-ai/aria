@@ -13,6 +13,7 @@ const ENV_KEYS = [
   'LARK_CHANNEL_DSH_BIN',
   'LARK_CHANNEL_KIMI_BIN',
   'LARK_CHANNEL_PI_BIN',
+  'LARK_CHANNEL_DEVIN_BIN',
 ] as const;
 
 describe('engine probe', () => {
@@ -42,6 +43,7 @@ describe('engine probe', () => {
       process.env.LARK_CHANNEL_DSH_BIN = await writeVersionExecutable(dir, 'dsh', '0.1.1');
       process.env.LARK_CHANNEL_KIMI_BIN = await writeVersionExecutable(dir, 'kimi', '0.36.1');
       process.env.LARK_CHANNEL_PI_BIN = await writeVersionExecutable(dir, 'pi', '0.84.2');
+      process.env.LARK_CHANNEL_DEVIN_BIN = await writeVersionExecutable(dir, 'devin', '3000.10.31');
 
       const statuses = await probeEngineStatus(true);
       const byId = new Map(statuses.map((s) => [s.id, s]));
@@ -53,6 +55,7 @@ describe('engine probe', () => {
       expect(byId.get('dsh')).toMatchObject({ installed: true, version: '0.1.1' });
       expect(byId.get('kimi')).toMatchObject({ installed: true, version: '0.36.1' });
       expect(byId.get('pi')).toMatchObject({ installed: true, version: '0.84.2' });
+      expect(byId.get('devin')).toMatchObject({ installed: true, version: '3000.10.31' });
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
@@ -67,6 +70,7 @@ describe('engine probe', () => {
     process.env.LARK_CHANNEL_DSH_BIN = '/nonexistent/dsh-missing';
     process.env.LARK_CHANNEL_KIMI_BIN = '/nonexistent/kimi-missing';
     process.env.LARK_CHANNEL_PI_BIN = '/nonexistent/pi-missing';
+    process.env.LARK_CHANNEL_DEVIN_BIN = '/nonexistent/devin-missing';
 
     const statuses = await probeEngineStatus(true);
     for (const status of statuses) {
@@ -92,6 +96,7 @@ describe('engine probe', () => {
       process.env.LARK_CHANNEL_DSH_BIN = missing('dsh');
       process.env.LARK_CHANNEL_KIMI_BIN = missing('kimi');
       process.env.LARK_CHANNEL_PI_BIN = missing('pi');
+      process.env.LARK_CHANNEL_DEVIN_BIN = missing('devin');
 
       const byId = new Map((await probeEngineStatus(true)).map((status) => [status.id, status]));
 

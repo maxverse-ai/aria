@@ -9,9 +9,9 @@ export function executionSpaceMode(profile: Pick<EngineProfileConfig, 'mode' | '
 export function spaceEngineCapabilities(engineId: SpaceEngineId, deployment: Pick<SpaceEngineDeployment, 'queryNode' | 'tools'> = {}) {
   return {
     engineId,
-    topology: engineId === 'codex' || engineId === 'grok' ? 'profile-daemon' as const : 'one-shot' as const,
+    topology: ['codex', 'grok', 'devin'].includes(engineId) ? 'profile-daemon' as const : 'one-shot' as const,
     nativeResume: engineId !== 'dsh',
-    nativeHistory: ['codex', 'grok', 'opencode'].includes(engineId) || (engineId === 'claude' && Boolean(deployment.queryNode)),
+    nativeHistory: ['codex', 'grok', 'opencode', 'devin'].includes(engineId) || (engineId === 'claude' && Boolean(deployment.queryNode)),
     catalogHistory: true,
     verifiedNativeImport: engineId === 'codex',
     nativeTools: deployment.tools ? ['lark-cli'] : [],

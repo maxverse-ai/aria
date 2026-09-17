@@ -73,6 +73,25 @@ export function codexCapability(profile: Pick<ProfileConfig, 'permissions'>): Ag
   };
 }
 
+export function devinCapability(profile: Pick<ProfileConfig, 'permissions'>): AgentCapability {
+  return {
+    agentId: 'devin',
+    sessionKind: 'devin-session',
+    promptInjection: 'stdin-prefix',
+    systemPrompt: BRIDGE_SYSTEM_PROMPT,
+    supportsNativeHistory: true,
+    callback: {
+      marker: '__bridge_cb',
+      legacyMarkers: [],
+    },
+    permissions: {
+      maxAccess: profile.permissions.maxAccess,
+    },
+    finalReply: 'separate',
+    supportsImages: true,
+  };
+}
+
 export function grokCapability(profile: Pick<ProfileConfig, 'permissions'>): AgentCapability {
   return {
     agentId: 'grok',

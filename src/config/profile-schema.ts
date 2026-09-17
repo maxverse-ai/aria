@@ -119,6 +119,23 @@ export interface PiConfig {
   sessionDir?: string;
 }
 
+export interface DevinConfig {
+  binaryPath: string;
+  realpath?: string;
+  version?: string;
+  sha256?: string;
+  owner?: number;
+  mode?: number;
+  /**
+   * Env var supplying the API key forwarded to `devin acp` `authenticate`.
+   * Defaults to `DEVIN_API_KEY` (with `WINDSURF_API_KEY` as a fallback).
+   * The key itself is never stored in the profile.
+   */
+  apiKeyEnv?: string;
+  /** Default model for the profile's `devin acp` daemon. */
+  model?: string;
+}
+
 export interface AttachmentConfig {
   maxCount: number;
   maxBytes: number;
@@ -255,6 +272,7 @@ export interface ProfileConfig {
   dsh?: DshConfig;
   kimi?: KimiConfig;
   pi?: PiConfig;
+  devin?: DevinConfig;
   /** External engine plugin package names, loaded at profile start. */
   plugins?: string[];
   /** Channel packages and instances. Required only by stored schema v3. */
@@ -305,6 +323,7 @@ export interface CreateDefaultProfileConfigInput {
   dsh?: DshConfig;
   kimi?: KimiConfig;
   pi?: PiConfig;
+  devin?: DevinConfig;
   plugins?: string[];
   secrets?: SecretsConfig;
 }
@@ -355,6 +374,7 @@ export function normalizeEngineProfileConfig(input: unknown): EngineProfileConfi
     dsh?: DshConfig;
     kimi?: KimiConfig;
     pi?: PiConfig;
+    devin?: DevinConfig;
     plugins?: unknown;
     channels?: unknown;
     attachments?: Partial<AttachmentConfig>;
@@ -417,6 +437,7 @@ export function normalizeEngineProfileConfig(input: unknown): EngineProfileConfi
     ...(raw.dsh ? { dsh: normalizeDsh(raw.dsh) } : {}),
     ...(raw.kimi ? { kimi: normalizeKimi(raw.kimi) } : {}),
     ...(raw.pi ? { pi: normalizePi(raw.pi) } : {}),
+    ...(raw.devin ? { devin: normalizeDevin(raw.devin) } : {}),
     ...(plugins.length > 0 ? { plugins } : {}),
     ...(channels ? { channels } : {}),
     attachments: {
@@ -678,6 +699,23 @@ function normalizePi(input: PiConfig): PiConfig {
     ...(typeof input.owner === 'number' ? { owner: input.owner } : {}),
     ...(typeof input.mode === 'number' ? { mode: input.mode } : {}),
     ...(typeof input.sessionDir === 'string' ? { sessionDir: input.sessionDir } : {}),
+  };
+}
+
+function normalizeDevin(input: DevinConfig): DevinConfig {
+  return {
+    binaryPath: input.binaryPath,
+    ...(typeof input.realpath === 'string' ? { realpath: input.realpath } : {}),
+    ...(typeof input.version === 'string' ? { version: input.version } : {}),
+    ...(typeof input.sha256 === 'string' ? { sha256: input.sha256 } : {}),
+    ...(typeof input.owner === 'number' ? { owner: input.owner } : {}),
+    ...(typeof input.mode === 'number' ? { mode: input.mode } : {}),
+    ...(typeof input.apiKeyEnv === 'string' && input.apiKeyEnv.trim()
+      ? { apiKeyEnv: input.apiKeyEnv.trim() }
+      : {}),
+    ...(typeof input.model === 'string' && input.model.trim()
+      ? { model: input.model.trim() }
+      : {}),
   };
 }
 

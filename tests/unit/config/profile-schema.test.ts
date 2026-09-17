@@ -206,6 +206,36 @@ describe('profile schema', () => {
     });
   });
 
+  it('requires devin configuration when agentKind is devin', () => {
+    expect(() =>
+      normalizeProfileConfig({
+        schemaVersion: 2,
+        agentKind: 'devin',
+        accounts: { app },
+      }),
+    ).toThrow(/devin profile requires devin configuration/);
+  });
+
+  it('normalizes devin profile configuration without storing the API key', () => {
+    const cfg = normalizeProfileConfig({
+      schemaVersion: 2,
+      agentKind: 'devin',
+      accounts: { app },
+      devin: {
+        binaryPath: '/usr/local/bin/devin',
+        apiKeyEnv: 'ACME_DEVIN_KEY',
+        model: 'opus',
+      },
+    });
+
+    expect(cfg.devin).toMatchObject({
+      binaryPath: '/usr/local/bin/devin',
+      apiKeyEnv: 'ACME_DEVIN_KEY',
+      model: 'opus',
+    });
+    expect(cfg.devin).not.toHaveProperty('apiKey');
+  });
+
   it('keeps access at profile top level without legacy open semantics', () => {
     const cfg = normalizeProfileConfig({
       schemaVersion: 2,

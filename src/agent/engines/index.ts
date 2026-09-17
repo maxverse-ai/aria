@@ -2,6 +2,7 @@ import type { EnginePlugin } from '../plugin/types';
 import type { EngineRuntimeFactory } from '../runtime/construction';
 import { claudeEnginePlugin, claudeRuntimeFactory } from './claude/plugin';
 import { codexEnginePlugin, codexRuntimeFactory } from './codex/plugin';
+import { devinEnginePlugin, devinRuntimeFactory } from './devin/plugin';
 import { dshEnginePlugin, dshRuntimeFactory } from './dsh/plugin';
 import { grokEnginePlugin, grokRuntimeFactory } from './grok/plugin';
 import { kimiEnginePlugin, kimiRuntimeFactory } from './kimi/plugin';
@@ -11,6 +12,7 @@ import { piEnginePlugin, piRuntimeFactory } from './pi/plugin';
 const factories = new Map<EnginePlugin, EngineRuntimeFactory>([
   [claudeEnginePlugin, claudeRuntimeFactory],
   [codexEnginePlugin, codexRuntimeFactory],
+  [devinEnginePlugin, devinRuntimeFactory],
   [grokEnginePlugin, grokRuntimeFactory],
   [opencodeEnginePlugin, opencodeRuntimeFactory],
   [dshEnginePlugin, dshRuntimeFactory],

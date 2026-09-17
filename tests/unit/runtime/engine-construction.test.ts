@@ -9,7 +9,7 @@ import { normalizeEngineProfileConfig } from '../../../src/config/profile-schema
 import { prepareProfileEngineRuntime } from '../../../src/runtime/agent-runtime';
 import { FakeAgentAdapter } from '../../helpers/fake-agent';
 
-const engines = ['claude', 'codex', 'grok', 'opencode', 'dsh', 'kimi', 'pi'];
+const engines = ['claude', 'codex', 'grok', 'opencode', 'dsh', 'kimi', 'pi', 'devin'];
 const roots: string[] = [];
 
 afterEach(async () => {
@@ -56,7 +56,7 @@ describe('runtime construction preparation', () => {
       expect(runtime.engineId).toBe(id);
       expect(runtime.descriptor.contractVersion).toBe(1);
       expect(runtime.descriptor.topology).toBe(
-        ['codex', 'grok'].includes(id) ? 'profile-daemon' : 'one-shot',
+        ['codex', 'grok', 'devin'].includes(id) ? 'profile-daemon' : 'one-shot',
       );
       expect(await readdir(root)).toEqual(['config.json']);
       expect(await readFile(configPath, 'utf8')).toBe(stored);

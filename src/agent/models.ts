@@ -104,6 +104,22 @@ export const PI_MODELS: ModelOption[] = [
   { value: 'openai/gpt-5-codex', label: 'GPT-5 Codex' },
 ];
 
+/**
+ * Devin CLI family aliases. Short names always resolve to the latest release
+ * in the family server-side; `adaptive` is the account default router.
+ */
+export const DEVIN_MODELS: ModelOption[] = [
+  { value: DEFAULT_MODEL, label: '跟随默认（不指定）' },
+  { value: 'adaptive', label: 'Adaptive（自动路由）' },
+  { value: 'fusion', label: 'Fusion（前沿模型 + 高性价比辅助）' },
+  { value: 'swe', label: 'SWE（最新）' },
+  { value: 'opus', label: 'Claude Opus（最新）' },
+  { value: 'sonnet', label: 'Claude Sonnet（最新）' },
+  { value: 'gpt', label: 'GPT（最新）' },
+  { value: 'gemini', label: 'Gemini（最新）' },
+  { value: 'codex', label: 'Codex（最新）' },
+];
+
 type ModelOptionsProvider = () => ModelOption[];
 
 const modelOptionsProviders = new Map<string, ModelOptionsProvider>();

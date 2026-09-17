@@ -7,7 +7,7 @@ import { normalizeEngineProfileConfig, type EngineProfileConfig } from '../../sr
 import { createProfileConversationHost } from '../../src/conversation/profile-host';
 import { prepareProfileEngineRuntime } from '../../src/runtime/agent-runtime';
 
-const allEngines = ['claude', 'codex', 'grok', 'opencode', 'dsh', 'kimi', 'pi'] as const;
+const allEngines = ['claude', 'codex', 'grok', 'opencode', 'dsh', 'kimi', 'pi', 'devin'] as const;
 type Engine = typeof allEngines[number];
 // `dsh` reports progress over an extra stdio descriptor, which Node only
 // supports on POSIX hosts, so its launch cases do not apply on Windows.
@@ -105,7 +105,7 @@ describe('prepared profile runtime process compatibility', () => {
         LARKSUITE_CLI_CONFIG_DIR: join(root, 'private-cli'),
       });
       expect(await realpath(record.cwd)).toBe(
-        await realpath(['codex', 'grok'].includes(engine) ? stateDirectory : root),
+        await realpath(['codex', 'grok', 'devin'].includes(engine) ? stateDirectory : root),
       );
       const prompts = [record.stdin, record.systemPrompt, ...record.argv, JSON.stringify(record.requests)].join('\n');
       expect(prompts).toContain('Aria 运行约定');
@@ -147,6 +147,11 @@ describe('prepared profile runtime process compatibility', () => {
           expect(record.env.GROK_DISABLE_AUTOUPDATER).toBe('1');
           expect(record.requests.find((request) => request.method === 'session/load')?.params)
             .toMatchObject({ sessionId: 'session-old', cwd: root, _meta: { yoloMode: custom } });
+          break;
+        case 'devin':
+          expect(record.argv).toEqual(['acp']);
+          expect(record.requests.find((request) => request.method === 'session/load')?.params)
+            .toMatchObject({ sessionId: 'session-old', cwd: root });
           break;
         case 'opencode':
           expect(record.argv).toEqual([
@@ -313,7 +318,7 @@ function fakeMain(input: { engine: Engine; recordPath: string; envKeys: string[]
   if (promptIndex >= 0) record.systemPrompt = fs.readFileSync(record.argv[promptIndex + 1]!, 'utf8');
   save();
 
-  if (input.engine === 'codex' || input.engine === 'grok') {
+  if (input.engine === 'codex' || input.engine === 'grok' || input.engine === 'devin') {
     const rl = require('node:readline').createInterface({ input: process.stdin });
     rl.on('line', (line: string) => {
       const message = JSON.parse(line);
@@ -322,9 +327,9 @@ function fakeMain(input: { engine: Engine; recordPath: string; envKeys: string[]
       if (message.id === undefined) return;
       const reply = (result: unknown) => send({ jsonrpc: '2.0', id: message.id, result });
       if (message.method === 'initialize') {
-        reply(input.engine === 'grok'
-          ? { protocolVersion: 1, agentCapabilities: { loadSession: true }, authMethods: [] }
-          : { userAgent: 'fixture' });
+        reply(input.engine === 'codex'
+          ? { userAgent: 'fixture' }
+          : { protocolVersion: 1, agentCapabilities: { loadSession: true }, authMethods: [] });
       } else if (message.method === 'thread/start' || message.method === 'thread/resume') {
         reply({ thread: { id: message.params?.threadId ?? 'thread-new' }, model: 'test-model' });
       } else if (message.method === 'turn/start') {

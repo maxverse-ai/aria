@@ -104,6 +104,7 @@ channel normalization → access + addressing → profile / session / workspace
 | Claude Code | Retained for the next turn | Native history and compatible resume |
 | Codex CLI | Direct text steering through App Server `turn/steer` | Image input and model-reported service tiers such as Fast |
 | Grok Build | Direct text steering through Agent stdio | ACP sessions, image input, and live model discovery |
+| Devin | Retained for the next turn | ACP sessions, image input, session modes, and host-supplied API-key auth |
 | OpenCode | Retained for the next turn | Native history and live model discovery |
 | DeepSeek Harness | Retained for the next turn | Built-in headless adapter |
 | Kimi Code | Retained for the next turn | Claude-compatible transport and native history |
@@ -137,6 +138,9 @@ The current product boundary is deliberately explicit:
   - Codex CLI: `codex`, see https://developers.openai.com/codex/cli
   - Grok Build: `grok`, see https://docs.x.ai/build/cli/
   - OpenCode CLI: `opencode`, see https://opencode.ai/docs/
+  - Devin: `devin`, see https://devin.ai — its ACP server intentionally ignores
+    local login credentials, so the profile reads an API key from
+    `DEVIN_API_KEY` (or `devin.apiKeyEnv`) instead.
   - DeepSeek Harness (`dsh`), Kimi Code (`kimi`), and Pi (`pi`) are also
     built-in when their corresponding CLI is installed.
 - A Feishu / Lark **PersonalAgent** app. The first-run QR wizard can create and bind one for you.
@@ -434,13 +438,15 @@ This is a profile-field snippet. Do not replace the whole `config.json` with it;
 
 Mode mapping:
 
-| Bridge access | Claude permission mode | Codex mode | OpenCode |
-|---|---|---|---|
-| `full` | `bypassPermissions` | `danger-full-access` | `--auto` |
-| `workspace` | `acceptEdits` | `workspace-write` | no `--auto` |
-| `read-only` | `plan` | `read-only` | no `--auto` |
+| Bridge access | Claude permission mode | Codex mode | OpenCode | Devin |
+|---|---|---|---|---|
+| `full` | `bypassPermissions` | `danger-full-access` | `--auto` | `dangerous` session mode |
+| `workspace` | `acceptEdits` | `workspace-write` | no `--auto` | `accept-edits` session mode |
+| `read-only` | `plan` | `read-only` | no `--auto` | `plan` session mode |
 
 OpenCode permission prompts cannot be answered in the bridge's headless environment and are denied outright, so only `full` enables auto-approval (`--auto`; explicit deny rules from OpenCode's own config still apply).
+
+Devin session modes are applied through ACP `session/set_mode` when the session advertises them; any remaining `session/request_permission` prompt is auto-answered `allow_once` only at `full` access and `reject_once` otherwise.
 
 ## Data directories
 

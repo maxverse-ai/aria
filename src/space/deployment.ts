@@ -41,6 +41,7 @@ const templateTargets: Record<SpaceEngineId, readonly string[]> = {
   codex: ['home/.codex/config.toml'], grok: ['home/.grok/settings.json'],
   claude: ['home/.claude/settings.json'], opencode: ['config/opencode/opencode.json'],
   kimi: ['home/.kimi/config.toml'], pi: ['data/pi-sessions/settings.json'], dsh: ['home/.dsh/config.json'],
+  devin: ['home/.config/devin/config.json'],
 };
 const forbiddenEnvironment = /^(?:HOME$|PATH$|XDG_|LARK|LARKSUITE|ARIA_|CODEX_HOME$|GROK_HOME$|DSH_HOME$|PI_CODING_AGENT_DIR$|CLAUDE_CONFIG_DIR$|OPENCODE_CONFIG_DIR$|LD_|DYLD_|NODE_OPTIONS$|NODE_PATH$|BASH_ENV$|ENV$)/;
 

@@ -24,7 +24,7 @@ import { seedNativeTemplates } from './native-templates';
 import { spaceEngineCapabilities } from './capabilities';
 import { verifyWorkspaceSkillCatalog } from '../agent/runtime/workspace-assets';
 
-export const SPACE_ENGINE_IDS = ['opencode', 'grok', 'codex', 'claude', 'pi', 'kimi', 'dsh'] as const;
+export const SPACE_ENGINE_IDS = ['opencode', 'grok', 'codex', 'claude', 'pi', 'kimi', 'dsh', 'devin'] as const;
 export type SpaceEngineId = typeof SPACE_ENGINE_IDS[number];
 export interface SpaceEngineDeployment {
   readonly engineId: SpaceEngineId;
@@ -56,6 +56,7 @@ export function spaceEngineProfile(profile: EngineProfileConfig, paths: SpacePat
     case 'pi': result.pi = { ...result.pi, binaryPath: deployment.binary, sessionDir: join(paths.data, 'pi-sessions') }; break;
     case 'kimi': result.kimi = { ...result.kimi, binaryPath: deployment.binary }; break;
     case 'dsh': result.dsh = { ...result.dsh, binaryPath: deployment.binary, dshHome: join(paths.home, '.dsh') }; break;
+    case 'devin': result.devin = { ...result.devin, binaryPath: deployment.binary }; break;
     case 'claude': break;
   }
   return result;
