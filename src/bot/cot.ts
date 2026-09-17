@@ -246,20 +246,31 @@ export async function sweepOrphanedCots(
     return;
   }
   if (entries.length === 0) return;
-  await rm(stateFile, { force: true });
   log.info('cot', 'orphan-sweep-start', { count: entries.length });
+  const failed = new Set<string>();
   for (const entry of entries) {
     try {
-      await client.complete({ cotId: entry.cotId, messageId: entry.messageId }, 'interrupted');
+      // Feishu rejects reason='interrupted' (HTTP 500/2200); 'error' is the
+      // accepted terminal reason for a bubble whose owner died.
+      await client.complete({ cotId: entry.cotId, messageId: entry.messageId }, 'error');
       log.info('cot', 'orphan-swept', { cotId: entry.cotId });
     } catch (err) {
       // "already in terminal status" means it closed fine before the crash.
       const msg = err instanceof Error ? err.message : String(err);
-      if (!msg.includes('already in terminal status')) {
+      if (msg.includes('already in terminal status')) {
+        log.info('cot', 'orphan-swept', { cotId: entry.cotId });
+      } else {
+        failed.add(entry.cotId);
         log.warn('cot', 'orphan-sweep-failed', { cotId: entry.cotId, err: msg });
       }
     }
   }
+  // Persist survivors instead of deleting the file up front: removing the
+  // record before the close succeeds loses the only handle to the bubble,
+  // and a failed complete would leave it spinning forever with no retry.
+  await mutateStateFile(stateFile, (current) =>
+    current.filter((e) => failed.has(e.cotId)),
+  );
 }
 
 export interface CotEvent {
@@ -370,7 +381,9 @@ export class CotPublisher {
     await this.flush();
     if (!this.ref) return;
     try {
-      await this.client.complete(this.ref, this.disabled ? 'interrupted' : reason);
+      // reason='interrupted' is rejected server-side (HTTP 500/2200); a
+      // degraded bubble closes with 'error'.
+      await this.client.complete(this.ref, this.disabled ? 'error' : reason);
       await clearActiveRef(this.stateFile, this.ref.cotId);
       log.info('cot', 'completed', { cotId: this.ref.cotId, reason });
     } catch (err) {

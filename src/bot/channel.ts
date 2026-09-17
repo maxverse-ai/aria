@@ -134,6 +134,7 @@ import type { ProcessPool } from './process-pool';
 import { fetchQuotedContext, fetchTopicContext, type QuotedContext } from './quote';
 import { addWorkingReaction, removeReaction } from './reaction';
 import { fetchKnownChats } from './lark-info';
+import { readLarkMemberRoster } from './lark-group-roster';
 import type { AppPaths } from '../config/app-paths';
 import { BoundCotClient, completeInterrupted } from '../outbound/bound-cot';
 import { ProgressCard } from '../outbound/progress-card';
@@ -389,6 +390,14 @@ export async function startChannel(deps: StartChannelDeps): Promise<BridgeChanne
 
   // One cache per logical SDK Channel; native WS reconnects reuse it.
   const sdkCache = new LarkSdkCache();
+  // Roster lookups happen on the SDK's per-message warm path. An app missing
+  // the member-list scope gets HTTP 400 (code 99991672) on every inbound
+  // message; the grant is app-wide and cannot appear while this process runs,
+  // so after the first denial we serve an empty roster — sender names degrade
+  // exactly as they did on the failure — instead of paying a doomed REST call
+  // per message.
+  let rosterChannel: Pick<LarkChannel, 'rawClient'> | undefined;
+  let rosterScopeDenied = false;
   const opts: LarkChannelOptions = {
     cache: sdkCache,
     appId: cfg.accounts.app.id,
@@ -418,6 +427,17 @@ export async function startChannel(deps: StartChannelDeps): Promise<BridgeChanne
     // The SDK keeps this lookup cached per chat and degrades to an absent name
     // when the roster cannot be resolved.
     resolveSenderNames: true,
+    resolveChatMembers: async (chatId) => {
+      if (rosterScopeDenied) return [];
+      if (!rosterChannel) return undefined;
+      const roster = await readLarkMemberRoster(rosterChannel, chatId);
+      if (roster === 'denied') {
+        rosterScopeDenied = true;
+        log.warn('chat', 'roster-scope-denied', { chatId });
+        return [];
+      }
+      return roster;
+    },
     outbound: {
       streamThrottleMs: 400,
     },
@@ -438,6 +458,7 @@ export async function startChannel(deps: StartChannelDeps): Promise<BridgeChanne
   };
 
   const rawChannel = createLarkChannel(opts);
+  rosterChannel = rawChannel;
   const taskAdmission = taskStore
     ? new TaskAdmissionService({
       store: taskStore,
@@ -479,7 +500,7 @@ export async function startChannel(deps: StartChannelDeps): Promise<BridgeChanne
   const terminateProgress = async (receipt: ProgressReceipt): Promise<void> => {
     if (!spaceGate) throw new Error('space progress cleanup requires its owner');
     spaceGate.resources.assertProgressReceipt(receipt);
-    const content = receipt.format === 'cot' ? JSON.stringify({ reason: 'interrupted' }) : JSON.stringify(interruptedProgressCard());
+    const content = receipt.format === 'cot' ? JSON.stringify({ reason: 'error' }) : JSON.stringify(interruptedProgressCard());
     await checkProgress(outboundPolicy?.progress, Boolean(outboundPolicy), {
       format: receipt.format, phase: 'complete', content,
       context: { source: 'system', senderOpenId: 'host-cleanup', sourceMessageId: receipt.messageId,
@@ -694,6 +715,7 @@ export async function startChannel(deps: StartChannelDeps): Promise<BridgeChanne
               conversation,
               controls: scoped?.controls ?? controls,
               chatTopology,
+              finalReplyFreshness,
               personalGroups,
               executor,
               pool,
@@ -1264,6 +1286,7 @@ interface IntakeDeps {
   conversation: ResolvedMessageConversation;
   controls: Controls;
   chatTopology: ChatTopologyResolver;
+  finalReplyFreshness: FinalReplyFreshness;
   personalGroups?: PersonalAgentGroups;
   executor: RunExecutor;
   pool: ProcessPool;
@@ -1474,6 +1497,10 @@ async function intakeMessage(deps: IntakeDeps): Promise<void> {
   });
   if (handled) {
     const dropped = pending.cancel(scope);
+    // The command was fully consumed here; without the mark the final-reply
+    // freshness history backstop would re-discover it as unseen input and
+    // run it again as a prompt (and withhold the in-flight run's reply).
+    deps.finalReplyFreshness.markConsumed(scope, emsg.messageId);
     log.info('intake', 'command', { scope, droppedPending: dropped.length });
     if (newTaskContent) {
       const taskMessage = { ...emsg, content: newTaskContent };

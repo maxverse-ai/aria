@@ -46,6 +46,14 @@ const DEFAULT_HISTORY_TIMEOUT_MS = 3_000;
  */
 export class FinalReplyFreshness {
   private readonly handoffs = new Map<string, FreshnessHandoff>();
+  /** messageIds the command intake already consumed (e.g. /new, /effort).
+   * They never enter the pending queue, so without this ledger the remote
+   * history backstop would re-discover them as "unseen input" and re-queue a
+   * handled command as a fresh prompt — while also withholding the current
+   * run's reply. Bounded FIFO per scope; marks only need to outlive the run
+   * they raced with, so in-memory is enough. */
+  private readonly consumed = new Map<string, Set<string>>();
+  private static readonly consumedCap = 200;
 
   constructor(
     private readonly deps: {
@@ -76,8 +84,10 @@ export class FinalReplyFreshness {
       this.deps.historyTimeoutMs ?? DEFAULT_HISTORY_TIMEOUT_MS,
       { scope: input.scope, runId: input.turn.runId },
     );
+    const consumedIds = this.consumed.get(input.scope);
     const remoteInputs = history.inputs.filter((entry) =>
-      entry.senderType === 'bot' || !input.canAcceptRemote || input.canAcceptRemote(entry.message),
+      !consumedIds?.has(entry.message.messageId)
+      && (entry.senderType === 'bot' || !input.canAcceptRemote || input.canAcceptRemote(entry.message)),
     );
     const remote = remoteInputs.map((entry) => ({
       ...toCandidate(entry, 'remote'),
@@ -126,6 +136,21 @@ export class FinalReplyFreshness {
 
   handoff(scope: string): FreshnessHandoff | undefined {
     return this.handoffs.get(scope);
+  }
+
+  /** Record a message the command path already handled so remote history
+   * reconciliation cannot requeue it as unseen input. */
+  markConsumed(scope: string, messageId: string): void {
+    let ids = this.consumed.get(scope);
+    if (!ids) {
+      ids = new Set();
+      this.consumed.set(scope, ids);
+    }
+    if (!ids.has(messageId) && ids.size >= FinalReplyFreshness.consumedCap) {
+      const oldest = ids.values().next().value;
+      if (oldest !== undefined) ids.delete(oldest);
+    }
+    ids.add(messageId);
   }
 
   acknowledgeHandoff(scope: string, expected: FreshnessHandoff): void {

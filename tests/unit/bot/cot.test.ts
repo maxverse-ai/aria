@@ -425,7 +425,7 @@ describe('COT event mapping', () => {
 
     expect(publisher.disabled).toBe(true);
     expect(publisher.degradedReason).toBe('field validation failed');
-    expect(client.completed).toEqual(['interrupted']);
+    expect(client.completed).toEqual(['error']);
     expect(client.events).toEqual([]);
   });
 });
@@ -537,7 +537,32 @@ describe('CoT orphan state persistence', () => {
     };
 
     await sweepOrphanedCots(client as unknown as CotClient, stateFile);
-    expect(completed).toEqual(['cot_a:interrupted']);
+    expect(completed).toEqual(['cot_a:error']);
     expect(existsSync(stateFile)).toBe(false);
+  });
+
+  it('sweepOrphanedCots keeps failed entries in the state file for the next restart', async () => {
+    const stateFile = join(tmpdir(), `cot-state-sweep-retry-${Date.now()}.json`);
+    writeFileSync(
+      stateFile,
+      JSON.stringify([
+        { cotId: 'cot_a', messageId: 'om_a', chatId: 'oc_chat', startedAt: 1 },
+        { cotId: 'cot_b', messageId: 'om_b', chatId: 'oc_chat', startedAt: 2 },
+      ]),
+    );
+    const completed: string[] = [];
+    const client = {
+      async complete(ref: { cotId: string }, reason: string): Promise<void> {
+        if (ref.cotId === 'cot_b') throw new Error('COT HTTP 500 code=2200');
+        completed.push(`${ref.cotId}:${reason}`);
+      },
+    };
+
+    await sweepOrphanedCots(client as unknown as CotClient, stateFile);
+    expect(completed).toEqual(['cot_a:error']);
+    const entries = JSON.parse(readFileSync(stateFile, 'utf8')) as Array<{ cotId: string }>;
+    expect(entries).toHaveLength(1);
+    expect(entries[0]?.cotId).toBe('cot_b');
+    rmSync(stateFile, { force: true });
   });
 });

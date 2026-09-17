@@ -125,6 +125,18 @@ describe('FinalReplyFreshness', () => {
     expect(h.pending.snapshot('scope').map(e => e.message.messageId)).toEqual(['peer']);
   });
 
+  it('ignores a remote input the command intake already consumed', async () => {
+    const h = harness(async () => ({
+      status: 'complete',
+      inputs: [conversation('cmd-effort', { content: '/effort' })],
+    }));
+    h.pending.block('scope');
+    h.freshness.markConsumed('scope', 'cmd-effort');
+
+    await expect(h.freshness.inspect(request())).resolves.toEqual({ kind: 'fresh' });
+    expect(h.pending.snapshot('scope')).toEqual([]);
+  });
+
   it('uses bot output only for exact duplicate suppression', async () => {
     const h = harness(async () => ({
       status: 'complete',

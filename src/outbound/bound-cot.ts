@@ -73,7 +73,7 @@ export class BoundCotClient {
   private async terminate(receipt: ProgressReceipt): Promise<void> {
     this.input.gate.resources.assertProgressReceipt(receipt);
     await checkProgress(this.input.policy, this.input.policyRequired, { format: 'cot', phase: 'complete',
-      context: this.input.context, content: JSON.stringify({ reason: 'interrupted' }) });
+      context: this.input.context, content: JSON.stringify({ reason: 'error' }) });
     await completeInterrupted(this.input.client, receipt);
     await this.finish(receipt);
   }
@@ -87,7 +87,9 @@ export class BoundCotClient {
  * persisted or replayed, and legacy unowned IDs never enter this path. */
 export async function completeInterrupted(client: Pick<CotClient, 'complete'>, receipt: ProgressReceipt): Promise<void> {
   if (receipt.format !== 'cot' || !receipt.cotId) throw new Error('invalid CoT cleanup receipt');
-  try { await client.complete({ cotId: receipt.cotId, messageId: receipt.messageId }, 'interrupted'); }
+  // Feishu rejects reason='interrupted' (HTTP 500/2200); 'error' is the
+  // accepted terminal reason for a bubble closed during host recovery.
+  try { await client.complete({ cotId: receipt.cotId, messageId: receipt.messageId }, 'error'); }
   catch (error) {
     if (!(error instanceof Error) || !error.message.includes('already in terminal status')) throw error;
   }

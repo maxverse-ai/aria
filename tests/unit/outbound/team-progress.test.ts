@@ -102,7 +102,7 @@ describe('bound CoT lifecycle', () => {
     await f.bound.create('group-a', 'origin'); f.state.humans = ['a', 'b'];
     await expect(f.bound.update(ref, [{ event_type: 'TOOL_CALL_RESULT', content: 'private detail', timestamp: 1 }])).rejects.toThrow();
     await f.bound.close();
-    expect(f.client.update).not.toHaveBeenCalled(); expect(f.client.complete).toHaveBeenCalledWith(ref, 'interrupted');
+    expect(f.client.update).not.toHaveBeenCalled(); expect(f.client.complete).toHaveBeenCalledWith(ref, 'error');
     f.state.humans = ['a'];
     await expect(f.bound.update(ref, [])).rejects.toThrow();
   });
@@ -116,7 +116,7 @@ describe('bound CoT lifecycle', () => {
     const f = await fixture();
     f.client.create.mockImplementation(async () => { f.state.humans = ['a', 'b']; return { cot_id: 'cot', message_id: 'bubble' }; });
     await expect(f.bound.create('group-a', 'origin')).rejects.toThrow();
-    await f.bound.close(); expect(f.client.complete).toHaveBeenCalledWith({ cotId: 'cot', messageId: 'bubble' }, 'interrupted');
+    await f.bound.close(); expect(f.client.complete).toHaveBeenCalledWith({ cotId: 'cot', messageId: 'bubble' }, 'error');
     expect(f.client.update).not.toHaveBeenCalled();
   });
   it('rejects foreign destinations, origins and provider IDs', async () => {
@@ -142,7 +142,7 @@ describe('bound CoT lifecycle', () => {
     await expect(bound.update({ cotId: 'cot', messageId: 'bubble' }, [])).rejects.toThrow('roster unavailable');
     await bound.close();
     expect(f.client.update).not.toHaveBeenCalled();
-    expect(f.client.complete).toHaveBeenCalledWith({ cotId: 'cot', messageId: 'bubble' }, 'interrupted');
+    expect(f.client.complete).toHaveBeenCalledWith({ cotId: 'cot', messageId: 'bubble' }, 'error');
   });
   it('restores only owned terminal cleanup after restart, without replaying private content', async () => {
     const f = await fixture(true); await f.bound.create('group-a', 'origin');
@@ -151,7 +151,7 @@ describe('bound CoT lifecycle', () => {
     const [receipt] = restored.resources.pendingProgress(f.source.authorityId, 'primary');
     expect(receipt).toBeDefined(); restored.resources.assertProgressReceipt(receipt!);
     await completeInterrupted(f.client, receipt!); await restored.resources.finishProgress(receipt!);
-    expect(f.client.complete).toHaveBeenCalledWith({ cotId: 'cot', messageId: 'bubble' }, 'interrupted');
+    expect(f.client.complete).toHaveBeenCalledWith({ cotId: 'cot', messageId: 'bubble' }, 'error');
     expect(f.client.update).not.toHaveBeenCalled();
     expect(restored.resources.pendingProgress(f.source.authorityId, 'primary')).toEqual([]);
   });
