@@ -15,6 +15,11 @@ import type {
   AgentRun,
   AgentRunOptions,
 } from '../../../types';
+import type {
+  AgentSteeringOutcome,
+  AgentSteeringRequest,
+  AgentSteeringSupport,
+} from '../../../steering';
 import { log } from '../../../../core/logger';
 import { prefixBridgeSystemPrompt } from '../../../bridge-system-prompt';
 import type { ChannelEnvContext } from '../../../channel-env';
@@ -29,6 +34,8 @@ import {
   extractSessionId,
   findConfigOption,
   isRecord,
+  supportsDevinSteering,
+  type DevinInjectResult,
   type DevinJsonRpcNotification,
   type DevinJsonRpcRequest,
   type DevinPromptResult,
@@ -60,7 +67,7 @@ export class DevinAcpRuntime implements EngineRuntime {
     topology: 'profile-daemon',
     capabilities: {
       inputs: ['text', 'image'],
-      liveInput: { mode: 'none', inputs: [] },
+      liveInput: { mode: 'gated', inputs: ['text'] },
       sessions: ['resume', 'list'],
       controls: ['interrupt', 'model'],
       interactions: [],
@@ -218,6 +225,8 @@ type RunSignal =
   | { type: 'prompt-error'; error: Error }
   | { type: 'closed'; error: Error };
 
+const DEVIN_STEERING_SUPPORT: AgentSteeringSupport = { mode: 'direct', textOnly: true };
+
 export class DevinAgentRun implements AgentRun {
   readonly runId: string;
   readonly events: AsyncIterable<AgentEvent>;
@@ -225,7 +234,9 @@ export class DevinAgentRun implements AgentRun {
   private client: DevinAcpClient | undefined;
   private promptInFlight = false;
   private stopRequested = false;
+  private turnClosing = false;
   private exited = false;
+  private readonly steeringRequests = new Map<string, Promise<AgentSteeringOutcome>>();
   private readonly exitPromise: Promise<void>;
   private resolveExit!: () => void;
 
@@ -249,8 +260,77 @@ export class DevinAgentRun implements AgentRun {
     return this.sessionId;
   }
 
+  get steering(): AgentSteeringSupport | undefined {
+    return supportsDevinSteering(this.client?.initializeResult)
+      ? DEVIN_STEERING_SUPPORT
+      : undefined;
+  }
+
+  steer(request: AgentSteeringRequest): Promise<AgentSteeringOutcome> {
+    const existing = this.steeringRequests.get(request.requestId);
+    if (existing) return existing;
+    const attempt = this.performSteer(request);
+    this.steeringRequests.set(request.requestId, attempt);
+    return attempt;
+  }
+
+  private async performSteer(request: AgentSteeringRequest): Promise<AgentSteeringOutcome> {
+    if (request.expectedRunId !== this.runId) {
+      return { kind: 'rejected', reason: 'stale-run' };
+    }
+    if (!request.prompt.trim()) {
+      return { kind: 'rejected', reason: 'invalid-input' };
+    }
+    if (this.turnClosing || this.stopRequested || this.exited) {
+      return { kind: 'deferred', reason: 'turn-closing' };
+    }
+    if (!this.steering) return { kind: 'deferred', reason: 'unsupported' };
+    const client = this.client;
+    const sessionId = this.sessionId;
+    if (!client || !sessionId || !this.promptInFlight) {
+      return { kind: 'deferred', reason: 'turn-not-ready' };
+    }
+
+    try {
+      const response = await client.request<DevinInjectResult>('session/inject', {
+        sessionId,
+        mode: 'steer',
+        content: [{ type: 'text', text: request.prompt }],
+      }, 5_000);
+      if (response.sessionId && response.sessionId !== sessionId) {
+        return { kind: 'rejected', reason: 'stale-run' };
+      }
+      if (typeof response.messageId !== 'string' || !response.messageId) {
+        return {
+          kind: 'rejected',
+          reason: 'transport-error',
+          message: 'Devin ACP session/inject response did not include messageId',
+        };
+      }
+      return { kind: 'accepted', runId: this.runId };
+    } catch (error) {
+      if (error instanceof DevinRpcError) {
+        const reason = isRecord(error.data) && typeof error.data.reason === 'string'
+          ? error.data.reason
+          : undefined;
+        if (error.code === -32601 || reason === 'unsupported_mode') {
+          return { kind: 'deferred', reason: 'unsupported' };
+        }
+        if (error.code === -32602 || reason === 'no_running_turn') {
+          return { kind: 'deferred', reason: 'turn-not-ready' };
+        }
+      }
+      return {
+        kind: 'rejected',
+        reason: 'transport-error',
+        message: error instanceof Error ? error.message : String(error),
+      };
+    }
+  }
+
   async stop(): Promise<void> {
     this.stopRequested = true;
+    this.turnClosing = true;
     if (this.client && this.sessionId && this.promptInFlight && !this.exited) {
       try {
         this.client.notify('session/cancel', { sessionId: this.sessionId });
@@ -340,6 +420,7 @@ export class DevinAgentRun implements AgentRun {
 
       for await (const signal of queue) {
         if (signal.type === 'closed') {
+          this.turnClosing = true;
           for (const event of messages.finish(false)) yield event;
           yield {
             type: 'error',
@@ -350,6 +431,7 @@ export class DevinAgentRun implements AgentRun {
         }
         if (signal.type === 'prompt-error') {
           this.promptInFlight = false;
+          this.turnClosing = true;
           for (const event of messages.finish(false)) yield event;
           yield {
             type: 'error',
@@ -362,6 +444,7 @@ export class DevinAgentRun implements AgentRun {
         }
         if (signal.type === 'prompt-result') {
           this.promptInFlight = false;
+          this.turnClosing = true;
           const cancelled = this.stopRequested || signal.result.stopReason === 'cancelled';
           for (const event of messages.finish(!cancelled)) yield event;
           const usage = extractDevinUsage(signal.result);
@@ -393,6 +476,7 @@ export class DevinAgentRun implements AgentRun {
         for (const event of messages.handle(update)) yield event;
       }
     } catch (error) {
+      this.turnClosing = true;
       for (const event of messages.finish(false)) yield event;
       yield {
         type: 'error',
@@ -401,6 +485,7 @@ export class DevinAgentRun implements AgentRun {
       };
     } finally {
       this.promptInFlight = false;
+      this.turnClosing = true;
       offNotification?.();
       offClosed?.();
       queue.end();

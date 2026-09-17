@@ -26,8 +26,25 @@ export interface DevinInitializeResult {
   agentCapabilities?: {
     loadSession?: boolean;
     promptCapabilities?: { image?: boolean };
-    sessionCapabilities?: { list?: unknown };
+    session?: { inject?: DevinSessionInjectCapability };
+    sessionCapabilities?: {
+      list?: unknown;
+      inject?: DevinSessionInjectCapability;
+    };
   };
+}
+
+/** ACP v2's negotiated mid-turn input surface. */
+export interface DevinSessionInjectCapability {
+  modes?: unknown;
+  steer_in_stream?: unknown;
+  pending?: unknown;
+}
+
+export interface DevinInjectResult {
+  messageId?: string;
+  sessionId?: string;
+  _meta?: Record<string, unknown>;
 }
 
 export interface DevinSessionResult {
@@ -165,4 +182,12 @@ function firstFinite(
 
 function finiteNumber(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+export function supportsDevinSteering(result: DevinInitializeResult | undefined): boolean {
+  const capabilities = result?.agentCapabilities;
+  const inject = capabilities?.session?.inject ?? capabilities?.sessionCapabilities?.inject;
+  return isRecord(inject)
+    && Array.isArray(inject.modes)
+    && inject.modes.includes('steer');
 }

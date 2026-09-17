@@ -36,8 +36,8 @@ The sharp product contract is:
 - **Capability-driven engines:** every engine plugin advertises its own
   history, image, service-tier, and live-input capabilities. The UI renders
   only controls the selected engine and model actually support.
-- **Safe steering and fallback:** eligible text sent during Codex and Grok runs
-  can be accepted by their native live-input transports; an unsupported,
+- **Safe steering and fallback:** eligible text sent during supported engine
+  runs can be accepted by their native live-input transports; an unsupported,
   delayed, or rejected input remains owned by the next-turn queue instead of
   disappearing.
 - **Conversation isolation:** each chat, topic, or document-comment thread has
@@ -104,7 +104,7 @@ channel normalization → access + addressing → profile / session / workspace
 | Claude Code | Retained for the next turn | Native history and compatible resume |
 | Codex CLI | Direct text steering through App Server `turn/steer` | Image input and model-reported service tiers such as Fast |
 | Grok Build | Direct text steering through Agent stdio | ACP sessions, image input, and live model discovery |
-| Devin | Retained for the next turn | ACP sessions, image input, session modes, and host-supplied API-key auth |
+| Devin | Gated text steering when ACP advertises `session/inject` steer; otherwise retained for the next turn | ACP sessions, image input, session modes, and host-supplied API-key auth |
 | OpenCode | Retained for the next turn | Native history and live model discovery |
 | DeepSeek Harness | Retained for the next turn | Built-in headless adapter |
 | Kimi Code | Retained for the next turn | Claude-compatible transport and native history |
@@ -112,7 +112,8 @@ channel normalization → access + addressing → profile / session / workspace
 
 All built-in engines share channel routing, access control, profiles,
 workspaces, queue/freshness safety, streaming, and service management. Native
-steering is currently text-only for Codex and Grok. Fast is not a generic Aria
+steering is currently text-only for Codex, Grok, and Devin when its ACP server
+advertises `session/inject` steer support. Fast is not a generic Aria
 speed flag: it appears only when Codex App Server reports a compatible service
 tier for the selected model.
 

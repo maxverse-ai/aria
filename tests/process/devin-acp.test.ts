@@ -32,7 +32,7 @@ describe('Devin ACP runtime', () => {
       topology: 'profile-daemon',
       capabilities: {
         inputs: ['text', 'image'],
-        liveInput: { mode: 'none', inputs: [] },
+        liveInput: { mode: 'gated', inputs: ['text'] },
         sessions: ['resume', 'list'],
         controls: ['interrupt', 'model'],
       },
@@ -78,6 +78,7 @@ describe('Devin ACP runtime', () => {
       sessionId: 'devin-session-1',
       terminationReason: 'normal',
     });
+    expect(run.steering).toBeUndefined();
 
     const log = await readFile(join(root, 'devin.log'), 'utf8');
     expect(log).toContain('args acp');
@@ -104,6 +105,103 @@ describe('Devin ACP runtime', () => {
         detail: 'Devin',
       },
     ]);
+  });
+
+  it('steers an active turn only through an advertised session/inject capability', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'aria-devin-acp-steer-'));
+    roots.push(root);
+    vi.stubEnv('DEVIN_API_KEY', 'test-devin-key');
+    const runtime = new DevinAcpRuntime({
+      binary: await writeFakeDevin(root, { steering: true, holdPrompt: true }),
+      profileStateDir: root,
+      access: 'full',
+    });
+    const run = runtime.execution.run({
+      runId: 'run-devin-steer',
+      scopeId: 'scope-devin',
+      prompt: 'inspect',
+      cwd: root,
+    });
+    const events = run.events[Symbol.asyncIterator]();
+    await expect(events.next()).resolves.toMatchObject({
+      value: { type: 'system', sessionId: 'devin-session-1' },
+    });
+    const firstTurnEvent = events.next();
+    await waitForLog(root, 'prompt-active');
+
+    expect(run.steering).toEqual({ mode: 'direct', textOnly: true });
+    const request = {
+      requestId: 'steer-1',
+      expectedRunId: run.runId,
+      prompt: 'change direction',
+    };
+    await expect(run.steer!(request)).resolves.toEqual({ kind: 'accepted', runId: run.runId });
+    await expect(run.steer!(request)).resolves.toEqual({ kind: 'accepted', runId: run.runId });
+    await expect(run.steer!({
+      requestId: 'steer-stale',
+      expectedRunId: 'other-run',
+      prompt: 'too late',
+    })).resolves.toEqual({ kind: 'rejected', reason: 'stale-run' });
+    await expect(run.steer!({
+      requestId: 'steer-empty',
+      expectedRunId: run.runId,
+      prompt: ' ',
+    })).resolves.toEqual({ kind: 'rejected', reason: 'invalid-input' });
+
+    const rest: AgentEvent[] = [];
+    const first = await firstTurnEvent;
+    if (!first.done) rest.push(first.value);
+    while (true) {
+      const next = await events.next();
+      if (next.done) break;
+      rest.push(next.value);
+    }
+    expect(rest).toContainEqual({ type: 'final_text', content: 'Done after steer.' });
+    expect(rest.at(-1)).toMatchObject({ type: 'done', terminationReason: 'normal' });
+    await expect(run.steer!({
+      requestId: 'steer-closed',
+      expectedRunId: run.runId,
+      prompt: 'after close',
+    })).resolves.toEqual({ kind: 'deferred', reason: 'turn-closing' });
+
+    const log = await readFile(join(root, 'devin.log'), 'utf8');
+    expect(log.match(/session\/inject steer change direction/g)).toHaveLength(1);
+    await runtime.dispose();
+  });
+
+  it('leaves injected input queued when the ACP server rejects the steer', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'aria-devin-acp-steer-error-'));
+    roots.push(root);
+    vi.stubEnv('DEVIN_API_KEY', 'test-devin-key');
+    const runtime = new DevinAcpRuntime({
+      binary: await writeFakeDevin(root, {
+        steering: true,
+        holdPrompt: true,
+        injectError: 'no-running-turn',
+      }),
+      profileStateDir: root,
+      access: 'full',
+    });
+    const run = runtime.execution.run({
+      runId: 'run-devin-steer-error',
+      scopeId: 'scope-devin',
+      prompt: 'inspect',
+      cwd: root,
+    });
+    const events = run.events[Symbol.asyncIterator]();
+    await events.next();
+    const firstTurnEvent = events.next();
+    await waitForLog(root, 'prompt-active');
+    await expect(run.steer!({
+      requestId: 'steer-unready',
+      expectedRunId: run.runId,
+      prompt: 'not ready',
+    })).resolves.toEqual({ kind: 'deferred', reason: 'turn-not-ready' });
+    await firstTurnEvent;
+    while (!(await events.next()).done) {
+      // Drain the turn.
+    }
+    await runtime.dispose();
   });
 
   it('selects accept-edits mode and rejects permission requests at workspace access', async () => {
@@ -209,9 +307,16 @@ describe('Devin ACP runtime', () => {
   });
 });
 
-async function writeFakeDevin(root: string): Promise<string> {
+interface FakeDevinOptions {
+  steering?: boolean;
+  holdPrompt?: boolean;
+  injectError?: 'method' | 'no-running-turn';
+}
+
+async function writeFakeDevin(root: string, fakeOptions: FakeDevinOptions = {}): Promise<string> {
   const binary = join(root, 'devin');
   const source = `#!/usr/bin/env node
+const options = ${JSON.stringify(fakeOptions)};
 const fs = require('node:fs');
 const path = require('node:path');
 const logPath = path.join(process.cwd(), 'devin.log');
@@ -219,7 +324,27 @@ const log = (line) => fs.appendFileSync(logPath, line + '\\n');
 log('args ' + process.argv.slice(2).join(' '));
 let buffer = '';
 let permissionId = 900;
+let activePrompt;
 const send = (value) => process.stdout.write(JSON.stringify(value) + '\\n');
+const finishPrompt = (text, delay = 0) => {
+  const prompt = activePrompt;
+  if (!prompt) return;
+  clearTimeout(prompt.timer);
+  prompt.timer = setTimeout(() => {
+    activePrompt = undefined;
+    send({ jsonrpc: '2.0', method: 'session/update', params: { sessionId: prompt.sessionId, update: {
+      sessionUpdate: 'tool_call_update', toolCallId: 'tool-1', status: 'completed', rawOutput: '/workspace',
+    } } });
+    send({ jsonrpc: '2.0', method: 'session/update', params: { sessionId: prompt.sessionId, update: {
+      sessionUpdate: 'agent_message_chunk', content: { type: 'text', text },
+    } } });
+    send({ jsonrpc: '2.0', id: prompt.id, result: {
+      stopReason: 'end_turn', _meta: {
+        inputTokens: 11, outputTokens: 4, cachedReadTokens: 3, reasoningTokens: 2,
+      },
+    } });
+  }, delay);
+};
 process.stdin.on('data', (chunk) => {
   buffer += chunk.toString('utf8');
   let newline;
@@ -236,7 +361,14 @@ process.stdin.on('data', (chunk) => {
       send({ jsonrpc: '2.0', id: message.id, result: {
         protocolVersion: 1,
         authMethods: [{ id: 'devin-browser', name: 'Log in with browser' }],
-        agentCapabilities: { loadSession: true, promptCapabilities: { image: true } },
+        agentCapabilities: {
+          loadSession: true,
+          promptCapabilities: { image: true },
+          ...(options.steering ? { session: { inject: {
+            modes: ['queue', 'steer'],
+            steer_in_stream: ['finish'],
+          } } } : {}),
+        },
       } });
       continue;
     }
@@ -290,6 +422,7 @@ process.stdin.on('data', (chunk) => {
       log('session/prompt');
       log('identity ' + String(message.params.prompt[0].text.includes('ou_aria')));
       const sid = message.params.sessionId;
+      activePrompt = { id: message.id, sessionId: sid };
       send({ jsonrpc: '2.0', method: 'session/update', params: { sessionId: sid, update: {
         sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'I will inspect.' },
       } } });
@@ -300,19 +433,32 @@ process.stdin.on('data', (chunk) => {
         sessionId: sid,
         options: [{ kind: 'allow_once', optionId: 'allow' }, { kind: 'reject_once', optionId: 'reject' }],
       } });
-      setTimeout(() => {
-        send({ jsonrpc: '2.0', method: 'session/update', params: { sessionId: sid, update: {
-          sessionUpdate: 'tool_call_update', toolCallId: 'tool-1', status: 'completed', rawOutput: '/workspace',
-        } } });
-        send({ jsonrpc: '2.0', method: 'session/update', params: { sessionId: sid, update: {
-          sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Done.' },
-        } } });
-        send({ jsonrpc: '2.0', id: message.id, result: {
-          stopReason: 'end_turn', _meta: {
-            inputTokens: 11, outputTokens: 4, cachedReadTokens: 3, reasoningTokens: 2,
-          },
+      if (options.holdPrompt) log('prompt-active');
+      finishPrompt('Done.', options.holdPrompt ? 250 : 100);
+      continue;
+    }
+    if (message.method === 'session/inject') {
+      const sid = message.params?.sessionId;
+      const text = message.params?.content?.[0]?.text ?? '';
+      log('session/inject ' + message.params?.mode + ' ' + text);
+      if (!activePrompt || activePrompt.sessionId !== sid || options.injectError === 'no-running-turn') {
+        send({ jsonrpc: '2.0', id: message.id, error: {
+          code: -32010,
+          message: 'Inject precondition failed',
+          data: { reason: 'no_running_turn' },
         } });
-      }, 100);
+        continue;
+      }
+      if (message.params?.mode !== 'steer' || options.injectError === 'method') {
+        send({ jsonrpc: '2.0', id: message.id, error: { code: -32601, message: 'Method not found' } });
+        continue;
+      }
+      const messageId = 'inject-' + message.id;
+      send({ jsonrpc: '2.0', id: message.id, result: { messageId, sessionId: sid } });
+      send({ jsonrpc: '2.0', method: 'session/update', params: { sessionId: sid, update: {
+        sessionUpdate: 'user_message', messageId, content: [{ type: 'text', text }],
+      } } });
+      finishPrompt('Done after steer.', 30);
       continue;
     }
     send({ jsonrpc: '2.0', id: message.id, result: {} });
@@ -323,4 +469,17 @@ setInterval(() => {}, 1 << 30);
   await writeFile(binary, source, 'utf8');
   await chmod(binary, 0o755);
   return binary;
+}
+
+async function waitForLog(root: string, text: string, timeoutMs = 2_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      if ((await readFile(join(root, 'devin.log'), 'utf8')).includes(text)) return;
+    } catch {
+      // The fake process creates the log on startup.
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error(`timed out waiting for devin.log to contain ${text}`);
 }

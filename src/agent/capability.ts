@@ -89,6 +89,7 @@ export function devinCapability(profile: Pick<ProfileConfig, 'permissions'>): Ag
     },
     finalReply: 'separate',
     supportsImages: true,
+    steering: { mode: 'gated', textOnly: true },
   };
 }
 

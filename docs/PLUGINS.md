@@ -2,7 +2,7 @@
 
 > Status: current
 
-Aria drives local coding-agent CLIs through a plugin registry. Seven engines ship
+Aria drives local coding-agent CLIs through a plugin registry. Eight engines ship
 in the current build:
 
 | Id | Display name | Native history | Native live text | Service tiers |
@@ -10,6 +10,7 @@ in the current build:
 | `claude` | Claude Code | Yes | No | No |
 | `codex` | Codex CLI | Aria reads Codex thread history | Yes, App Server `turn/steer` | Yes, model-scoped |
 | `grok` | Grok Build | Yes, ACP session list | Yes, Agent stdio interject | No |
+| `devin` | Devin | Yes, ACP session list | Conditional, ACP `session/inject` steer | No |
 | `opencode` | OpenCode | Yes | No | No |
 | `dsh` | DeepSeek Harness | No | No | No |
 | `kimi` | Kimi Code | Yes | No | No |

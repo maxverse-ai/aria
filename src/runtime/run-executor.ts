@@ -211,7 +211,11 @@ export class RunExecutor {
     try {
       const native = bindAgentRun(present(() => lease.runtime.execution.run(runOptions)), present);
       run = input.assertAuthorized ? {
-        runId: native.runId, events: native.events, steering: native.steering,
+        runId: native.runId,
+        events: native.events,
+        get steering() {
+          return native.steering;
+        },
         ...(native.steer ? { steer: (request) => {
           input.assertAuthorized!(); return native.steer!(request);
         } } : {}),

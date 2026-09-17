@@ -4,7 +4,9 @@ import type { AgentRun, AgentEvent } from '../types';
 export function bindAgentRun(run: AgentRun, bind: <T>(operation: () => T) => T): AgentRun {
   return {
     runId: run.runId,
-    ...(run.steering ? { steering: run.steering } : {}),
+    get steering() {
+      return run.steering;
+    },
     events: {
       async *[Symbol.asyncIterator](): AsyncGenerator<AgentEvent> {
         const iterator = bind(() => run.events[Symbol.asyncIterator]());
