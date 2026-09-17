@@ -334,6 +334,77 @@ describe('COT event mapping', () => {
     expect(calls[0]?.body).toMatchObject({ receive_id: 'oc_chat', origin_message_id: 'om_origin' });
   });
 
+  it('splits a burst of buffered events into bounded update batches', async () => {
+    const client = new FakeCotClient();
+    const publisher = new CotPublisher({
+      client,
+      chatId: 'oc_chat',
+      originMessageId: 'om_origin',
+      runId: 'run-burst',
+      scope: 'oc_chat',
+      inputPreview: 'run',
+    });
+    await publisher.start();
+
+    // start() queues RUN_STARTED + STEP_STARTED; 45 more pushes a batch over
+    // the 20-event update cap.
+    for (let i = 0; i < 45; i += 1) publisher.enqueue('TOOL_CALL_END', { toolCallId: `t${i}` });
+    await publisher.finish('done');
+
+    expect(client.updateCalls.length).toBeGreaterThanOrEqual(3);
+    for (const batch of client.updateCalls) expect(batch.length).toBeLessThanOrEqual(20);
+    expect(client.events.filter((event) => event.event_type === 'TOOL_CALL_END')).toHaveLength(45);
+    expect(client.completed).toEqual(['done']);
+  });
+
+  it('splits an update batch when the serialized payload nears the byte cap', async () => {
+    const client = new FakeCotClient();
+    const publisher = new CotPublisher({
+      client,
+      chatId: 'oc_chat',
+      originMessageId: 'om_origin',
+      runId: 'run-bytes',
+      scope: 'oc_chat',
+      inputPreview: 'run',
+    });
+    await publisher.start();
+
+    // 12 events x ~3.9KB content each stays under the per-event limit but
+    // exceeds the 32KB per-update payload budget, forcing a second batch.
+    for (let i = 0; i < 12; i += 1) publisher.enqueue('TOOL_CALL_RESULT', { pad: 'x'.repeat(3800), i });
+    await publisher.finish('done');
+
+    expect(client.updateCalls.length).toBeGreaterThanOrEqual(2);
+    for (const batch of client.updateCalls) {
+      const bytes = batch.reduce((sum, event) => sum + Buffer.byteLength(event.content, 'utf8'), 0);
+      expect(bytes).toBeLessThanOrEqual(32 * 1024 + 4096);
+    }
+    expect(client.events.filter((event) => event.event_type === 'TOOL_CALL_RESULT')).toHaveLength(12);
+  });
+
+  it('surfaces field_violations from Feishu 400 responses', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        code: 0,
+        tenant_access_token: 'tenant-token',
+        expire: 7200,
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        code: 99992402,
+        msg: 'field validation failed',
+        error: { field_violations: [{ field: 'events', description: 'too many' }] },
+      }), { status: 400 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const client = new CotClient({ tenant: 'feishu', appId: 'app', appSecret: 'secret' });
+
+    const error = await client.update(
+      { cotId: 'cot', messageId: 'message' },
+      [{ event_type: 'RUN_STARTED', content: '{}', timestamp: 1 }],
+    ).then(() => undefined, (caught: unknown) => caught);
+    expect((error as Error).message).toContain('code=99992402');
+    expect((error as Error).message).toContain('fields=events');
+  });
+
   it('marks the publisher degraded when COT updates fail', async () => {
     const client = new FakeCotClient();
     client.failUpdate = new Error('field validation failed');
@@ -361,6 +432,7 @@ describe('COT event mapping', () => {
 
 class FakeCotClient {
   events: Array<{ event_type: string; content: string; timestamp: number }> = [];
+  updateCalls: Array<Array<{ event_type: string; content: string; timestamp: number }>> = [];
   completed: string[] = [];
   createCalls: Array<{ chatId: string; originMessageId?: string }> = [];
   failUpdate: Error | undefined;
@@ -376,6 +448,7 @@ class FakeCotClient {
 
   async update(_ref: unknown, events: readonly { event_type: string; content: string; timestamp: number }[]): Promise<void> {
     if (this.failUpdate) throw this.failUpdate;
+    this.updateCalls.push([...events]);
     this.events.push(...events);
   }
 

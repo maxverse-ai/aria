@@ -213,7 +213,7 @@ class DevinAcpAdapter implements AgentAdapter {
 }
 
 type RunSignal =
-  | { type: 'notification'; notification: DevinJsonRpcNotification }
+  | { type: 'notification'; notification: DevinJsonRpcNotification; replay: boolean }
   | { type: 'prompt-result'; result: DevinPromptResult }
   | { type: 'prompt-error'; error: Error }
   | { type: 'closed'; error: Error };
@@ -273,11 +273,18 @@ export class DevinAgentRun implements AgentRun {
     const messages = new DevinMessageTranslator();
     let offNotification: (() => void) | undefined;
     let offClosed: (() => void) | undefined;
+    // session/load replays the whole conversation as session/update
+    // notifications before resolving. Over stdio they always arrive while the
+    // load request is in flight, so this flag marks them as replay — they are
+    // history, not live turn events, and must not reach COT/progress rendering
+    // (a replay burst overflows the message_cot update batch and fails the run's
+    // progress bubble with field-validation errors).
+    let loadingSession = false;
     const model = this.options.model && this.options.model !== 'default' ? this.options.model : undefined;
     try {
       this.client = await this.runtime.client();
       offNotification = this.client.onNotification((notification) => {
-        queue.push({ type: 'notification', notification });
+        queue.push({ type: 'notification', notification, replay: loadingSession });
       });
       offClosed = this.client.onClosed((error) => queue.push({ type: 'closed', error }));
 
@@ -287,9 +294,16 @@ export class DevinAgentRun implements AgentRun {
         mcpServers: [],
       };
       const requestedSessionId = this.options.sessionId;
-      const session = requestedSessionId
-        ? await this.loadOrCreateSession(requestedSessionId, sessionParams)
-        : await this.client.request<DevinSessionResult>('session/new', sessionParams);
+      loadingSession = Boolean(requestedSessionId);
+      const session = await (async () => {
+        try {
+          return requestedSessionId
+            ? await this.loadOrCreateSession(requestedSessionId, sessionParams)
+            : await this.client!.request<DevinSessionResult>('session/new', sessionParams);
+        } finally {
+          loadingSession = false;
+        }
+      })();
       this.sessionId = extractSessionId(session, requestedSessionId);
       if (!this.sessionId) throw new Error('Devin ACP session response did not include sessionId');
       this.runtime.bindSession(this.sessionId, this);
@@ -363,6 +377,7 @@ export class DevinAgentRun implements AgentRun {
         }
 
         const notification = signal.notification;
+        if (signal.replay) continue;
         if (notification.method !== 'session/update') continue;
         const params = isRecord(notification.params)
           ? notification.params as DevinSessionUpdateParams

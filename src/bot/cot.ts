@@ -23,6 +23,12 @@ const COT_EVENT_CONTENT_BYTE_MAX = 4000;
 // start() — which runs before any agent event is drained and before the
 // plain-reply fallback — to undici's ~300s default.
 const COT_REQUEST_TIMEOUT_MS = 15_000;
+// Feishu validates each AppendCOTEvents batch; a burst that fits the per-event
+// byte budget can still be rejected whole (observed: 99992402 field validation
+// failed on a ~100-event flush after an engine replayed its history). Bound
+// both axes so one flush can never exceed the validator.
+const COT_EVENTS_PER_UPDATE = 20;
+const COT_UPDATE_BYTES_MAX = 32 * 1024;
 
 export class CotClient {
   private readonly baseUrl: string;
@@ -131,6 +137,13 @@ function cotHttpError(resp: Response, text: string): Error {
       if (typeof data.code === 'number' || typeof data.code === 'string') code = String(data.code);
       if (typeof data.msg === 'string') message = safeCotErrorField(data.msg);
       else if (typeof data.message === 'string') message = safeCotErrorField(data.message);
+      const violations = isRecord(data.error) && Array.isArray(data.error.field_violations)
+        ? data.error.field_violations
+            .filter(isRecord)
+            .map((v) => typeof v.field === 'string' ? safeCotErrorField(v.field) : undefined)
+            .filter((f): f is string => Boolean(f))
+        : [];
+      if (violations.length > 0) message = [message, `fields=${violations.join(',')}`].filter(Boolean).join(' ');
     }
   } catch {
     // Non-JSON error pages are intentionally not copied into logs.
@@ -389,20 +402,39 @@ export class CotPublisher {
       if (this.buffer.length > 0 && !this.disabled) await this.flush();
       return;
     }
-    const events = this.buffer.splice(0);
-    if (events.length === 0) return;
-    this.flushing = this.client.update(this.ref, events)
-      .catch((err) => {
-        this.disabled = true;
-        this.buffer.length = 0;
-        this.degradedReason = err instanceof Error ? err.message : String(err);
-        log.warn('cot', 'update-failed', { err: this.degradedReason });
-      })
+    this.flushing = this.flushLoop()
       .finally(() => {
         this.flushing = undefined;
         if (this.buffer.length > 0 && !this.disabled) this.scheduleFlush();
       });
     await this.flushing;
+  }
+
+  private async flushLoop(): Promise<void> {
+    while (this.buffer.length > 0 && !this.disabled && this.ref) {
+      const events = this.takeBatch();
+      try {
+        await this.client.update(this.ref, events);
+      } catch (err) {
+        this.disabled = true;
+        this.buffer.length = 0;
+        this.degradedReason = err instanceof Error ? err.message : String(err);
+        log.warn('cot', 'update-failed', { err: this.degradedReason });
+      }
+    }
+  }
+
+  private takeBatch(): CotEvent[] {
+    const batch: CotEvent[] = [];
+    let bytes = 0;
+    while (this.buffer.length > 0 && batch.length < COT_EVENTS_PER_UPDATE) {
+      const next = this.buffer[0]!;
+      const size = Buffer.byteLength(next.content, 'utf8') + next.event_type.length + 32;
+      if (batch.length > 0 && bytes + size > COT_UPDATE_BYTES_MAX) break;
+      bytes += size;
+      batch.push(this.buffer.shift()!);
+    }
+    return batch;
   }
 }
 

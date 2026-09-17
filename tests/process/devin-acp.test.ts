@@ -130,6 +130,36 @@ describe('Devin ACP runtime', () => {
     await runtime.dispose();
   });
 
+  it('drops session/load replay notifications instead of surfacing them as live events', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'aria-devin-acp-replay-'));
+    roots.push(root);
+    vi.stubEnv('DEVIN_API_KEY', 'test-devin-key');
+    const runtime = new DevinAcpRuntime({
+      binary: await writeFakeDevin(root),
+      profileStateDir: root,
+      access: 'full',
+    });
+
+    const run = runtime.execution.run({
+      runId: 'run-devin-replay',
+      scopeId: 'scope-devin',
+      prompt: 'continue',
+      cwd: root,
+      sessionId: 'devin-session-1',
+    });
+    const events: AgentEvent[] = [];
+    for await (const event of run.events) events.push(event);
+
+    expect(events.some((event) => event.type === 'tool_use' && event.id === 'replay-tool')).toBe(false);
+    expect(events.some(
+      (event) => (event.type === 'text' && event.delta.includes('REPLAYED_HISTORY'))
+        || (event.type === 'final_text' && event.content.includes('REPLAYED_HISTORY')),
+    )).toBe(false);
+    expect(events).toContainEqual({ type: 'text', delta: 'I will inspect.' });
+    expect(events.at(-1)).toMatchObject({ type: 'done', terminationReason: 'normal' });
+    await runtime.dispose();
+  });
+
   it('fails fast when the host supplies no API key', async () => {
     const root = await mkdtemp(join(tmpdir(), 'aria-devin-acp-noauth-'));
     roots.push(root);
@@ -216,6 +246,17 @@ process.stdin.on('data', (chunk) => {
       continue;
     }
     if (message.method === 'session/new' || message.method === 'session/load') {
+      if (message.method === 'session/load') {
+        const sid = message.params.sessionId;
+        // ACP replays history as session/update notifications before resolving
+        // session/load; the client must not surface them as live turn events.
+        send({ jsonrpc: '2.0', method: 'session/update', params: { sessionId: sid, update: {
+          sessionUpdate: 'tool_call', toolCallId: 'replay-tool', title: 'shell', rawInput: { command: 'old' },
+        } } });
+        send({ jsonrpc: '2.0', method: 'session/update', params: { sessionId: sid, update: {
+          sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'REPLAYED_HISTORY' },
+        } } });
+      }
       send({ jsonrpc: '2.0', id: message.id, result: {
         sessionId: message.params.sessionId ?? 'devin-session-1',
         modes: {
