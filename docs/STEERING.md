@@ -243,6 +243,81 @@ doing; round 4's prompt batch contains both the loop prompt and the
 correction. It is steering with turn granularity — the Ralph-loop trick of
 "don't fight for mid-turn control; make turns short and re-prompt".
 
+## A different answer: Cumora's egress-side gate and priority-triaged steering
+
+[Cumora](https://github.com/yetone/cumora) — team chat where BYOA agents
+(Claude Code, Codex, Grok, Cursor, OpenCode, pi) are first-class
+participants driven by a local daemon — hits the same wall and answers it
+twice: once on the input side, like everyone else, and once on the
+**output** side, which nobody else in this document does.
+
+### Input: `maybeSteer`, a priority classifier in front of the inject
+
+The daemon's wake path (`server/src/agents/computer/daemon.ts`) stacks
+three tiers:
+
+1. **Coalescing first.** `WAKE_DEBOUNCE_MS = 2500` folds a burst of wakes
+   into ONE turn; wakes arriving mid-turn collapse into a single
+   `pendingRerun` that re-reads the inbox at turn end (a no-op if the
+   running turn already handled everything). Level 0, always on.
+2. **Direct-ping push.** A DM, @mention, or human message arriving
+   mid-turn calls `session.steer()`, which writes a stream-json user
+   message into the live persistent Claude session — but the payload is a
+   *directive*, not the raw message: "answer it BRIEFLY, then resume your
+   current task", with the sender's body truncated to 300 chars. Only the
+   priority class gets pushed; the agent is told explicitly not to drop
+   its task.
+3. **Content-free group nudge.** Plain group chatter mid-turn gets a
+   throttled, deduped `⚡ N new message(s) in — bodies withheld…
+   cumora glance <convo>` — the Level 1 mailbox pattern verbatim, pulled
+   via `cumora glance` at a natural pause.
+
+The safety details are worth copying: a `sideSteering` re-entrancy guard;
+dedup by last message id and a minimum interval for group nudges; a
+`GET /inbox?probe=1` read that inspects the inbox **without** advancing
+the freshness baseline (probing is not seeing); and a best-effort
+try/catch so any steer failure simply rides the coalesced rerun.
+
+Per engine, `steer()` resolves differently — claude writes a stdin user
+message, `pi --mode rpc` has a native `steer` command the engine queues
+itself, and the ACP-stdio adapter logs "same-turn steer is not supported
+on ACP stdio — the ping rides the next wake". Same ceiling Aria hits on
+Devin; same graceful degradation to Level 0.
+
+### Output: the freshness preflight, `HELD` instead of injected
+
+`cumora reply` — the only way an agent posts — runs a server-side
+preflight (`server/src/agents/cli.ts`):
+
+- Redis keeps a seen-baseline per agent per conversation.
+- On reply, the server selects non-self messages newer than the baseline.
+  If any exist → the reply is rejected with a `HELD` envelope (exit 2)
+  carrying the newer messages inline; the baseline advances to the held
+  max so retries compare against fresh state — no infinite HOLD loop.
+- The contract is **shown ⇒ seen**: every surface that displays rows
+  (wake brief, `glance`, HELD envelopes themselves) advances the cursor,
+  so a plain re-send after being shown the state passes.
+- `--send-anyway` is the escape, but it's a one-shot token bound to the
+  exact sequence the HELD envelope showed, the normalized title, and a
+  2-minute TTL — a stale token cannot bypass a genuinely-new race.
+
+Worked example, a counting game: agents A and B both wake on the posted
+`"2"` and both draft `"3"`. With input steering alone, both post a
+duplicate — the classic race. With the gate: A's reply lands first and
+advances the room; B's `cumora reply` hits the preflight, sees A's `"3"`
+newer than its baseline, and returns `HELD` with A's message inline. B
+re-decides against fresh state and drops its draft. **The turn was never
+steered; the race was resolved at the exit.**
+
+### Why the egress gate complements the ladder
+
+Input steering makes the agent *see* the change sooner; the egress gate
+makes a wrong move *impossible to commit* — including for engines with no
+input channel at all (the Level 0 dead end Devin sits in today). For
+multi-actor rooms, where the world changes underneath a running turn
+constantly, the exit check is infrastructure rather than UX: it is the
+only mechanism here that still works when every input path fails.
+
 ## The protocol layer: where ACP is heading
 
 These mechanisms are converging on a standard shape. The ACP working group
@@ -273,6 +348,8 @@ bridge changes.
 | Engine has input channel, push is racy | Content-free notice + agent pull (mailbox) |
 | Engine has nothing | Turn-boundary queue; `/loop` for steerable repetition; `cancel` + re-prompt when the correction is urgent |
 | You own the loop | `getSteeringMessages`-style callback at every boundary; `followUpQueue` for late arrivals |
+| Mixed-priority traffic mid-turn | Classify before injecting: push direct pings, content-free nudge for the rest (Cumora's `maybeSteer`) |
+| Multi-actor rooms where output can race | Egress freshness gate: seen-baseline + `HELD` + one-shot seq-bound override token |
 
 The pitfalls that recur across every implementation: steer accepted at the
 transport but orphaned from its owning turn (#934); the post-tool window
@@ -295,3 +372,4 @@ urgent corrections — while `session/inject` waits upstream.
 - [ACP RFD #1261](https://github.com/agentclientprotocol/agent-client-protocol/pull/1261) — `session/inject` standardization.
 - [claude-agent-acp#871](https://github.com/agentclientprotocol/claude-agent-acp/issues/871), [#934](https://github.com/agentclientprotocol/claude-agent-acp/issues/934) — steering over ACP: the request and the lifecycle bug.
 - [kimi-code#2370](https://github.com/MoonshotAI/kimi-code/issues/2370) — the `_session/steering` convention spreading across adapters.
+- [yetone/cumora](https://github.com/yetone/cumora) + its [COORDINATION.md](https://github.com/yetone/cumora/blob/main/docs/COORDINATION.md) — priority-triaged same-turn steering and the egress freshness gate.

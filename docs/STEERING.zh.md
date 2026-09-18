@@ -220,6 +220,74 @@ prompt 批次里同时带着 loop prompt 和这条纠正。这是 turn 粒度的
 steering——Ralph-loop 的思路："别去争 mid-turn 的控制权，把 turn
 切短，反复重投。"
 
+## 另一种答案：Cumora 的出口侧门控与分级 steering
+
+[Cumora](https://github.com/yetone/cumora)——一个团队聊天产品，BYOA
+agent（Claude Code、Codex、Grok、Cursor、OpenCode、pi）作为一等参与
+者由本地 daemon 驱动——撞的是同一堵墙，但它回答了**两次**：输入侧
+一次，和大家一样；**输出侧**一次，这是本文其他系统都没做的。
+
+### 输入：`maybeSteer`，注入前的优先级分类器
+
+daemon 的 wake 路径（`server/src/agents/computer/daemon.ts`）叠了
+三层：
+
+1. **先合并。** `WAKE_DEBOUNCE_MS = 2500` 把一波 wake 折成**一个**
+   turn；turn 运行中到达的 wake 坍缩成单个 `pendingRerun`，turn 结束
+   后重读收件箱（如果运行中的 turn 已经处理完就 no-op）。Level 0，
+   永远兜底。
+2. **direct-ping 推送。** DM、@mention 或人类消息在 mid-turn 到达时
+   调 `session.steer()`，往活着的 Claude 持久会话写一条 stream-json
+   user message——但 payload 是*指令*而不是原文："answer it BRIEFLY,
+   then resume your current task"，发送者正文截断到 300 字符。只有
+   高优先级的类别才推送，并且明确告诉 agent 不许丢下手头的活。
+3. **content-free 群聊 nudge。** mid-turn 的普通群消息得到一条节
+   流、按消息 id 去重的 `⚡ N new message(s) in — bodies withheld…
+   cumora glance <convo>`——就是 Level 1 mailbox 的原样翻版，agent
+   在自然停顿用 `cumora glance` 拉正文。
+
+值得照抄的安全细节：`sideSteering` 防重入；按最新消息 id 去重 +
+ 群 nudge 最小间隔；用 `GET /inbox?probe=1` 探测收件箱**而不**推进
+ freshness 基线（探测不算看过）；以及 best-effort 的 try/catch——任
+何 steer 失败都只是搭回 coalesced rerun 的兜底。
+
+按引擎分，`steer()` 解析不同——claude 写 stdin user message，
+`pi --mode rpc` 有原生 `steer` 命令由引擎自己排队，而 ACP-stdio
+adapter 打的是 "same-turn steer is not supported on ACP stdio —
+the ping rides the next wake"。和 Aria 在 Devin 上撞到的天花板一样，
+也一样优雅降级到 Level 0。
+
+### 输出：freshness 预检，与其注入不如 `HELD`
+
+`cumora reply`——agent 发帖的唯一出口——跑一个服务端预检
+（`server/src/agents/cli.ts`）：
+
+- Redis 保存每个 agent × 会话的 seen 基线。
+- 回复时服务端查出比基线新的非本人消息。存在 → 回复被拒，返回
+  `HELD` 信封（exit code 2），信封内联这些新消息；基线推进到 held
+  最大值，重试按新状态比对——不会无限 HOLD。
+- 契约是 **shown ⇒ seen**：每个把消息行展示出来的面（wake brief、
+  `glance`、HELD 信封本身）都会推进游标，所以被展示过状态之后直接
+  重发就能过。
+- `--send-anyway` 是逃生口，但它是一次性 token，绑定 HELD 信封当时
+  展示的 sequence、归一化标题和 2 分钟 TTL——过期 token 绕不过真正
+  的新竞态。
+
+具体例子，报数游戏：agent A 和 B 都在 `"2"` 发出时被唤醒，都草拟
+`"3"`。只有输入侧 steering 的话两个都发重复——经典竞态。加了门
+控：A 的回复先落地推进房间状态；B 的 `cumora reply` 撞上预检，发现
+A 的 `"3"` 比自己的基线新，收到带 A 消息内联的 `HELD`。B 按新状态
+重新决策，丢掉草稿。**turn 从头到尾没被 steer；竞态在出口被解决
+了。**
+
+### 为什么出口门控是对阶梯的补充
+
+输入侧 steering 让 agent *更早看到*变化；出口门控让错误动作*无法提
+交*——包括对完全没有输入通道的引擎（Devin 今天坐的 Level 0 死胡
+同）同样有效。对多参与者房间——turn 运行时世界一直在它脚下变——
+出口检查是基础设施而不是体验加分项：它是本文唯一一种在输入路径全
+部失效时仍然成立的机制。
+
 ## 协议层：ACP 正在收敛的方向
 
 这些机制正在向一个标准形状收敛。ACP 工作组有一个 open 的 RFD——
@@ -249,6 +317,8 @@ Aria 的引擎契约抽象的本来就是 outcome 而不是报文：
 | 引擎有输入通道但推送有竞态 | content-free 通知 + agent 拉取（mailbox） |
 | 引擎什么都没有 | turn 边界排队；要反复迭代用 `/loop`；纠正紧急就 `cancel` + 重发 prompt |
 | 你自己持有循环 | 每个边界挂 `getSteeringMessages` 式回调；来晚的进 `followUpQueue` |
+| mid-turn 流量优先级混杂 | 注入前先分类：direct ping 才推送，其余发 content-free nudge（Cumora 的 `maybeSteer`） |
+| 多参与者房间、输出会竞态 | 出口 freshness 门控：seen 基线 + `HELD` + 一次性 seq 绑定覆盖 token |
 
 每种实现里反复出现的坑：transport 层 accepted 却和 owning turn 脱钩
 的 steer（#934）；引擎丢 stdin 输入的 post-tool 窗口；compaction
@@ -271,3 +341,4 @@ prompt 契约不禁止，agent 会把无内容通知误读成"没有待办"。
 - [ACP RFD #1261](https://github.com/agentclientprotocol/agent-client-protocol/pull/1261) —— `session/inject` 标准化。
 - [claude-agent-acp#871](https://github.com/agentclientprotocol/claude-agent-acp/issues/871)、[#934](https://github.com/agentclientprotocol/claude-agent-acp/issues/934) —— ACP steering：最初需求与生命周期 bug。
 - [kimi-code#2370](https://github.com/MoonshotAI/kimi-code/issues/2370) —— `_session/steering` 约定在各家 adapter 间扩散。
+- [yetone/cumora](https://github.com/yetone/cumora) + [COORDINATION.md](https://github.com/yetone/cumora/blob/main/docs/COORDINATION.md) —— 分级同轮 steering 与出口 freshness 门控。
