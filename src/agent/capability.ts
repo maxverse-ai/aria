@@ -47,6 +47,7 @@ export function claudeCapability(profile?: Pick<ProfileConfig, 'permissions'>): 
     permissions: {
       maxAccess,
     },
+    steering: { mode: 'direct', textOnly: true, mechanism: 'stdio-push', delivery: 'none' },
   };
 }
 

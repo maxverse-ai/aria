@@ -1,5 +1,34 @@
 import type { AgentEvent } from '../types';
 
+/**
+ * `--input-format stream-json` accepts user turns as JSON lines on stdin. A
+ * mid-turn line is the only live-input door claude exposes: the CLI absorbs
+ * it at the next tool boundary, so it is a push with no acknowledgement.
+ */
+export function encodeUserMessageLine(text: string): string {
+  return JSON.stringify({
+    type: 'user',
+    message: { role: 'user', content: [{ type: 'text', text }] },
+  });
+}
+
+/**
+ * Concatenate the text blocks of a raw `user` event — used to detect the
+ * CLI echoing a steered message back, which is the only delivery evidence a
+ * stdio push can produce.
+ */
+export function extractUserEventText(raw: unknown): string | undefined {
+  if (!raw || typeof raw !== 'object') return;
+  const evt = raw as ClaudeRawEvent;
+  if (evt.type !== 'user' || !evt.message?.content) return;
+  const text = evt.message.content
+    .filter((block) => block.type === 'text' && typeof block.text === 'string')
+    .map((block) => block.text)
+    .join('\n')
+    .trim();
+  return text || undefined;
+}
+
 interface ContentBlock {
   type: string;
   text?: string;

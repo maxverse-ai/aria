@@ -115,12 +115,15 @@ describe('prepared profile runtime process compatibility', () => {
       switch (engine) {
         case 'claude':
         case 'kimi':
-          expect(record.argv.slice(0, 7)).toEqual([
-            '-p', '--output-format', 'stream-json', '--verbose',
-            '--permission-mode', 'acceptEdits', '--append-system-prompt-file',
+          expect(record.argv.slice(0, 9)).toEqual([
+            '-p', '--input-format', 'stream-json', '--output-format', 'stream-json',
+            '--verbose', '--permission-mode', 'acceptEdits', '--append-system-prompt-file',
           ]);
-          expect(record.argv.slice(8)).toEqual(['--resume', 'session-old', '--model', 'test-model']);
-          expect(record.stdin).toBe('construction prompt');
+          expect(record.argv.slice(10)).toEqual(['--resume', 'session-old', '--model', 'test-model']);
+          expect(JSON.parse(record.stdin.trim())).toEqual({
+            type: 'user',
+            message: { role: 'user', content: [{ type: 'text', text: 'construction prompt' }] },
+          });
           expect(record.systemPrompt).toContain('Aria 运行约定');
           break;
         case 'codex':
@@ -360,11 +363,29 @@ function fakeMain(input: { engine: Engine; recordPath: string; envKeys: string[]
     return;
   }
 
+  // Claude-compatible engines take stream-json user messages on stdin and
+  // keep it open for the run's lifetime — answer each line with the result.
+  if (input.engine === 'claude' || input.engine === 'kimi') {
+    let buf = '';
+    process.stdin.on('data', (chunk) => {
+      const text = chunk.toString();
+      record.stdin += text;
+      buf += text;
+      let nl: number;
+      while ((nl = buf.indexOf('\n')) >= 0) {
+        const line = buf.slice(0, nl);
+        buf = buf.slice(nl + 1);
+        if (!line.trim()) continue;
+        send({ type: 'result', session_id: 'session-old' });
+      }
+    });
+    process.stdin.on('end', () => { save(); process.exit(0); });
+    return;
+  }
+
   const complete = () => {
     save();
-    if (input.engine === 'claude' || input.engine === 'kimi') {
-      send({ type: 'result', session_id: 'session-old' });
-    } else if (input.engine === 'opencode') {
+    if (input.engine === 'opencode') {
       send({ type: 'text', sessionID: 'session-old', part: { type: 'text', text: 'fixture answer' } });
     } else if (input.engine === 'pi') {
       send({ type: 'session', id: 'session-old' });

@@ -1670,7 +1670,12 @@ async function tryMergeLiveFollowup(input: {
     input.pending.acknowledge(claim);
     // Retain the input while the engine's landing is still unconfirmed —
     // a later `steer_delivery` record either clears it or requeues it.
-    if (!result.insertion || result.insertion === 'unconfirmed') {
+    // Engines with 'none' delivery evidence never emit records, so nothing
+    // is retained for them.
+    if (
+      (!result.insertion || result.insertion === 'unconfirmed') &&
+      activeRun.steering?.delivery !== 'none'
+    ) {
       input.steerDeliveries.remember(requestId, input.input);
     }
     log.info('followup', 'accepted', {

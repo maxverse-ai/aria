@@ -15,9 +15,14 @@ import {
   type AgentRun,
   type AgentRunOptions,
 } from '../types';
-import { translateEvent } from './stream-json';
+import { encodeUserMessageLine, extractUserEventText, translateEvent } from './stream-json';
 import { armProcessExitDrain } from '../process-exit-drain';
 import { buildAgentLaunchEnv } from '../launch-env';
+import type {
+  AgentSteeringOutcome,
+  AgentSteeringRequest,
+  AgentSteeringSupport,
+} from '../steering';
 
 export interface ClaudeAdapterOptions {
   binary?: string;
@@ -28,6 +33,12 @@ export interface ClaudeAdapterOptions {
   /** Agent id reported by preflight; defaults to {@link id}. */
   agentId?: string;
   ariaChannel?: ChannelEnvContext;
+  /**
+   * 'auto' (default) steers by writing a mid-turn user message to the
+   * persistent stream-json stdin; 'off' exposes no steering and defers all
+   * mid-turn input to the next turn.
+   */
+  steering?: 'auto' | 'off';
 }
 
 type ClaudeChild = SpawnedProcessByStdio<Writable, Readable, Readable>;
@@ -40,6 +51,7 @@ export class ClaudeAdapter implements AgentAdapter {
   private readonly systemPromptDirectory?: string;
   private readonly agentId: string;
   private readonly ariaChannel: ChannelEnvContext | undefined;
+  private readonly steeringEnabled: boolean;
 
   constructor(opts: ClaudeAdapterOptions = {}) {
     this.id = opts.id ?? 'claude';
@@ -48,6 +60,7 @@ export class ClaudeAdapter implements AgentAdapter {
     this.binary = opts.binary ?? 'claude';
     this.systemPromptDirectory = opts.systemPromptDirectory;
     this.ariaChannel = opts.ariaChannel;
+    this.steeringEnabled = opts.steering !== 'off';
   }
 
   async isAvailable(): Promise<boolean> {
@@ -80,6 +93,8 @@ export class ClaudeAdapter implements AgentAdapter {
 
     const args = [
       '-p',
+      '--input-format',
+      'stream-json',
       '--output-format',
       'stream-json',
       '--verbose',
@@ -137,10 +152,41 @@ export class ClaudeAdapter implements AgentAdapter {
       log.info('agent', 'exit', { pid: child.pid ?? null, code, signal });
       systemPromptFile.cleanup();
     });
+    // Mid-turn live input shares stdin with the initial prompt, so it stays
+    // open for the run's lifetime and is closed when the turn's `result`
+    // arrives — the process then exits on its own.
+    const state: ClaudeRunState = {
+      turnDone: false,
+      stdinDead: false,
+      lastToolEventMs: 0,
+      pendingSteerTexts: new Map(),
+    };
+    const steeringRequests = new Map<string, Promise<AgentSteeringOutcome>>();
+    const endStdin = (): void => {
+      if (state.stdinDead) return;
+      state.stdinDead = true;
+      try {
+        child.stdin.end();
+      } catch {
+        // The pipe may already be torn down; the exit path covers it.
+      }
+    };
     child.stdin.on('error', (err) => {
+      state.stdinDead = true;
       log.warn('agent', 'stdin-error', { message: err.message });
     });
-    child.stdin.end(opts.prompt, 'utf8');
+    child.stdin.write(`${encodeUserMessageLine(opts.prompt)}\n`, 'utf8');
+
+    const steering: AgentSteeringSupport | undefined = this.steeringEnabled
+      ? CLAUDE_STEERING_SUPPORT
+      : undefined;
+    const steer = (request: AgentSteeringRequest): Promise<AgentSteeringOutcome> => {
+      const existing = steeringRequests.get(request.requestId);
+      if (existing) return existing;
+      const attempt = performClaudeSteer(child, state, request, opts.runId);
+      steeringRequests.set(request.requestId, attempt);
+      return attempt;
+    };
 
     // Default 5s if caller didn't specify — claude often has live
     // subprocesses (lark-cli waiting for OAuth, long Bash, etc.) and the
@@ -151,7 +197,8 @@ export class ClaudeAdapter implements AgentAdapter {
 
     return {
       runId: opts.runId,
-      events: createEventStream(child, stderrChunks, () => runtimeError),
+      events: createEventStream(child, stderrChunks, () => runtimeError, state, endStdin),
+      ...(steering ? { steering, steer } : {}),
       async stop() {
         if (child.exitCode !== null || child.signalCode !== null) return;
         log.info('agent', 'stop-sigterm', { pid: child.pid ?? null, graceMs: stopGraceMs });
@@ -194,10 +241,23 @@ export class ClaudeAdapter implements AgentAdapter {
   }
 }
 
+interface ClaudeRunState {
+  /** The turn's `result` event arrived — no further live input is possible. */
+  turnDone: boolean;
+  /** stdin errored or was closed; steers can no longer be written. */
+  stdinDead: boolean;
+  /** Last tool activity observed on stdout; a drop window follows it. */
+  lastToolEventMs: number;
+  /** Steered texts awaiting the CLI's user-event echo, keyed by requestId. */
+  pendingSteerTexts: Map<string, string>;
+}
+
 async function* createEventStream(
   child: ClaudeChild,
   stderrChunks: Buffer[],
   getError: () => Error | null,
+  state: ClaudeRunState,
+  endStdin: () => void,
 ): AsyncGenerator<AgentEvent> {
   // If fork itself failed synchronously, child.pid is undefined. The 'error'
   // event (ENOENT etc.) fires in the next tick, so also check getError().
@@ -223,9 +283,41 @@ async function* createEventStream(
       } catch {
         continue;
       }
+      const raw = parsed as {
+        type?: string;
+        message?: { content?: Array<{ type?: string }> };
+      };
+      // The window right after tool activity is where a stdin write can be
+      // swallowed without a trace — timestamp tool blocks so steer can defer
+      // instead. Plain text deltas must not arm the gate or every steer
+      // would defer.
+      const blocks = raw.message?.content;
+      if (Array.isArray(blocks) && blocks.some(
+        (block) => block?.type === 'tool_use' || block?.type === 'tool_result',
+      )) {
+        state.lastToolEventMs = Date.now();
+      }
+      // A `user` event that echoes a steered text back is the only delivery
+      // evidence a stdio push produces: the CLI took the message into the
+      // running turn.
+      const echoed = extractUserEventText(parsed);
+      if (echoed && state.pendingSteerTexts.size > 0) {
+        for (const [requestId, needle] of state.pendingSteerTexts) {
+          if (needle && echoed.includes(needle)) {
+            state.pendingSteerTexts.delete(requestId);
+            yield { type: 'steer_delivery', requestId, insertion: 'into-active-turn' };
+          }
+        }
+      }
+      if (raw.type === 'result') {
+        state.turnDone = true;
+        endStdin();
+      }
       yield* translateEvent(parsed);
     }
   } finally {
+    state.turnDone = true;
+    endStdin();
     cleanupProcessExitDrain();
     rl.close();
   }
@@ -288,6 +380,66 @@ function writeSystemPromptFile(content: string, directory?: string): { path: str
       }
     },
   };
+}
+
+/**
+ * A stdin write gives no acknowledgement — a steered message can only be
+ * confirmed if the CLI echoes it back as a `user` event, and even that says
+ * nothing about drops. Delivery evidence is therefore 'none' at write time.
+ */
+const CLAUDE_STEERING_SUPPORT: AgentSteeringSupport = {
+  mode: 'direct',
+  textOnly: true,
+  mechanism: 'stdio-push',
+  delivery: 'none',
+};
+
+/**
+ * How long after a tool event a stdin write is considered unsafe. Observed
+ * claude builds drop input written right after a tool boundary; deferring
+ * those steers to the next turn beats losing them silently.
+ */
+const POST_TOOL_GATE_MS = 750;
+
+function performClaudeSteer(
+  child: ClaudeChild,
+  state: ClaudeRunState,
+  request: AgentSteeringRequest,
+  runId: string,
+): Promise<AgentSteeringOutcome> {
+  if (request.expectedRunId !== runId) {
+    return Promise.resolve({ kind: 'rejected', reason: 'stale-run' });
+  }
+  const text = request.prompt.trim();
+  if (!text) {
+    return Promise.resolve({ kind: 'rejected', reason: 'invalid-input' });
+  }
+  if (state.turnDone || child.exitCode !== null || child.signalCode !== null) {
+    return Promise.resolve({ kind: 'deferred', reason: 'turn-closing' });
+  }
+  if (state.stdinDead) {
+    return Promise.resolve({ kind: 'deferred', reason: 'turn-not-ready' });
+  }
+  if (Date.now() - state.lastToolEventMs < POST_TOOL_GATE_MS) {
+    return Promise.resolve({ kind: 'deferred', reason: 'turn-not-ready' });
+  }
+  try {
+    child.stdin.write(`${encodeUserMessageLine(request.prompt)}\n`, 'utf8');
+  } catch (error) {
+    return Promise.resolve({
+      kind: 'rejected',
+      reason: 'transport-error',
+      message: error instanceof Error ? error.message : String(error),
+      retryable: true,
+    });
+  }
+  state.pendingSteerTexts.set(request.requestId, text);
+  log.info('agent', 'steer-pushed', { runId, requestId: request.requestId });
+  return Promise.resolve({
+    kind: 'accepted',
+    runId,
+    insertion: 'unconfirmed',
+  });
 }
 
 function isWindowsCommandNotFoundLine(line: string): boolean {

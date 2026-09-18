@@ -65,11 +65,29 @@ export function spaceEngineMain(input: { engine: string; envKeys: string[]; sent
     return;
   }
 
+  // Claude-compatible engines take stream-json user messages on stdin and
+  // keep it open for the run's lifetime — answer each line with the result.
+  if (input.engine === 'claude' || input.engine === 'kimi') {
+    let buf = '';
+    process.stdin.on('data', (chunk) => {
+      const text = chunk.toString();
+      record.stdin += text;
+      buf += text;
+      let nl: number;
+      while ((nl = buf.indexOf('\n')) >= 0) {
+        const line = buf.slice(0, nl);
+        buf = buf.slice(nl + 1);
+        if (!line.trim()) continue;
+        send({ type: 'result', session_id: 'session-old' });
+      }
+    });
+    process.stdin.on('end', () => { save(); process.exit(0); });
+    return;
+  }
+
   const complete = () => {
     save();
-    if (input.engine === 'claude' || input.engine === 'kimi') {
-      send({ type: 'result', session_id: 'session-old' });
-    } else if (input.engine === 'opencode') {
+    if (input.engine === 'opencode') {
       send({ type: 'text', sessionID: 'session-old', part: { type: 'text', text: 'fixture answer' } });
     } else if (input.engine === 'pi') {
       send({ type: 'session', id: 'session-old' });

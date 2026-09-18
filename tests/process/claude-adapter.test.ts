@@ -44,11 +44,20 @@ describe('ClaudeAdapter process contract', () => {
 
     expect(await realpath(record.cwd)).toBe(await realpath(fake.dir));
     expect(record.env.LARK_CHANNEL).toBe('1');
-    // The prompt goes via stdin, and the bridge system prompt via a temp file,
-    // so neither ever touches argv (which cmd.exe would mangle on Windows).
-    expect(record.stdin).toBe('hello');
-    expect(record.argv.slice(0, 7)).toEqual([
+    // The prompt goes via stdin as a stream-json user message, and the bridge
+    // system prompt via a temp file, so neither ever touches argv (which
+    // cmd.exe would mangle on Windows).
+    const stdinMessages = record.stdin.trim().split('\n').map((l) => JSON.parse(l));
+    expect(stdinMessages).toEqual([
+      {
+        type: 'user',
+        message: { role: 'user', content: [{ type: 'text', text: 'hello' }] },
+      },
+    ]);
+    expect(record.argv.slice(0, 9)).toEqual([
       '-p',
+      '--input-format',
+      'stream-json',
       '--output-format',
       'stream-json',
       '--verbose',
@@ -126,7 +135,7 @@ describe('ClaudeAdapter process contract', () => {
     const record = await readRecord(fake.recordPath);
 
     expect(record.argv.slice(-4)).toEqual(['--resume', 'sess-old', '--model', 'sonnet']);
-    expect(record.argv[5]).toBe('bypassPermissions');
+    expect(record.argv[7]).toBe('bypassPermissions');
   });
 
   it('includes stderr when the process exits non-zero', async () => {
@@ -134,6 +143,7 @@ describe('ClaudeAdapter process contract', () => {
       lines: [{ type: 'assistant', message: { content: [{ type: 'text', text: 'before failure' }] } }],
       stderr: 'boom\n',
       exitCode: 42,
+      exitAfterFirstMessage: true,
     });
     cleanup.push(fake.dir);
 
@@ -212,6 +222,153 @@ describe('ClaudeAdapter process contract', () => {
     await iterator.return?.();
   });
 
+  it('steers an active turn by writing a mid-turn user message to stdin', async () => {
+    const fake = await createFakeClaude({
+      lines: [{ type: 'assistant', message: { content: [{ type: 'text', text: 'working' }] } }],
+      holdResult: true,
+      echoSteer: true,
+      result: { type: 'result', session_id: 'sess-steer' },
+    });
+    cleanup.push(fake.dir);
+
+    const run = new ClaudeAdapter({ binary: fake.path }).run({
+      runId: 'run-steer',
+      scopeId: 'scope-claude',
+      prompt: 'inspect',
+      cwd: fake.dir,
+    });
+    expect(run.steering).toEqual({
+      mode: 'direct',
+      textOnly: true,
+      mechanism: 'stdio-push',
+      delivery: 'none',
+    });
+    const events = run.events[Symbol.asyncIterator]();
+    await expect(events.next()).resolves.toMatchObject({ value: { type: 'text' } });
+
+    const request = {
+      requestId: 'steer-1',
+      expectedRunId: run.runId,
+      prompt: 'change direction',
+    };
+    const accepted = { kind: 'accepted', runId: run.runId, insertion: 'unconfirmed' };
+    await expect(run.steer!(request)).resolves.toEqual(accepted);
+    await expect(run.steer!(request)).resolves.toEqual(accepted);
+    await expect(run.steer!({
+      requestId: 'steer-stale',
+      expectedRunId: 'other-run',
+      prompt: 'too late',
+    })).resolves.toEqual({ kind: 'rejected', reason: 'stale-run' });
+    await expect(run.steer!({
+      requestId: 'steer-empty',
+      expectedRunId: run.runId,
+      prompt: ' ',
+    })).resolves.toEqual({ kind: 'rejected', reason: 'invalid-input' });
+
+    const rest: AgentEvent[] = [];
+    while (true) {
+      const next = await events.next();
+      if (next.done) break;
+      rest.push(next.value);
+    }
+    // The fake echoes the steered text back — the only delivery evidence a
+    // stdio push can produce.
+    expect(rest).toContainEqual({
+      type: 'steer_delivery',
+      requestId: 'steer-1',
+      insertion: 'into-active-turn',
+    });
+    expect(rest.at(-1)).toEqual({
+      type: 'done',
+      sessionId: 'sess-steer',
+      terminationReason: 'normal',
+    });
+
+    const record = await readRecord(fake.recordPath);
+    const stdinTexts = record.stdin.trim().split('\n')
+      .map((l) => JSON.parse(l).message.content[0].text);
+    expect(stdinTexts).toEqual(['inspect', 'change direction']);
+    await run.stop();
+  });
+
+  it('defers a steer written inside the post-tool drop window', async () => {
+    const fake = await createFakeClaude({
+      lines: [
+        { type: 'assistant', message: { content: [{ type: 'tool_use', id: 't1', name: 'shell', input: {} }] } },
+        { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 't1', content: 'ok' }] } },
+      ],
+      holdResult: true,
+      result: { type: 'result', session_id: 'sess-gate' },
+    });
+    cleanup.push(fake.dir);
+
+    const run = new ClaudeAdapter({ binary: fake.path }).run({
+      runId: 'run-gate',
+      scopeId: 'scope-claude',
+      prompt: 'inspect',
+      cwd: fake.dir,
+    });
+    const events = run.events[Symbol.asyncIterator]();
+    await events.next();
+    await events.next();
+
+    await expect(run.steer!({
+      requestId: 'steer-window',
+      expectedRunId: run.runId,
+      prompt: 'in the drop window',
+    })).resolves.toEqual({ kind: 'deferred', reason: 'turn-not-ready' });
+
+    await new Promise((resolve) => setTimeout(resolve, 900));
+    await expect(run.steer!({
+      requestId: 'steer-after',
+      expectedRunId: run.runId,
+      prompt: 'after the window',
+    })).resolves.toEqual({ kind: 'accepted', runId: run.runId, insertion: 'unconfirmed' });
+
+    while (!(await events.next()).done) {
+      // Drain the turn.
+    }
+    await run.stop();
+  });
+
+  it('defers steering once the turn has ended', async () => {
+    const fake = await createFakeClaude({
+      lines: [],
+      result: { type: 'result', session_id: 'sess-done' },
+    });
+    cleanup.push(fake.dir);
+
+    const run = new ClaudeAdapter({ binary: fake.path }).run({
+      runId: 'run-done',
+      scopeId: 'scope-claude',
+      prompt: 'inspect',
+      cwd: fake.dir,
+    });
+    await collect(run.events);
+    await expect(run.steer!({
+      requestId: 'steer-late',
+      expectedRunId: run.runId,
+      prompt: 'too late',
+    })).resolves.toEqual({ kind: 'deferred', reason: 'turn-closing' });
+  });
+
+  it('exposes no steering when the adapter disables it', async () => {
+    const fake = await createFakeClaude({
+      lines: [],
+      result: { type: 'result', session_id: 'sess-off' },
+    });
+    cleanup.push(fake.dir);
+    const run = new ClaudeAdapter({ binary: fake.path, steering: 'off' }).run({
+      runId: 'run-off',
+      scopeId: 'scope-claude',
+      prompt: 'inspect',
+      cwd: fake.dir,
+    });
+    expect(run.steering).toBeUndefined();
+    expect(run.steer).toBeUndefined();
+    await collect(run.events);
+  });
+
   it('requires cwd to be resolved by policy before spawning', () => {
     expect(() =>
       new ClaudeAdapter({ binary: 'unused' }).run({
@@ -231,9 +388,17 @@ async function collect(events: AsyncIterable<AgentEvent>): Promise<AgentEvent[]>
 
 async function createFakeClaude(options: {
   lines: unknown[];
+  /** Result payload for turn end; emitted after `lines` unless `holdResult`. */
+  result?: unknown;
+  /** Hold the turn open: the result only arrives after a second stdin line. */
+  holdResult?: boolean;
+  /** Echo a steered message back as a `user` event before the result. */
+  echoSteer?: boolean;
   stderr?: string;
   exitCode?: number;
   exitDelayMs?: number;
+  /** Exit right after the first-message burst without waiting for stdin end. */
+  exitAfterFirstMessage?: boolean;
 }): Promise<FakeBinary> {
   const dir = await mkdtemp(join(tmpdir(), 'claude-adapter-test-'));
   const path = join(dir, 'fake-claude.mjs');
@@ -246,9 +411,14 @@ async function createFakeClaude(options: {
       'const argv = process.argv.slice(2);',
       'const spIdx = argv.indexOf("--append-system-prompt-file");',
       'const systemPrompt = spIdx !== -1 ? readFileSync(argv[spIdx + 1], "utf8") : null;',
+      `const lines = ${JSON.stringify(options.lines)};`,
+      `const result = ${JSON.stringify(options.result ?? null)};`,
       'let stdin = "";',
-      'process.stdin.on("data", (c) => { stdin += c; });',
-      'process.stdin.on("end", () => {',
+      'let buffer = "";',
+      'let first = true;',
+      'const emit = (v) => console.log(JSON.stringify(v));',
+      'const textOf = (m) => (m?.message?.content ?? []).filter((b) => b.type === "text").map((b) => b.text).join("\\n");',
+      'const finish = () => {',
       `  writeFileSync(${JSON.stringify(recordPath)}, JSON.stringify({`,
       '    argv,',
       '    stdin,',
@@ -262,11 +432,29 @@ async function createFakeClaude(options: {
       '      LARKSUITE_CLI_CONFIG_DIR: process.env.LARKSUITE_CLI_CONFIG_DIR,',
       '    },',
       '  }));',
-      `  const lines = ${JSON.stringify(options.lines)};`,
-      '  for (const line of lines) console.log(JSON.stringify(line));',
       options.stderr ? `  process.stderr.write(${JSON.stringify(options.stderr)});` : '',
       `  setTimeout(() => process.exit(${options.exitCode ?? 0}), ${options.exitDelayMs ?? 0});`,
+      '};',
+      'process.stdin.on("data", (c) => {',
+      '  buffer += c;',
+      '  let nl;',
+      '  while ((nl = buffer.indexOf("\\n")) >= 0) {',
+      '    const line = buffer.slice(0, nl); buffer = buffer.slice(nl + 1);',
+      '    if (!line.trim()) continue;',
+      '    stdin += line + "\\n";',
+      '    const msg = JSON.parse(line);',
+      '    if (first) {',
+      '      first = false;',
+      '      for (const l of lines) emit(l);',
+      options.holdResult ? '' : '      if (result) emit(result);',
+      options.exitAfterFirstMessage ? '      finish();' : '',
+      '    } else {',
+      options.echoSteer ? '      emit({ type: "user", message: { content: [{ type: "text", text: textOf(msg) }] } });' : '',
+      options.holdResult ? '      if (result) emit(result);' : '',
+      '    }',
+      '  }',
       '});',
+      'process.stdin.on("end", finish);',
     ].filter(Boolean).join('\n'),
     'utf8',
   );

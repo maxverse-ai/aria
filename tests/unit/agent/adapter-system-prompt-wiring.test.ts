@@ -49,8 +49,9 @@ describe('ClaudeAdapter system prompt wiring', () => {
 
     adapter.run({ identity: { providerId: 'lark', accountId: 'app', subjectId: 'ou_bot_self', displayName: 'Bridge' }, runId: 'r1', scopeId: 'scope-test', prompt: 'hi', cwd: '/tmp' });
 
-    // The prompt goes via stdin, never argv (cmd.exe would mangle it on Windows).
-    expect(await readAll(child.stdin)).toBe('hi');
+    // The prompt goes via stdin as a stream-json user line, never argv
+    // (cmd.exe would mangle it on Windows). stdin stays open for steering.
+    expect(await readPromptText(child.stdin)).toBe('hi');
     expect(systemPromptFileContent()).toBe(
       buildBridgeSystemPrompt({ providerId: 'lark', accountId: 'app', subjectId: 'ou_bot_self', displayName: 'Bridge' }),
     );
@@ -63,7 +64,7 @@ describe('ClaudeAdapter system prompt wiring', () => {
 
     adapter.run({ runId: 'r1', scopeId: 'scope-test', prompt: 'hi', cwd: '/tmp' });
 
-    expect(await readAll(child.stdin)).toBe('hi');
+    expect(await readPromptText(child.stdin)).toBe('hi');
     expect(systemPromptFileContent()).toBe(buildBridgeSystemPrompt(undefined));
   });
 
@@ -76,10 +77,21 @@ describe('ClaudeAdapter system prompt wiring', () => {
   }
 });
 
-async function readAll(stream: PassThrough): Promise<string> {
-  const chunks: Buffer[] = [];
-  for await (const chunk of stream) {
-    chunks.push(chunk as Buffer);
-  }
-  return Buffer.concat(chunks).toString('utf8');
+async function readPromptText(stream: PassThrough): Promise<string> {
+  const line = await new Promise<string>((resolve, reject) => {
+    let buf = '';
+    const timer = setTimeout(() => reject(new Error('timed out waiting for stdin line')), 5000);
+    stream.on('data', (chunk: Buffer) => {
+      buf += chunk.toString('utf8');
+      const nl = buf.indexOf('\n');
+      if (nl < 0) return;
+      clearTimeout(timer);
+      resolve(buf.slice(0, nl));
+    });
+    stream.on('error', reject);
+  });
+  const event = JSON.parse(line) as { type: string; message?: { content?: Array<{ type: string; text?: string }> } };
+  expect(event.type).toBe('user');
+  const texts = (event.message?.content ?? []).filter((part) => part.type === 'text').map((part) => part.text ?? '');
+  return texts.join('');
 }
