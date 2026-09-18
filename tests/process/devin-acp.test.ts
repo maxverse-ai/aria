@@ -274,6 +274,155 @@ describe('Devin ACP runtime', () => {
     await runtime.dispose();
   });
 
+  it('steers through the negotiated _session/steering extension when advertised', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'aria-devin-acp-steer-ext-'));
+    roots.push(root);
+    vi.stubEnv('DEVIN_API_KEY', 'test-devin-key');
+    const runtime = new DevinAcpRuntime({
+      binary: await writeFakeDevin(root, { holdPrompt: true, steeringExtension: 'steering' }),
+      profileStateDir: root,
+      access: 'full',
+    });
+    const run = runtime.execution.run({
+      runId: 'run-devin-steer-ext',
+      scopeId: 'scope-devin',
+      prompt: 'inspect',
+      cwd: root,
+    });
+    const events = run.events[Symbol.asyncIterator]();
+    await events.next();
+    const firstTurnEvent = events.next();
+    await waitForLog(root, 'prompt-active');
+
+    expect(run.steering).toEqual({
+      mode: 'direct',
+      textOnly: true,
+      mechanism: 'acp-extension',
+      delivery: 'confirmed',
+    });
+    await expect(run.steer!({
+      requestId: 'steer-ext',
+      expectedRunId: run.runId,
+      prompt: 'change direction',
+    })).resolves.toEqual({
+      kind: 'accepted',
+      runId: run.runId,
+      insertion: 'into-active-turn',
+    });
+    const rest: AgentEvent[] = [];
+    const first = await firstTurnEvent;
+    if (!first.done) rest.push(first.value);
+    while (true) {
+      const next = await events.next();
+      if (next.done) break;
+      rest.push(next.value);
+    }
+    expect(rest).toContainEqual({
+      type: 'steer_delivery',
+      requestId: 'steer-ext',
+      insertion: 'into-active-turn',
+    });
+
+    const log = await readFile(join(root, 'devin.log'), 'utf8');
+    expect(log).toContain('_session/steering change direction');
+    expect(log).not.toContain('session/prompt steer');
+    await runtime.dispose();
+  });
+
+  it('prefers session/inject when the inject capability is advertised', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'aria-devin-acp-steer-inject-'));
+    roots.push(root);
+    vi.stubEnv('DEVIN_API_KEY', 'test-devin-key');
+    const runtime = new DevinAcpRuntime({
+      binary: await writeFakeDevin(root, { holdPrompt: true, steeringExtension: 'inject' }),
+      profileStateDir: root,
+      access: 'full',
+    });
+    const run = runtime.execution.run({
+      runId: 'run-devin-steer-inject',
+      scopeId: 'scope-devin',
+      prompt: 'inspect',
+      cwd: root,
+    });
+    const events = run.events[Symbol.asyncIterator]();
+    await events.next();
+    const firstTurnEvent = events.next();
+    await waitForLog(root, 'prompt-active');
+    await expect(run.steer!({
+      requestId: 'steer-inject',
+      expectedRunId: run.runId,
+      prompt: 'change direction',
+    })).resolves.toEqual({
+      kind: 'accepted',
+      runId: run.runId,
+      insertion: 'into-active-turn',
+    });
+    const first = await firstTurnEvent;
+    void first;
+    while (!(await events.next()).done) {
+      // Drain the turn.
+    }
+    const log = await readFile(join(root, 'devin.log'), 'utf8');
+    expect(log).toContain('session/inject change direction');
+    expect(log).not.toContain('session/prompt steer');
+    await runtime.dispose();
+  });
+
+  it('falls back to prompt-merge when an advertised extension answers -32601', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'aria-devin-acp-steer-lie-'));
+    roots.push(root);
+    vi.stubEnv('DEVIN_API_KEY', 'test-devin-key');
+    const runtime = new DevinAcpRuntime({
+      binary: await writeFakeDevin(root, {
+        holdPrompt: true,
+        steeringExtension: 'steering-lie',
+      }),
+      profileStateDir: root,
+      access: 'full',
+    });
+    const run = runtime.execution.run({
+      runId: 'run-devin-steer-lie',
+      scopeId: 'scope-devin',
+      prompt: 'inspect',
+      cwd: root,
+    });
+    const events = run.events[Symbol.asyncIterator]();
+    await events.next();
+    const firstTurnEvent = events.next();
+    await waitForLog(root, 'prompt-active');
+
+    await expect(run.steer!({
+      requestId: 'steer-lie',
+      expectedRunId: run.runId,
+      prompt: 'change direction',
+    })).resolves.toMatchObject({ kind: 'rejected', reason: 'transport-error' });
+    // The capability lied, so the next steer goes back to prompt-merge.
+    expect(run.steering).toEqual({
+      mode: 'direct',
+      textOnly: true,
+      mechanism: 'prompt-merge',
+      delivery: 'inferred',
+    });
+    await expect(run.steer!({
+      requestId: 'steer-merged',
+      expectedRunId: run.runId,
+      prompt: 'change direction',
+    })).resolves.toEqual({
+      kind: 'accepted',
+      runId: run.runId,
+      insertion: 'into-active-turn',
+    });
+    const first = await firstTurnEvent;
+    while (!(await events.next()).done) {
+      // Drain the turn.
+    }
+    void first;
+    const log = await readFile(join(root, 'devin.log'), 'utf8');
+    expect(log).toContain('_session/steering change direction');
+    expect(log).toContain('session/prompt steer change direction');
+    await runtime.dispose();
+  });
+
   it('selects accept-edits mode and rejects permission requests at workspace access', async () => {
     const root = await mkdtemp(join(tmpdir(), 'aria-devin-acp-workspace-'));
     roots.push(root);
@@ -382,6 +531,13 @@ interface FakeDevinOptions {
   /** Steer prompts resolve with a different userMessageId — new-turn signature. */
   steerAsNewTurn?: boolean;
   steerError?: 'no-running-turn';
+  /**
+   * 'steering' advertises `_meta.steering.supported` and answers
+   * `_session/steering`; 'inject' advertises `session.inject.modes` and
+   * answers `session/inject`; 'steering-lie' advertises the extension but
+   * returns -32601 for it.
+   */
+  steeringExtension?: 'steering' | 'inject' | 'steering-lie';
 }
 
 async function writeFakeDevin(root: string, fakeOptions: FakeDevinOptions = {}): Promise<string> {
@@ -438,14 +594,39 @@ process.stdin.on('data', (chunk) => {
       continue;
     }
     if (message.method === 'initialize') {
+      const extension = options.steeringExtension;
       send({ jsonrpc: '2.0', id: message.id, result: {
         protocolVersion: 1,
         authMethods: [{ id: 'devin-browser', name: 'Log in with browser' }],
         agentCapabilities: {
           loadSession: true,
           promptCapabilities: { image: true },
+          ...(extension === 'inject'
+            ? { session: { inject: { modes: ['queue', 'steer'] } } }
+            : {}),
         },
+        ...(extension === 'steering' || extension === 'steering-lie'
+          ? { _meta: { steering: { supported: true } } }
+          : {}),
       } });
+      continue;
+    }
+    if (message.method === '_session/steering') {
+      log('_session/steering ' + (message.params.prompt?.[0]?.text ?? ''));
+      if (options.steeringExtension === 'steering-lie') {
+        send({ jsonrpc: '2.0', id: message.id, error: {
+          code: -32601, message: 'Method not found',
+        } });
+        continue;
+      }
+      send({ jsonrpc: '2.0', id: message.id, result: {
+        status: options.steerAsNewTurn ? 'startedNewTurn' : 'injected',
+      } });
+      continue;
+    }
+    if (message.method === 'session/inject') {
+      log('session/inject ' + (message.params.prompt?.[0]?.text ?? ''));
+      send({ jsonrpc: '2.0', id: message.id, result: { messageId: 'imsg-1' } });
       continue;
     }
     if (message.method === 'authenticate') {

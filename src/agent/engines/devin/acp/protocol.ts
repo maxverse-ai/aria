@@ -29,6 +29,7 @@ export interface DevinInitializeResult {
     promptCapabilities?: { image?: boolean };
     sessionCapabilities?: { list?: unknown };
   };
+  _meta?: Record<string, unknown>;
 }
 
 export interface DevinSessionResult {
@@ -184,4 +185,51 @@ export function extractUserMessageId(result: unknown): string | undefined {
   return typeof nested?.userMessageId === 'string' && nested.userMessageId
     ? nested.userMessageId
     : undefined;
+}
+
+export type DevinSteeringMethod = 'session/inject' | '_session/steering';
+
+/**
+ * Negotiated steering advertised in `initialize`. `session/inject` (ACP RFD
+ * #1261, `session.inject.modes` containing 'steer') outranks the de-facto
+ * `_session/steering` extension (`_meta.steering.supported`): inject carries
+ * explicit modes and an agent-owned messageId. Nothing advertised means the
+ * caller falls back to prompt-merge.
+ */
+export function negotiatedSteeringMethod(
+  result: DevinInitializeResult | undefined,
+): DevinSteeringMethod | undefined {
+  if (!result) return;
+  if (steeringInjectModes(result).includes('steer')) return 'session/inject';
+  const meta = isRecord(result._meta) ? result._meta : undefined;
+  const steering = meta?.steering;
+  if (steering === true) return '_session/steering';
+  if (isRecord(steering) && steering.supported === true) return '_session/steering';
+  return;
+}
+
+/**
+ * Tolerates the capability living under `agentCapabilities.session.inject`,
+ * `agentCapabilities['session.inject']`, or `_meta['session.inject']` — the
+ * RFD predates a settled wire location.
+ */
+function steeringInjectModes(result: DevinInitializeResult): readonly string[] {
+  const caps = isRecord(result.agentCapabilities)
+    ? result.agentCapabilities as Record<string, unknown>
+    : undefined;
+  const meta = isRecord(result._meta) ? result._meta : undefined;
+  const candidates = [
+    isRecord(caps?.session) ? caps.session : undefined,
+    caps?.['session.inject'],
+    meta?.['session.inject'],
+    meta?.inject,
+  ];
+  for (const candidate of candidates) {
+    const record = isRecord(candidate) ? candidate : undefined;
+    const modes = record?.modes ?? (isRecord(record?.inject) ? record.inject.modes : undefined);
+    if (Array.isArray(modes) && modes.some((mode) => typeof mode === 'string')) {
+      return modes.filter((mode): mode is string => typeof mode === 'string');
+    }
+  }
+  return [];
 }

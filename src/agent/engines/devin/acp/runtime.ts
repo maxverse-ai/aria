@@ -36,11 +36,13 @@ import {
   extractUserMessageId,
   findConfigOption,
   isRecord,
+  negotiatedSteeringMethod,
   type DevinJsonRpcNotification,
   type DevinJsonRpcRequest,
   type DevinPromptResult,
   type DevinSessionResult,
   type DevinSessionUpdateParams,
+  type DevinSteeringMethod,
 } from './protocol';
 import { resolveDevinApiKey, startDevinAcp } from './process';
 
@@ -243,6 +245,17 @@ const DEVIN_STEERING_SUPPORT: AgentSteeringSupport = {
 };
 
 /**
+ * A negotiated steering RPC (`session/inject` or `_session/steering`) gets a
+ * real response, so delivery evidence is confirmed rather than inferred.
+ */
+const DEVIN_STEERING_EXTENSION_SUPPORT: AgentSteeringSupport = {
+  mode: 'direct',
+  textOnly: true,
+  mechanism: 'acp-extension',
+  delivery: 'confirmed',
+};
+
+/**
  * A merged session/prompt only resolves when a turn completes, so a refused
  * steer is told apart from an absorbed one by timing: a protocol error lands
  * immediately, while silence within this window means the engine took it.
@@ -305,8 +318,22 @@ export class DevinAgentRun implements AgentRun {
   }
 
   get steering(): AgentSteeringSupport | undefined {
-    if (!this.client?.initializeResult || this.runtime.steeringDisabled) return;
+    const initializeResult = this.client?.initializeResult;
+    if (!initializeResult || this.runtime.steeringDisabled) return;
+    if (this.steeringMethod(this.client)) return DEVIN_STEERING_EXTENSION_SUPPORT;
     return DEVIN_STEERING_SUPPORT;
+  }
+
+  /**
+   * Negotiated capability is trusted only until the wire contradicts it: an
+   * extension that answers -32601 was advertised but not implemented, so
+   * subsequent steers fall back to prompt-merge for this run.
+   */
+  private extensionSteeringRefused = false;
+
+  private steeringMethod(client: DevinAcpClient | undefined): DevinSteeringMethod | undefined {
+    if (!client || this.extensionSteeringRefused) return;
+    return negotiatedSteeringMethod(client.initializeResult);
   }
 
   steer(request: AgentSteeringRequest): Promise<AgentSteeringOutcome> {
@@ -344,6 +371,11 @@ export class DevinAgentRun implements AgentRun {
       return { kind: 'deferred', reason: 'turn-not-ready' };
     }
 
+    const method = this.steeringMethod(client);
+    if (method) {
+      return this.performSteerExtension(request, method, client, sessionId);
+    }
+
     const attempt = client.request<DevinPromptResult>('session/prompt', {
       sessionId,
       prompt: [{ type: 'text', text: request.prompt }],
@@ -372,6 +404,52 @@ export class DevinAgentRun implements AgentRun {
         );
       }),
     ]);
+  }
+
+  /**
+   * Negotiated steering path: unlike prompt-merge the RPC answers directly,
+   * so the response itself is the delivery evidence. `session/inject`
+   * (RFD #1261) takes a mode and returns an agent-owned messageId;
+   * `_session/steering` reports `injected` / `startedNewTurn`. Both map onto
+   * the same insertion classification, recorded immediately so the stream
+   * emits steer_delivery without waiting for the turn to end.
+   */
+  private async performSteerExtension(
+    request: AgentSteeringRequest,
+    method: DevinSteeringMethod,
+    client: DevinAcpClient,
+    sessionId: string,
+  ): Promise<AgentSteeringOutcome> {
+    try {
+      const params: Record<string, unknown> = {
+        sessionId,
+        prompt: [{ type: 'text', text: request.prompt }],
+      };
+      if (method === 'session/inject') params.mode = 'steer';
+      const result = await client.request<unknown>(method, params);
+      const insertion = classifyExtensionSteerResult(result);
+      this.steerDeliveries.push({ requestId: request.requestId, insertion });
+      this.queue?.push({ type: 'steer-delivery' });
+      log.info('devin-acp', 'steer-delivered', {
+        requestId: request.requestId,
+        method,
+        insertion,
+      });
+      return { kind: 'accepted', runId: this.runId, insertion };
+    } catch (error) {
+      if (error instanceof DevinRpcError && error.code === -32601) {
+        this.extensionSteeringRefused = true;
+        log.warn('devin-acp', 'steer-extension-refused', {
+          requestId: request.requestId,
+          method,
+        });
+      }
+      // Mirror the prompt-merge contract: a refused steer reports failure
+      // both as the outcome and as a steer_delivery record.
+      this.steerDeliveries.push({ requestId: request.requestId, insertion: 'failed' });
+      this.queue?.push({ type: 'steer-delivery' });
+      return steerErrorOutcome(error);
+    }
   }
 
   private onSteerSettled(requestId: string, result: DevinPromptResult | Error): void {
@@ -546,6 +624,10 @@ export class DevinAgentRun implements AgentRun {
         if (signal.type === 'closed') {
           this.turnClosing = true;
           for (const event of messages.finish(false)) yield event;
+          this.flushOrphanedSteers();
+          for (const delivery of this.takeSteerDeliveries()) {
+            yield { type: 'steer_delivery', ...delivery };
+          }
           yield {
             type: 'error',
             message: signal.error.message,
@@ -751,6 +833,27 @@ function steerErrorOutcome(error: unknown): AgentSteeringOutcome {
     message: error instanceof Error ? error.message : String(error),
     retryable: true,
   };
+}
+
+/**
+ * `_session/steering` reports `injected` / `startedNewTurn`; `session/inject`
+ * in steer mode returns an agent-owned messageId with no status field. Any
+ * explicit new-turn/queued status maps to as-new-turn; a bare success means
+ * the engine took the input into the active turn.
+ */
+function classifyExtensionSteerResult(result: unknown): AgentSteeringInsertion {
+  if (isRecord(result)) {
+    const status = [result.status, result.outcome, result.insertion, result.kind]
+      .find((value): value is string => typeof value === 'string');
+    if (status) {
+      const normalized = status.toLowerCase();
+      if (normalized.includes('new') || normalized.includes('queue')) {
+        return 'as-new-turn';
+      }
+      return 'into-active-turn';
+    }
+  }
+  return 'into-active-turn';
 }
 
 function isCancelled(error: Error): boolean {
