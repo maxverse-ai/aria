@@ -521,6 +521,7 @@ Per engine, today and forward:
 | --- | --- | --- | --- |
 | Codex | `turn/steer` (native) | confirmed — turn id returned | deferred → auto-flush |
 | Devin | `session/prompt` merge | inferred — `userMessageId` comparison | deferred → auto-flush; mailbox last |
+| Claude/Kimi | stdio user-line push (`--input-format stream-json`) | none — echo observed but never relied on; post-tool gate defers | deferred → auto-flush |
 | Grok | existing stdio path | per implementation | deferred → auto-flush |
 | Future ACP engine | `session/inject` > `_session/steering` > prompt-merge | explicit `messageId` | deferred → auto-flush |
 
