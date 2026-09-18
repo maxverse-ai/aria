@@ -290,7 +290,7 @@ describe('agent-aware resume commands', () => {
     expect(JSON.stringify(lastContent(h.channel))).toContain('当前推理配置：`high`');
     expect(JSON.stringify(lastContent(h.channel))).toContain('xhigh');
 
-    await expect(h.run('/models')).resolves.toBe(true);
+    await expect(h.run('/model')).resolves.toBe(true);
     expect(JSON.stringify(lastContent(h.channel))).toContain('gpt-runtime');
   });
 
@@ -365,7 +365,7 @@ describe('agent-aware resume commands', () => {
       },
     }];
 
-    await expect(h.run('/models')).resolves.toBe(true);
+    await expect(h.run('/model')).resolves.toBe(true);
     expect(h.channel.sent).toHaveLength(0);
     expect(JSON.stringify(lastContent(h.controlChannel))).toContain('gpt-control-test');
 
@@ -432,11 +432,11 @@ describe('agent-aware resume commands', () => {
   it('updates one models card from loading to switch success without sending another card', async () => {
     const h = await createHarness('claude');
 
-    await expect(h.run('/models')).resolves.toBe(true);
+    await expect(h.run('/model')).resolves.toBe(true);
     expect(h.channel.sent).toHaveLength(1);
 
     await expect(
-      h.dispatchCard({ cmd: 'models.use', arg: 'claude-sonnet-4-6' }, 'om_fake_1'),
+      h.dispatchCard({ cmd: 'model.use', arg: 'claude-sonnet-4-6' }, 'om_fake_1'),
     ).resolves.toBeUndefined();
     await waitForCardActions();
     const updates = h.channel.rawClient.requests.filter(

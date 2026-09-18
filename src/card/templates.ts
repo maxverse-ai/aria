@@ -282,7 +282,7 @@ export function modelsCard(options: ModelOption[], current: string): object {
         actions([
           {
             text: '使用该模型',
-            value: { cmd: 'models.use', arg: option.value },
+            value: { cmd: 'model.use', arg: option.value },
             style: 'primary',
           },
         ]),
@@ -291,7 +291,7 @@ export function modelsCard(options: ModelOption[], current: string): object {
     if (i < options.length - 1) elements.push(HR);
   });
   elements.push(HR);
-  elements.push(actions([{ text: '刷新模型列表', value: { cmd: 'models.refresh' } }]));
+  elements.push(actions([{ text: '刷新模型列表', value: { cmd: 'model.refresh' } }]));
   return shell('🧠 模型管理', elements);
 }
 
@@ -303,7 +303,7 @@ export function modelSwitchSuccessCard(model: string, reasoning = 'default'): ob
       + '新配置将从下一条消息开始生效。',
     ),
     HR,
-    actions([{ text: '继续选择模型', value: { cmd: 'models.refresh' } }]),
+    actions([{ text: '继续选择模型', value: { cmd: 'model.refresh' } }]),
   ]);
 }
 
@@ -421,7 +421,7 @@ export function helpCard(agentName = 'Agent', team = false): object {
       '- `/new [任务]` — 在当前会话开始新的上下文',
       '- `/resume [N]` — 查看并恢复当前授权范围内的会话',
       '- `/status` — 查看当前会话状态',
-      '- `/models` — 查看当前可用模型',
+      '- `/model` — 查看当前可用模型',
       '- `/stop` — 停止当前会话的任务',
       '',
       '只有你和 Bot 的群可以与私聊共享工作区，群聊仍不能发起用户授权。',
@@ -447,7 +447,7 @@ export function helpCard(agentName = 'Agent', team = false): object {
         '- `/account` — 查看当前应用；`/account change` 换 appId/secret 并重连',
         '- `/config` — 调整偏好、访问控制和 lark-cli 身份策略',
         '- `/agent` — 查看并切换该 profile 使用的引擎',
-        '- `/models` — 查看并选择模型',
+        '- `/model` — 查看并选择模型',
         '- `/effort` — 查看并选择推理强度',
         '- `/goal` — 查看或设置当前会话的长期目标（Codex，默认暂停）',
         '- `/loop [--max <n>] <任务>` — 同一任务循环跑多轮，每轮独立回复；`/loop stop` 停止（管理员）',

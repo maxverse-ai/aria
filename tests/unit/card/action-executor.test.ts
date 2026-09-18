@@ -45,8 +45,8 @@ describe('Card Action Executor', () => {
       order.push('second');
     };
 
-    await executeCardAction({ action: 'models.refresh', key: 'chat:card-serial', task: first });
-    await executeCardAction({ action: 'models.use', key: 'chat:card-serial', task: second });
+    await executeCardAction({ action: 'model.refresh', key: 'chat:card-serial', task: first });
+    await executeCardAction({ action: 'model.use', key: 'chat:card-serial', task: second });
     await vi.waitFor(() => expect(order).toEqual(['first-start']));
     finishFirst();
     await waitForCardActions();

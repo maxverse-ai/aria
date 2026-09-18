@@ -309,7 +309,7 @@ const handlers: Record<string, Handler> = {
   '/ws': handleWs,
   '/resume': handleResume,
   '/agent': handleAgent,
-  '/models': handleModels,
+  '/model': handleModels,
   '/effort': handleEffort,
   '/fast': handleFast,
   '/status': handleStatus,
@@ -1896,7 +1896,7 @@ async function listEngineResumeHistory(
 function spaceCommandSupported(command: string, args: string): boolean {
   if (command === '/new' && (args.trim() === 'chat' || args.trim().startsWith('chat '))) return false;
   return ['/help', '/new', '/task', '/stop', '/resume', '/status'].includes(command)
-    || (command === '/models' && (!args.trim() || args.trim() === 'refresh'));
+    || (command === '/model' && (!args.trim() || args.trim() === 'refresh'));
 }
 
 /** Test seams: allow harnesses to inject fake histories per engine id. */

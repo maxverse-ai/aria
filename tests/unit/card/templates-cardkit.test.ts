@@ -104,7 +104,7 @@ describe('command card templates', () => {
     const rendered = JSON.stringify(card);
     expect(rendered).toContain('已切换到模型');
     expect(rendered).toContain('gpt-5.6-sol');
-    expect(rendered).toContain('models.refresh');
+    expect(rendered).toContain('model.refresh');
   });
 
   it('shows supported but missing agents and disables their switch button', () => {

@@ -341,7 +341,7 @@ Supervisor 重启会恢复明确要求运行的 profile，主动停止的保持�
 | `/resume` | 恢复同 agent、工作目录、权限模式兼容的历史会话 |
 | `/status` | 查看 profile、agent、工作目录、会话、lark-cli 身份和运行状态 |
 | `/agent` | 切换该 profile 使用的引擎，先让当前 run 结束再切换 |
-| `/models` | 查看并选择模型 |
+| `/model` | 查看并选择模型 |
 | `/effort` | 查看并选择推理强度 |
 | `/goal [目标] [--budget <tokens>]`, `/goal resume --budget <tokens>`, `/goal pause\|clear` | 查看、设置、暂停或清除当前会话的 Codex 长期目标。新目标默认为暂停；`resume` 开启自动推进且必须给预算上限，每一轮的结果会发到本会话 |
 | `/loop [--max <n>] <任务>`, `/loop status`, `/loop stop` | 把同一任务在每轮 run 结束后重新提交，引擎无关（默认 10 轮、上限 100；启动需管理员）。每轮独立回复，`/stop` 或 `/new` 会结束 loop，未正常结束的 run 也会让 loop 停下 |

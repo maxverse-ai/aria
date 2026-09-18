@@ -102,7 +102,7 @@ Signed actor envelopes and replay protection are not shipped.
 | Individual settings | registered `config.*.set` commands | staged CLI | `live` or `reconnect` |
 | Preference forms | `profile.preferences.update`, `profile.settings.update`, `profile.settings.update-reconnect` | `/config`, Web | `live` or `reconnect` |
 | Access and account | `profile.access.update`, `profile.account.update` | Feishu, Web | `live` or `reconnect` |
-| Model and reasoning | `profile.model.update`, `profile.reasoning.update` | `/models`, `/effort` | `live` |
+| Model and reasoning | `profile.model.update`, `profile.reasoning.update` | `/model`, `/effort` | `live` |
 | Engine | `profile.engine.update` | `/agent` | `engine-switch` |
 | Profile lifecycle | `profile.activate`, `profile.create`, `profile.archive`, `profile.purge` | CLI; Web create/activate | `none` plus lifecycle saga/projection |
 

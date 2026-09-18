@@ -356,7 +356,7 @@ If a profile was created with the wrong agent kind, stop or unregister any match
 | `/resume` | Resume compatible history for the same agent, working directory, and permission mode |
 | `/status` | Show profile, agent, working directory, session, lark-cli identity, and run state |
 | `/agent` | Switch the engine this profile runs, staged so the current run finishes first |
-| `/models` | Inspect and select the model |
+| `/model` | Inspect and select the model |
 | `/effort` | Inspect and select the reasoning effort |
 | `/goal [objective] [--budget <tokens>]`, `/goal resume --budget <tokens>`, `/goal pause\|clear` | Show, set, pause, or clear the session's Codex goal. A new goal starts paused; `resume` starts automatic continuation and needs a spend ceiling, and each continuation turn's answer is posted to this conversation |
 | `/loop [--max <n>] <task>`, `/loop status`, `/loop stop` | Re-submit the same task as consecutive runs after each one finishes — engine-agnostic (default 10 iterations, capped at 100; admin only to start). Each round posts its own reply, `/stop` or `/new` ends the loop, and a run that does not finish cleanly stops it |
