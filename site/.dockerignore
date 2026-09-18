@@ -1,0 +1,4 @@
+node_modules
+.next/cache
+content
+lib/generated
