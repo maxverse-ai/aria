@@ -44,6 +44,26 @@
   Read it before absorbing private changes, syncing `vendor/aria`, or
   re-attributing commit history.
 
+## Steering
+
+- [docs/STEERING.md](docs/STEERING.md) is the single source of truth for
+  mid-turn steering; update it and `docs/STEERING.zh.md` together with any
+  change that alters behavior. Do not fork the design into code comments.
+- Steer dispatch keys on `AgentSteeringSupport.delivery`, never on engine
+  names: `confirmed`/`inferred` transports push the body directly; `none`
+  (claude/kimi stdio-push) takes the two-envelope notice+pull mailbox in
+  `src/conversation/steer-mailbox.ts`.
+- A `<steer_notice>` is content-free — metadata plus the pull command, never
+  the body. Bodies live in `<profileDir>/inbox/<scope>/` under a
+  pending → noticed → pulled|swept|dropped lifecycle with a 30-minute TTL.
+- A noticed body must never be dropped silently: the host sweeps anything
+  still unread into the next turn's prompt. Keep that reconcile path intact
+  when touching `runAgentBatch` or the follow-up merge.
+- A pulled body lands as a tool result, not a user message — Aria owns no
+  code inside the engine loop. The bridge system prompt carries the honesty
+  contract (deferral is legal and must be reported; silent discard is not);
+  keep it in sync with mailbox behavior.
+
 ## Documentation
 
 - [docs/DOCUMENTATION_POLICY.md](docs/DOCUMENTATION_POLICY.md) owns how documents
