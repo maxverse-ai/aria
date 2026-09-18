@@ -1,6 +1,14 @@
-// Generates site/content/docs/ from ../docs/*.md so the repository's docs
-// directory stays the single source of truth. Re-run on every dev/build via
-// the chained `sync-docs` step in package.json scripts.
+// Generates site/content/docs/ and site/content/blog/ from ../docs so the
+// repository's docs directory stays the single source of truth. Re-run on
+// every dev/build via the chained `sync-docs` step in package.json scripts.
+//
+// Publishing rules (dynamic, driven by docs/DOCUMENTATION_POLICY.md):
+//   - top-level docs publish only when their `> Status:` role is `current`
+//     and the filename is not an internal class (ledger, plan, handoff,
+//     implementation/phase/completion records, release-linux-*).
+//   - `NAME.<locale>.md` is the localized variant of `NAME.md`
+//     (e.g. STEERING.zh.md -> steering.zh.mdx).
+//   - docs/releases/** and docs/blog/** become the /blog collection.
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -8,9 +16,25 @@ import { fileURLToPath } from 'node:url';
 const siteDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const repoRoot = path.resolve(siteDir, '..');
 const docsDir = path.join(repoRoot, 'docs');
-const outDir = path.join(siteDir, 'content', 'docs');
+const outDocsDir = path.join(siteDir, 'content', 'docs');
+const outBlogDir = path.join(siteDir, 'content', 'blog');
 const generatedDir = path.join(siteDir, 'lib', 'generated');
 const GITHUB = 'https://github.com/maxverse-ai/aria';
+
+// Non-default content locales. Keep in sync with site/lib/i18n.ts.
+const LOCALES = ['zh'];
+const DEFAULT_LOCALE = 'en';
+const BLOG_DIRS = new Set(['releases', 'blog']);
+
+// Filename classes that DOCUMENTATION_POLICY.md reserves for internal or
+// historical material. Matching files never reach the public site, even if
+// their status header is wrong.
+const INTERNAL_STEM = [
+  /^bug-ledger$/i,
+  /^release-linux-/i,
+  /[-_](DELIVERY_PLAN|HANDOFF|IMPLEMENTATION|COMPLETION)$/i,
+  /[-_]PHASE\d+$/i,
+];
 
 function slugSegment(name) {
   return name
@@ -26,6 +50,23 @@ function slugPath(rel) {
     .split('/')
     .map((seg) => slugSegment(seg))
     .join('/');
+}
+
+// "NAME.zh.md" -> { stem: "NAME", locale: "zh" }; "NAME.md" -> { stem, locale: null }
+function splitLocale(fileName) {
+  const base = fileName.replace(/\.md$/, '');
+  const idx = base.lastIndexOf('.');
+  if (idx > 0) {
+    const candidate = base.slice(idx + 1);
+    if (LOCALES.includes(candidate)) {
+      return { stem: base.slice(0, idx), locale: candidate };
+    }
+  }
+  return { stem: base, locale: null };
+}
+
+function isInternalStem(stem) {
+  return INTERNAL_STEM.some((re) => re.test(stem));
 }
 
 function walk(dir, base = dir) {
@@ -49,10 +90,21 @@ function statusRole(statusLine) {
   return statusLine.split(/\s+[—–-]\s+/)[0].trim().toLowerCase();
 }
 
+function firstParagraph(body) {
+  const m = body.match(/^(?!#|>|\s*$)([^\n].+)$/m);
+  if (!m) return null;
+  const text = m[1].replace(/\[([^\]]+)\]\([^)]+\)/g, '$1').replace(/[*_`]/g, '');
+  return text.length <= 160 ? text : text.slice(0, 160).replace(/\s\S*$/, '') + '…';
+}
+
 // Fence languages that the bundled Shiki config cannot highlight.
 const UNSUPPORTED_FENCE_LANGS = new Set(['caddyfile']);
 
-function rewriteLinks(body, srcAbs, warnings) {
+// Rewritten once the publish sets below are known.
+let publishedEn = new Set();
+let publishedZh = new Set();
+
+function rewriteLinks(body, srcAbs, srcLocale, selfSlug, collection, warnings) {
   // Transform only outside fenced code blocks.
   const parts = body.split(/(^```[\s\S]*?^```\s*$)/m);
   const srcDir = path.dirname(srcAbs);
@@ -76,8 +128,39 @@ function rewriteLinks(body, srcAbs, warnings) {
         const abs = path.resolve(srcDir, decoded);
         const relToDocs = path.relative(docsDir, abs).split(path.sep).join('/');
         if (!relToDocs.startsWith('..') && decoded.endsWith('.md')) {
-          const slug = slugPath(relToDocs.replace(/\.md$/, ''));
-          return `](/docs/${slug}${frag ? `#${frag}` : ''})`;
+          const top = relToDocs.split('/')[0];
+          if (BLOG_DIRS.has(top)) {
+            // Links into release notes / blog entries resolve to /blog.
+            const relNoExt = relToDocs.slice(top.length + 1).replace(/\.md$/, '');
+            const relStem = path.join(
+              path.dirname(relNoExt),
+              splitLocale(path.basename(relNoExt)).stem,
+            );
+            const bSlug = slugPath(relStem.split(path.sep).join('/'));
+            return `](/blog/${bSlug}${frag ? `#${frag}` : ''})`;
+          }
+          const { stem, locale: tLocale } = splitLocale(path.basename(relToDocs));
+          const tSlug = slugPath(
+            path.join(path.dirname(relToDocs), stem).split(path.sep).join('/'),
+          );
+          const suffix = frag ? `#${frag}` : '';
+          if (tLocale && tLocale !== DEFAULT_LOCALE) {
+            // Explicit link to a localized file, e.g. STEERING.zh.md.
+            if (publishedZh.has(tSlug)) return `](/${tLocale}/docs/${tSlug}${suffix})`;
+            if (publishedEn.has(tSlug)) return `](/docs/${tSlug}${suffix})`;
+          } else if (srcLocale === 'zh') {
+            // A localized file referencing its own default-locale source
+            // (e.g. STEERING.zh.md -> STEERING.md) means "the English
+            // version", not a self-link.
+            if (tSlug === selfSlug && publishedEn.has(tSlug))
+              return `](/docs/${tSlug}${suffix})`;
+            if (publishedZh.has(tSlug) || publishedEn.has(tSlug))
+              return `](/zh/docs/${tSlug}${suffix})`;
+          } else {
+            if (publishedEn.has(tSlug)) return `](/docs/${tSlug}${suffix})`;
+            if (publishedZh.has(tSlug)) return `](/zh/docs/${tSlug}${suffix})`;
+          }
+          // Unpublished doc: fall through to a GitHub link.
         }
         if (fs.existsSync(abs)) {
           const relToRepo = path.relative(repoRoot, abs).split(path.sep).join('/');
@@ -91,53 +174,117 @@ function rewriteLinks(body, srcAbs, warnings) {
     .join('');
 }
 
-const files = walk(docsDir);
-const warnings = [];
-const pages = []; // { rel, outRel, slug, title, role }
-const sourceMap = {}; // slugs.join('/') -> repo-relative source path
-
-fs.rmSync(outDir, { recursive: true, force: true });
-
-for (const rel of files) {
-  const srcAbs = path.join(docsDir, rel);
+function renderFile(srcAbs, srcLocale, selfSlug, collection, warnings) {
   const raw = fs.readFileSync(srcAbs, 'utf8');
-
-  let title = firstMatch(raw, /^#\s+(.+)$/m) ?? rel.replace(/\.md$/, '');
+  let title = firstMatch(raw, /^#\s+(.+)$/m) ?? path.basename(srcAbs, '.md');
   title = title.replace(/^Archived:\s*/i, '');
   const statusLine = firstMatch(raw, /^>\s*Status:\s*(.+)$/m);
   const role = statusRole(statusLine);
 
   // Drop the first H1 — DocsTitle renders the frontmatter title instead.
   const body = raw.replace(/^#\s+.+\n+/, '');
-  const transformed = rewriteLinks(body, srcAbs, warnings);
+  const transformed = rewriteLinks(
+    body,
+    srcAbs,
+    srcLocale,
+    selfSlug,
+    collection,
+    warnings,
+  );
 
-  const outRel = slugPath(rel.replace(/\.md$/, '')) + '.mdx';
-  const slug = outRel.replace(/\.mdx$/, '');
   const description = statusLine
     ? statusLine.length <= 140
       ? statusLine
       : statusLine.slice(0, 140).replace(/\s\S*$/, '') + '…'
-    : null;
+    : firstParagraph(transformed);
 
   const frontmatter =
     [
       '---',
       `title: ${JSON.stringify(title)}`,
-      description ? `description: ${JSON.stringify(`Status: ${description}`)}` : null,
+      description
+        ? `description: ${JSON.stringify(statusLine ? `Status: ${description}` : description)}`
+        : null,
       '---',
     ]
       .filter(Boolean)
       .join('\n') + '\n\n';
 
-  const outAbs = path.join(outDir, outRel);
-  fs.mkdirSync(path.dirname(outAbs), { recursive: true });
-  fs.writeFileSync(outAbs, frontmatter + transformed);
-  pages.push({ rel, outRel, slug, title, role });
-  sourceMap[slug] = `docs/${rel}`;
+  return { title, role, statusLine, mdx: frontmatter + transformed };
 }
 
-// Landing page for /docs.
-const landing = `---
+const files = walk(docsDir);
+const warnings = [];
+
+// ---------- pass 1: classify + decide what gets published ----------
+const docEntries = []; // { rel, stem, locale, slug, role, title, publish }
+const blogEntries = []; // { rel, stem, locale, slug, title, sortKey, date }
+
+function relSlug(rel) {
+  // rel like "sub/dir/NAME[.<locale>].md" -> "sub/dir/name"
+  const noExt = rel.replace(/\.md$/, '');
+  const { stem } = splitLocale(path.basename(noExt));
+  const dir = path.dirname(noExt);
+  return slugPath(dir === '.' ? stem : `${dir}/${stem}`);
+}
+
+for (const rel of files) {
+  const srcAbs = path.join(docsDir, rel);
+  const raw = fs.readFileSync(srcAbs, 'utf8');
+  const top = rel.includes('/') ? rel.split('/')[0] : null;
+  const { stem, locale } = splitLocale(path.basename(rel));
+
+  let title = firstMatch(raw, /^#\s+(.+)$/m) ?? stem;
+  title = title.replace(/^Archived:\s*/i, '');
+  const statusLine = firstMatch(raw, /^>\s*Status:\s*(.+)$/m);
+  const role = statusRole(statusLine);
+
+  if (top && BLOG_DIRS.has(top)) {
+    // Blog slugs drop the collection dir: docs/releases/v0.4.0.md -> /blog/v0-4-0.
+    blogEntries.push({ rel, stem, locale, slug: relSlug(rel.slice(top.length + 1)), title });
+    continue;
+  }
+
+  const slug = relSlug(rel);
+  const archivedTitle = /^Archived:/i.test(firstMatch(raw, /^#\s+(.+)$/m) ?? '');
+  const publish =
+    role === 'current' && !archivedTitle && !isInternalStem(stem) && slug !== 'index';
+  docEntries.push({ rel, stem, locale, slug, role, title, publish });
+}
+
+for (const e of docEntries) {
+  if (!e.publish) continue;
+  (e.locale === 'zh' ? publishedZh : publishedEn).add(e.slug);
+}
+
+// ---------- pass 2: emit ----------
+fs.rmSync(outDocsDir, { recursive: true, force: true });
+fs.rmSync(outBlogDir, { recursive: true, force: true });
+
+const sourceMap = {}; // "<locale>:<slug>" or "<slug>" -> repo-relative source path
+const publishedPages = []; // docEntries where publish
+
+for (const e of docEntries) {
+  if (!e.publish) continue;
+  const { mdx, title } = renderFile(
+    path.join(docsDir, e.rel),
+    e.locale ?? DEFAULT_LOCALE,
+    e.slug,
+    'docs',
+    warnings,
+  );
+  const outRel = e.locale ? `${e.slug}.${e.locale}.mdx` : `${e.slug}.mdx`;
+  const outAbs = path.join(outDocsDir, outRel);
+  fs.mkdirSync(path.dirname(outAbs), { recursive: true });
+  fs.writeFileSync(outAbs, mdx);
+  publishedPages.push({ ...e, title });
+  const key = e.locale ? `${e.locale}:${e.slug}` : e.slug;
+  sourceMap[key] = `docs/${e.rel}`;
+  if (e.locale && !sourceMap[e.slug]) sourceMap[e.slug] = `docs/${e.rel}`;
+}
+
+// Landing pages for /docs (per locale).
+const landingEn = `---
 title: Aria Documentation
 description: A local-first control plane for coding agents — chat is the remote control, not the compute plane.
 ---
@@ -154,40 +301,108 @@ single source of truth.
   <Card title="Steering" href="/docs/steering" />
 </Cards>
 `;
-fs.writeFileSync(path.join(outDir, 'index.mdx'), landing);
+const landingZh = `---
+title: Aria 文档
+description: 本地优先的编码智能体控制平面 —— 聊天是遥控器，而不是计算平面。
+---
+
+Aria 把聊天界面变成运行在你自己机器上的编码智能体的交互入口。这些页面由
+Aria 仓库中的 [\`docs/\`](${GITHUB}/tree/main/docs) 生成，仓库仍是唯一事实来源。
+
+<Cards>
+  <Card title="管理控制平面" href="/zh/docs/control-plane" />
+  <Card title="智能体运行时架构" href="/zh/docs/agent-runtime-architecture" />
+  <Card title="频道插件 ABI" href="/zh/docs/channel-plugin-abi-v1" />
+  <Card title="转向（Steering）" href="/zh/docs/steering" />
+</Cards>
+`;
+fs.mkdirSync(outDocsDir, { recursive: true });
+fs.writeFileSync(path.join(outDocsDir, 'index.mdx'), landingEn);
+fs.writeFileSync(path.join(outDocsDir, 'index.zh.mdx'), landingZh);
 sourceMap['index'] = 'docs';
+sourceMap['zh:index'] = 'docs';
 
-// Navigation: group pages by documentation role (see docs/DOCUMENTATION_POLICY.md).
-const top = pages.filter((p) => !p.slug.includes('/'));
-const releases = pages.filter((p) => p.slug.startsWith('releases/'));
+// Navigation: only published (current) docs, alphabetical by title.
 const byTitle = (a, b) => a.title.localeCompare(b.title);
-const bucket = (role) => top.filter((p) => p.role === role).sort(byTitle);
-
-const pageList = ['index'];
-const groups = [
-  ['---Guides & Specs---', top.filter((p) => !['in progress', 'historical', 'archived'].includes(p.role)).sort(byTitle)],
-  ['---Active Plans---', bucket('in progress')],
-  ['---History---', top.filter((p) => ['historical', 'archived'].includes(p.role)).sort(byTitle)],
+const pageList = [
+  'index',
+  ...publishedPages.filter((p) => !p.locale).sort(byTitle).map((p) => p.slug),
 ];
-for (const [sep, group] of groups) {
-  if (group.length === 0) continue;
-  pageList.push(sep, ...group.map((p) => p.slug));
-}
-if (releases.length > 0) pageList.push('releases');
-
 fs.writeFileSync(
-  path.join(outDir, 'meta.json'),
+  path.join(outDocsDir, 'meta.json'),
   JSON.stringify({ title: 'Aria Docs', pages: pageList }, null, 2) + '\n',
 );
+// Localized meta inherits the same ordering; only the display title differs.
+fs.writeFileSync(
+  path.join(outDocsDir, 'meta.zh.json'),
+  JSON.stringify({ title: 'Aria 文档', pages: pageList }, null, 2) + '\n',
+);
 
-if (releases.length > 0) {
-  const relPages = releases
-    .map((p) => p.slug.split('/').pop())
-    .sort()
-    .reverse();
+// ---------- blog ----------
+function blogSortKey(stem) {
+  const dateMatch = stem.match(/(\d{4})-(\d{2})-(\d{2})/);
+  if (dateMatch) return { date: dateMatch[0], key: Date.parse(dateMatch[0]) };
+  const verMatch = stem.match(/^v?(\d+)\.(\d+)(?:\.(\d+))?/i);
+  if (verMatch)
+    return {
+      date: null,
+      key:
+        Number(verMatch[1]) * 1e6 +
+        Number(verMatch[2]) * 1e3 +
+        Number(verMatch[3] ?? 0),
+    };
+  return { date: null, key: 0 };
+}
+
+const blogIndex = []; // canonical (default-locale) entries, newest first
+for (const e of blogEntries) {
+  const { mdx, title } = renderFile(
+    path.join(docsDir, e.rel),
+    e.locale ?? DEFAULT_LOCALE,
+    e.slug,
+    'blog',
+    warnings,
+  );
+  const outRel = e.locale ? `${e.slug}.${e.locale}.mdx` : `${e.slug}.mdx`;
+  const outAbs = path.join(outBlogDir, outRel);
+  fs.mkdirSync(path.dirname(outAbs), { recursive: true });
+  fs.writeFileSync(outAbs, mdx);
+  const { date, key } = blogSortKey(e.stem);
+  const slugPathArr = e.slug.split('/');
+  const entry = { slug: slugPathArr, title, date, key, locale: e.locale ?? DEFAULT_LOCALE };
+  blogIndex.push(entry);
+  sourceMap[`blog:${e.locale ?? DEFAULT_LOCALE}:${e.slug}`] = `docs/${e.rel}`;
+  if (!e.locale) sourceMap[`blog:${e.slug}`] = `docs/${e.rel}`;
+}
+
+blogIndex.sort((a, b) => b.key - a.key || a.title.localeCompare(b.title));
+const canonicalBlog = blogIndex
+  .filter((e) => e.locale === DEFAULT_LOCALE)
+  .map(({ slug, title, date }) => ({ slug, title, date }));
+
+// Blog sidebar/navigation: newest first, same ordering as the index page.
+if (canonicalBlog.length > 0) {
   fs.writeFileSync(
-    path.join(outDir, 'releases', 'meta.json'),
-    JSON.stringify({ title: 'Release Notes', pages: relPages }, null, 2) + '\n',
+    path.join(outBlogDir, 'meta.json'),
+    JSON.stringify(
+      {
+        title: 'Blog & Release Notes',
+        pages: canonicalBlog.map((e) => e.slug.join('/')),
+      },
+      null,
+      2,
+    ) + '\n',
+  );
+  fs.writeFileSync(
+    path.join(outBlogDir, 'meta.zh.json'),
+    JSON.stringify(
+      {
+        title: '博客与发布说明',
+        pages: canonicalBlog.map((e) => e.slug.join('/')),
+      },
+      null,
+      2,
+    ) + '\n',
   );
 }
 
@@ -196,6 +411,15 @@ fs.writeFileSync(
   path.join(generatedDir, 'source-map.json'),
   JSON.stringify(sourceMap, null, 2) + '\n',
 );
+fs.writeFileSync(
+  path.join(generatedDir, 'blog-index.json'),
+  JSON.stringify(canonicalBlog, null, 2) + '\n',
+);
 
-console.log(`sync-docs: ${files.length} docs -> ${path.relative(siteDir, outDir)}`);
+const skipped = docEntries.filter((e) => !e.publish);
+console.log(
+  `sync-docs: ${publishedPages.length} docs -> ${path.relative(siteDir, outDocsDir)}, ` +
+    `${blogIndex.length} blog entries -> ${path.relative(siteDir, outBlogDir)} ` +
+    `(${skipped.length} internal docs withheld)`,
+);
 for (const w of warnings) console.warn(`  warn: ${w}`);

@@ -2,10 +2,22 @@
 
 [Fumadocs](https://fumadocs.dev) (Next.js) site that publishes the markdown
 documents in [`../docs`](../docs). The `docs/` directory remains the single
-source of truth — `scripts/sync-docs.mjs` generates `content/docs/` on every
-`dev`/`build`, rewriting in-repo links (`.md` → `/docs/<slug>`, source files →
-GitHub URLs) and grouping the sidebar by each document's `Status:` role (see
-`docs/DOCUMENTATION_POLICY.md`).
+source of truth — `scripts/sync-docs.mjs` generates `content/docs/` and
+`content/blog/` on every `dev`/`build`, rewriting in-repo links (`.md` →
+`/docs/<slug>`, source files → GitHub URLs).
+
+Publishing rules (see `docs/DOCUMENTATION_POLICY.md`):
+
+- `/docs` shows only documents whose `> Status:` role is `current` and whose
+  filename is not an internal class (ledger, delivery plan, handoff,
+  implementation/phase/completion record). Withheld documents 404 on the
+  public site but stay in the repo; links to them become GitHub URLs.
+- `docs/releases/**` and `docs/blog/**` are published under `/blog` as the
+  blog/release-notes section, newest first.
+- `NAME.md` is the English source, `NAME.<locale>.md` its translation
+  (e.g. `STEERING.zh.md` → `/zh/docs/steering`). English is the default
+  locale and stays unprefixed; Chinese lives under `/zh`. Pages without a
+  translation fall back to English content.
 
 ## Develop
 

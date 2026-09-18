@@ -26,4 +26,5 @@ yarn-error.log*
 next-env.d.ts
 # generated from ../docs (single source of truth)
 /content/docs/
+/content/blog/
 /lib/generated/
