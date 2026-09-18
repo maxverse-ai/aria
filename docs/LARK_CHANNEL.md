@@ -2,6 +2,8 @@
 
 > Status: current
 
+> 中文版：[LARK_CHANNEL.zh.md](LARK_CHANNEL.zh.md)
+
 ## Purpose
 
 Expose an Aria profile to Lark / Feishu as addressed conversation input. The

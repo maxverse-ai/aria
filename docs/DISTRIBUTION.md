@@ -2,6 +2,8 @@
 
 > Status: current
 
+> 中文版：[DISTRIBUTION.zh.md](DISTRIBUTION.zh.md)
+
 Aria's current consumer channel is a private GitHub repository. GitHub Releases
 is the package authority; npm is used only to resolve Aria's public runtime
 dependencies while installing a verified release tarball. The Aria package is

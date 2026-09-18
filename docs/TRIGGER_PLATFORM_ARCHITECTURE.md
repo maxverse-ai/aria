@@ -1,6 +1,6 @@
 # Trigger platform architecture
 
-> Status: current — proposed direction. This document defines the target architecture and progressive delivery plan; no scheduled execution behavior is shipped by this document.
+> Status: current — stages 0 through 11 are implemented and integrated into `origin/main` behind the `ARIA_TRIGGER_RUNTIME=enabled` rollout switch, which is off by default; live release deployment and host acceptance are tracked in the [delivery handoff](TRIGGER_PLATFORM_DELIVERY_HANDOFF.md).
 
 Implementation status: Stages 0 through 11 are implemented and integrated into
 `origin/main`; live release deployment and host acceptance are tracked in the

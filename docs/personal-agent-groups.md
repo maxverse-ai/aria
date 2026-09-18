@@ -2,6 +2,8 @@
 
 > Status: current
 
+> 中文版：[personal-agent-groups.zh.md](personal-agent-groups.zh.md)
+
 A personal profile managed by an Aria Supervisor automatically admits explicitly
 mentioned messages in a group with exactly one human and at least two agents when:
 

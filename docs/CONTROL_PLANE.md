@@ -2,12 +2,15 @@
 
 > Status: current — functional convergence is shipped. Public configuration changes from the CLI, Feishu cards, and the local web console use the same versioned `ManagementApi`. Remaining work is lifecycle housekeeping, durable management audit, advanced actor verification, and removal of compatibility types.
 
+> 中文版：[CONTROL_PLANE.zh.md](CONTROL_PLANE.zh.md)
+
 For an independently authenticated path-prefix deployment of the full local
 console, see [Supervisor console behind a reverse proxy](CONSOLE_REVERSE_PROXY.md).
 
 This document is the single source of truth for the current architecture and
-its remaining work. The earlier CLI-centric roadmap is archived in
-[`CLI_CONTROL_PLANE_DESIGN.md`](CLI_CONTROL_PLANE_DESIGN.md).
+its remaining work. The earlier CLI-centric roadmap was superseded when the
+Management API, adapter migration, runtime reconciliation, model/engine
+management, and profile lifecycle shipped; it is preserved in Git history.
 
 ## Data flow
 
