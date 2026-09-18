@@ -119,14 +119,15 @@ console for config, profiles, and online bots.
 
 ## Where to go next
 
-- [Management control plane](CONTROL_PLANE.md) — the versioned
-  plan/confirm/apply configuration surface behind the CLI, Feishu cards, and
-  the web console.
+- [Talk to your agent](talk-to-your-agent.md) — addressing, session commands,
+  and mid-turn follow-ups.
+- [Operate the bridge](operate-the-bridge.md) — daemon, profiles, process
+  registry, and safe config changes.
+- [Install and upgrade](install-and-upgrade.md) — `aria update`, rollback,
+  and uninstall.
+- [Troubleshooting](troubleshooting.md) — when the bot stays silent or the
+  run looks frozen.
+- [CLI reference](CLI_REFERENCE.md) — every command and flag, auto-derived
+  from the CLI source.
 - [Lark / Feishu channel](LARK_CHANNEL.md) — channel boundary, lark-cli
   identity policy, and document comments.
-- [CLI distribution architecture](DISTRIBUTION.md) — `aria update`,
-  immutable releases, and transactional rollback.
-- [Engine plugins](PLUGINS.md) — the engine contract and the built-in
-  engines.
-- [Conversation coordination](COORDINATION.md) — follow-ups, group
-  addressing, and terminal-reply freshness.

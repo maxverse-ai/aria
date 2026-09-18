@@ -111,11 +111,14 @@ aria stop
 
 ## 接下来读什么
 
-- [管理控制平面](CONTROL_PLANE.md) —— CLI、飞书卡片和 Web 控制台共用的
-  版本化 plan/confirm/apply 配置面。
-- [飞书 / Lark 渠道](LARK_CHANNEL.md) —— 渠道边界、lark-cli 身份策略和
-  云文档评论。
-- [CLI 分发架构](DISTRIBUTION.md) —— `aria update`、不可变 Release 与
-  事务化回滚。
-- [Engine Plugin](PLUGINS.md) —— 引擎契约与内置引擎。
-- [对话协调](COORDINATION.md) —— 追问、群聊寻址与最终回复的新鲜度检查。
+- [与你的智能体对话](talk-to-your-agent.zh.md) —— 寻址、会话命令与
+  运行中追问。
+- [运维 bridge](operate-the-bridge.zh.md) —— daemon、profile、进程注册表
+  与安全的配置变更。
+- [安装与升级](install-and-upgrade.zh.md) —— `aria update`、回滚与卸载。
+- [故障排查](troubleshooting.zh.md) —— bot 不回复或运行看似卡死时的
+  诊断。
+- [CLI 命令参考](CLI_REFERENCE.zh.md) —— 由 CLI 源码自动生成的全部
+  命令与参数。
+- [飞书 / Lark 渠道](LARK_CHANNEL.zh.md) —— 渠道边界、lark-cli 身份策略
+  和云文档评论。

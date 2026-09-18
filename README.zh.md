@@ -541,17 +541,45 @@ grep '"event":"enter"' ~/.aria/profiles/<profile>/logs/bridge-$(date +%Y%m%d).js
 
 ## 文档导航
 
+[文档站](https://ai.***REMOVED***dev.com/zh/docs) 发布的是同一个索引：用户指南在前，
+其次是参考，最后是工程规范。[文档政策](docs/DOCUMENTATION_POLICY.md) 定义了
+角色划分，以及每份文档都要带的状态行。
+
+### 用户指南
+
+| 需求 | 文档 |
+| --- | --- |
+| Aria 是什么、如何工作 | [Aria 是什么](docs/what-is-aria.zh.md) |
+| 安装、首次启动和第一个 agent 会话 | [快速上手](docs/QUICKSTART.zh.md) |
+| 升级、回滚、服务生命周期、卸载 | [安装与升级](docs/install-and-upgrade.zh.md) |
+| daemon、profile、进程注册表、安全的配置变更 | [运维 bridge](docs/operate-the-bridge.zh.md) |
+| 寻址、会话命令、运行中追问 | [与你的智能体对话](docs/talk-to-your-agent.zh.md) |
+| 提醒、触发器与智能体授权 | [定时动作](docs/scheduled-actions.zh.md) |
+| Supervisor 与浏览器控制台 | [Web 控制台](docs/web-console.zh.md) |
+| 无频道的受管 worker | [Worker 模式](docs/worker-mode.zh.md) |
+| 已准备的执行空间与 profile 迁移 | [执行空间](docs/execution-spaces.zh.md) |
+| 密钥库、访问名单、权限模式 | [密钥与访问控制](docs/secrets-and-access.zh.md) |
+| 诊断出问题的 bot | [故障排查](docs/troubleshooting.zh.md) |
+| 飞书 / Lark 渠道、它的工具身份策略和云文档评论 | [飞书 / Lark 渠道](docs/LARK_CHANNEL.zh.md) |
+| 微信客服渠道 | [微信客服渠道](docs/WECHAT_KF_CHANNEL.md) |
+
+### 参考
+
+| 需求 | 文档 |
+| --- | --- |
+| 全部 CLI 命令与参数 | [CLI 命令参考](docs/CLI_REFERENCE.zh.md) |
+| 内置引擎 id 与能力 | [Engine Plugin](docs/PLUGINS.md) |
+| 版本化通道包/运行时契约和测试工具 | [Channel Plugin ABI v1](docs/CHANNEL_PLUGIN_ABI_V1.md) |
+
+### 内部设计 —— 工程规范
+
 | 需求 | 事实源文档 |
 | --- | --- |
-| 安装、首次启动和第一个 agent 会话 | [快速上手](docs/QUICKSTART.zh.md) |
 | 运行中追问、群聊寻址、freshness 与重复抑制 | [对话协调](docs/COORDINATION.md) |
 | Codex App Server、原生 steering、实时状态和服务档位 | [Codex App Server 运行时](docs/CODEX_APP_SERVER.md) |
 | Grok Agent stdio、ACP 会话和直接 steering | [Grok Agent stdio 运行时](docs/GROK_AGENT_STDIO.md) |
 | 跨引擎的 mid-turn steering 机制：从 loop 内建回调到 mailbox 拉取 | [Steering](docs/STEERING.zh.md) |
-| 内置与外部引擎契约 | [Engine Plugin](docs/PLUGINS.md) |
 | 多通道插件、生命周期、隔离和渐进式交付 | [通道平台架构](docs/CHANNEL_PLATFORM_ARCHITECTURE.md) |
-| 飞书 / Lark 渠道、它的工具身份策略和云文档评论 | [飞书 / Lark 渠道](docs/LARK_CHANNEL.md) |
-| 版本化通道包/运行时契约和测试工具 | [Channel Plugin ABI v1](docs/CHANNEL_PLUGIN_ABI_V1.md) |
 | 定时运行、提醒、未来触发源和结果路由 | [触发平台架构](docs/TRIGGER_PLATFORM_ARCHITECTURE.md) |
 | 私有 Release 安装、更新事务、稳定 launcher 与回滚 | [CLI 分发架构](docs/DISTRIBUTION.md) |
 | Profile 状态、托管工作空间和引擎自有布局 | [工作空间与状态布局](docs/WORKSPACE_AND_STATE_LAYOUT.md) |
@@ -561,11 +589,11 @@ grep '"event":"enter"' ~/.aria/profiles/<profile>/logs/bridge-$(date +%Y%m%d).js
 
 ### 完整索引
 
-每个主题一份文档，按角色分组。[文档政策](docs/DOCUMENTATION_POLICY.md) 定义了角色划分，以及每份文档都要带的状态行。文档标题保留英文原名。
+每个主题一份文档，按角色分组。文档标题保留英文原名。
 
 **现行规范** —— 描述当下的真相。
 
-[Agent Runtime architecture](docs/AGENT_RUNTIME_ARCHITECTURE.md) · [Channel platform architecture](docs/CHANNEL_PLATFORM_ARCHITECTURE.md) · [Channel Plugin ABI v1](docs/CHANNEL_PLUGIN_ABI_V1.md) · [Channel reliability primitives](docs/CHANNEL_RELIABILITY.md) · [Channel profile schema v3](docs/CHANNEL_SCHEMA_V3.md) · [Codex App Server runtime](docs/CODEX_APP_SERVER.md) · [Console development preview](docs/CONSOLE_DEVELOPMENT.md) · [Supervisor console behind a reverse proxy](docs/CONSOLE_REVERSE_PROXY.md) · [Management control plane](docs/CONTROL_PLANE.md) · [Management control plane 中文版](docs/CONTROL_PLANE.zh.md) · [Conversation coordination](docs/COORDINATION.md) · [Deterministic scheduled actions](docs/DETERMINISTIC_SCHEDULED_ACTIONS.md) · [Aria CLI distribution architecture](docs/DISTRIBUTION.md) · [Aria CLI distribution architecture 中文版](docs/DISTRIBUTION.zh.md) · [Documentation policy](docs/DOCUMENTATION_POLICY.md) · [Execution space architecture](docs/EXECUTION_SPACE_ARCHITECTURE.md) · [Grok Agent stdio runtime](docs/GROK_AGENT_STDIO.md) · [Lark / Feishu Channel](docs/LARK_CHANNEL.md) · [Lark / Feishu Channel 中文版](docs/LARK_CHANNEL.zh.md) · [Lark CLI argument ownership](docs/LARK_CLI_ARGUMENT_POLICY.md) · [Native read API architecture](docs/NATIVE_READ_API.md) · [Aria Engine Plugins](docs/PLUGINS.md) · [Quickstart](docs/QUICKSTART.md) · [Quickstart 中文版](docs/QUICKSTART.zh.md) · [Aria release policy](docs/RELEASE_POLICY.md) · [Mid-turn steering](docs/STEERING.md) · [Mid-turn steering 中文版](docs/STEERING.zh.md) · [Business workspace provisioning](docs/SPACE_WORKSPACE_PROVISIONING.md) · [Aria toolchain](docs/TOOLCHAIN.md) · [Trigger platform architecture](docs/TRIGGER_PLATFORM_ARCHITECTURE.md) · [WeChat Customer Service Channel](docs/WECHAT_KF_CHANNEL.md) · [Workspace and state layout architecture](docs/WORKSPACE_AND_STATE_LAYOUT.md) · [Cooperative replies](docs/agent-cooperation.md) · [Aria bug ledger](docs/bug-ledger.md) · [Personal agent groups](docs/personal-agent-groups.md) · [Personal agent groups 中文版](docs/personal-agent-groups.zh.md) · [Deployment public capabilities](docs/space-public-capabilities.md) · [Deployment-selected Space navigation](docs/space-workspaces.md) · [Team presentation and changing audiences](docs/team-presentation.md)
+[Agent Runtime architecture](docs/AGENT_RUNTIME_ARCHITECTURE.md) · [Channel platform architecture](docs/CHANNEL_PLATFORM_ARCHITECTURE.md) · [Channel Plugin ABI v1](docs/CHANNEL_PLUGIN_ABI_V1.md) · [Channel reliability primitives](docs/CHANNEL_RELIABILITY.md) · [Channel profile schema v3](docs/CHANNEL_SCHEMA_V3.md) · [Codex App Server runtime](docs/CODEX_APP_SERVER.md) · [Console development preview](docs/CONSOLE_DEVELOPMENT.md) · [Supervisor console behind a reverse proxy](docs/CONSOLE_REVERSE_PROXY.md) · [Management control plane](docs/CONTROL_PLANE.md) · [Management control plane 中文版](docs/CONTROL_PLANE.zh.md) · [Conversation coordination](docs/COORDINATION.md) · [Deterministic scheduled actions](docs/DETERMINISTIC_SCHEDULED_ACTIONS.md) · [Aria CLI distribution architecture](docs/DISTRIBUTION.md) · [Aria CLI distribution architecture 中文版](docs/DISTRIBUTION.zh.md) · [Documentation policy](docs/DOCUMENTATION_POLICY.md) · [Execution space architecture](docs/EXECUTION_SPACE_ARCHITECTURE.md) · [Grok Agent stdio runtime](docs/GROK_AGENT_STDIO.md) · [Lark / Feishu Channel](docs/LARK_CHANNEL.md) · [Lark / Feishu Channel 中文版](docs/LARK_CHANNEL.zh.md) · [Lark CLI argument ownership](docs/LARK_CLI_ARGUMENT_POLICY.md) · [Native read API architecture](docs/NATIVE_READ_API.md) · [Aria Engine Plugins](docs/PLUGINS.md) · [Quickstart](docs/QUICKSTART.md) · [Quickstart 中文版](docs/QUICKSTART.zh.md) · [Aria release policy](docs/RELEASE_POLICY.md) · [Mid-turn steering](docs/STEERING.md) · [Mid-turn steering 中文版](docs/STEERING.zh.md) · [Business workspace provisioning](docs/SPACE_WORKSPACE_PROVISIONING.md) · [Aria toolchain](docs/TOOLCHAIN.md) · [Trigger platform architecture](docs/TRIGGER_PLATFORM_ARCHITECTURE.md) · [WeChat Customer Service Channel](docs/WECHAT_KF_CHANNEL.md) · [Workspace and state layout architecture](docs/WORKSPACE_AND_STATE_LAYOUT.md) · [Cooperative replies](docs/agent-cooperation.md) · [Aria bug ledger](docs/bug-ledger.md) · [Personal agent groups](docs/personal-agent-groups.md) · [Personal agent groups 中文版](docs/personal-agent-groups.zh.md) · [Deployment public capabilities](docs/space-public-capabilities.md) · [Deployment-selected Space navigation](docs/space-workspaces.md) · [Team presentation and changing audiences](docs/team-presentation.md) · [What is Aria](docs/what-is-aria.md) · [What is Aria 中文版](docs/what-is-aria.zh.md) · [Install and upgrade](docs/install-and-upgrade.md) · [Install and upgrade 中文版](docs/install-and-upgrade.zh.md) · [Operate the bridge](docs/operate-the-bridge.md) · [Operate the bridge 中文版](docs/operate-the-bridge.zh.md) · [Talk to your agent](docs/talk-to-your-agent.md) · [Talk to your agent 中文版](docs/talk-to-your-agent.zh.md) · [Scheduled actions](docs/scheduled-actions.md) · [Scheduled actions 中文版](docs/scheduled-actions.zh.md) · [Web console](docs/web-console.md) · [Web console 中文版](docs/web-console.zh.md) · [Worker mode](docs/worker-mode.md) · [Worker mode 中文版](docs/worker-mode.zh.md) · [Execution spaces](docs/execution-spaces.md) · [Execution spaces 中文版](docs/execution-spaces.zh.md) · [Secrets and access](docs/secrets-and-access.md) · [Secrets and access 中文版](docs/secrets-and-access.zh.md) · [Troubleshooting](docs/troubleshooting.md) · [Troubleshooting 中文版](docs/troubleshooting.zh.md) · [CLI reference](docs/CLI_REFERENCE.md) · [CLI reference 中文版](docs/CLI_REFERENCE.zh.md)
 
 **执行手册** —— 仍有未完成项的在办工作。
 

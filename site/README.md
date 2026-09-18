@@ -19,6 +19,19 @@ Publishing rules (see `docs/DOCUMENTATION_POLICY.md`):
   locale and stays unprefixed; Chinese lives under `/zh`. Pages without a
   translation fall back to English content.
 
+Sidebar navigation is generated, not hand-maintained: the `SECTIONS` table at
+the top of `scripts/sync-docs.mjs` maps published slugs to the
+Getting started / Guides / Reference / Internals separators written into
+`meta.json` (and the localized `meta.zh.json`). A published doc that is not
+listed in `SECTIONS` lands under Internals through the `...` rest marker, so
+engineering specifications need no entry; user-facing docs should be added to
+their section explicitly. Listing an unpublished slug emits a build warning.
+
+`docs/CLI_REFERENCE{,.zh}.md` are generated from `src/cli/index.ts` by
+`scripts/gen-cli-reference.mjs` (`pnpm gen:cli-reference`, or `--check` to
+verify freshness — `tests/unit/docs/cli-reference.test.ts` runs it in CI).
+Never hand-edit those two files.
+
 ## Develop
 
 ```bash

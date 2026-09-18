@@ -26,6 +26,45 @@ const LOCALES = ['zh'];
 const DEFAULT_LOCALE = 'en';
 const BLOG_DIRS = new Set(['releases', 'blog']);
 
+// Sidebar sections, rendered as meta.json separators. The `slugs` arrays are
+// the only hand-maintained ordering: a published doc not listed here falls
+// into the final section through the "..." rest marker, which is why
+// Internals — the engineering specifications — is the default home. Keep user
+// guides in explicit sections; let specs stay unlisted.
+const SECTIONS = [
+  {
+    en: 'Getting started',
+    zh: '入门',
+    slugs: ['what-is-aria', 'quickstart', 'install-and-upgrade'],
+  },
+  {
+    en: 'Guides',
+    zh: '使用指南',
+    slugs: [
+      'lark-channel',
+      'wechat-kf-channel',
+      'operate-the-bridge',
+      'talk-to-your-agent',
+      'scheduled-actions',
+      'web-console',
+      'worker-mode',
+      'execution-spaces',
+      'secrets-and-access',
+      'troubleshooting',
+    ],
+  },
+  {
+    en: 'Reference',
+    zh: '参考',
+    slugs: ['cli-reference', 'plugins', 'channel-plugin-abi-v1'],
+  },
+  {
+    en: 'Internals',
+    zh: '内部设计与规范',
+    rest: true,
+  },
+];
+
 // Filename classes that DOCUMENTATION_POLICY.md reserves for internal or
 // historical material. Matching files never reach the public site, even if
 // their status header is wrong.
@@ -295,10 +334,10 @@ run on your own machine. These pages are generated from
 single source of truth.
 
 <Cards>
-  <Card title="Management Control Plane" href="/docs/control-plane" />
-  <Card title="Agent Runtime Architecture" href="/docs/agent-runtime-architecture" />
-  <Card title="Channel Plugin ABI" href="/docs/channel-plugin-abi-v1" />
-  <Card title="Steering" href="/docs/steering" />
+  <Card title="What is Aria" href="/docs/what-is-aria" />
+  <Card title="Quickstart" href="/docs/quickstart" />
+  <Card title="Install &amp; upgrade" href="/docs/install-and-upgrade" />
+  <Card title="CLI reference" href="/docs/cli-reference" />
 </Cards>
 `;
 const landingZh = `---
@@ -310,10 +349,10 @@ Aria 把聊天界面变成运行在你自己机器上的编码智能体的交互
 Aria 仓库中的 [\`docs/\`](${GITHUB}/tree/main/docs) 生成，仓库仍是唯一事实来源。
 
 <Cards>
-  <Card title="管理控制平面" href="/zh/docs/control-plane" />
-  <Card title="智能体运行时架构" href="/zh/docs/agent-runtime-architecture" />
-  <Card title="频道插件 ABI" href="/zh/docs/channel-plugin-abi-v1" />
-  <Card title="转向（Steering）" href="/zh/docs/steering" />
+  <Card title="Aria 是什么" href="/zh/docs/what-is-aria" />
+  <Card title="快速上手" href="/zh/docs/quickstart" />
+  <Card title="安装与升级" href="/zh/docs/install-and-upgrade" />
+  <Card title="CLI 命令参考" href="/zh/docs/cli-reference" />
 </Cards>
 `;
 fs.mkdirSync(outDocsDir, { recursive: true });
@@ -322,20 +361,33 @@ fs.writeFileSync(path.join(outDocsDir, 'index.zh.mdx'), landingZh);
 sourceMap['index'] = 'docs';
 sourceMap['zh:index'] = 'docs';
 
-// Navigation: only published (current) docs, alphabetical by title.
-const byTitle = (a, b) => a.title.localeCompare(b.title);
-const pageList = [
-  'index',
-  ...publishedPages.filter((p) => !p.locale).sort(byTitle).map((p) => p.slug),
-];
+// Navigation: only published (current) docs, grouped into SECTIONS. A listed
+// slug that was not published warns loudly — it usually means the doc was
+// renamed or lost its `current` status and the map needs an edit.
+const publishedSlugSet = new Set(publishedPages.filter((p) => !p.locale).map((p) => p.slug));
+const sectionPages = (labelKey) => {
+  const pages = ['index'];
+  for (const section of SECTIONS) {
+    pages.push(`---${section[labelKey]}---`);
+    if (section.rest) {
+      pages.push('...');
+      continue;
+    }
+    for (const slug of section.slugs) {
+      if (publishedSlugSet.has(slug)) pages.push(slug);
+      else warnings.push(`section "${section.en}" lists unpublished slug "${slug}"`);
+    }
+  }
+  return pages;
+};
 fs.writeFileSync(
   path.join(outDocsDir, 'meta.json'),
-  JSON.stringify({ title: 'Aria Docs', pages: pageList }, null, 2) + '\n',
+  JSON.stringify({ title: 'Aria Docs', pages: sectionPages('en') }, null, 2) + '\n',
 );
-// Localized meta inherits the same ordering; only the display title differs.
+// Localized meta inherits the same ordering; only the section labels differ.
 fs.writeFileSync(
   path.join(outDocsDir, 'meta.zh.json'),
-  JSON.stringify({ title: 'Aria 文档', pages: pageList }, null, 2) + '\n',
+  JSON.stringify({ title: 'Aria 文档', pages: sectionPages('zh') }, null, 2) + '\n',
 );
 
 // ---------- blog ----------

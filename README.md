@@ -559,18 +559,47 @@ legacy global command as a rollback baseline; it does not delete it.
 
 ## Documentation
 
+The [docs site](https://ai.***REMOVED***dev.com/docs) publishes this same index:
+user guides first, then references, then the engineering specifications.
+[Documentation policy](docs/DOCUMENTATION_POLICY.md) defines the roles and the
+status header every document carries.
+
+### User guides
+
+| Need | Document |
+| --- | --- |
+| What Aria is and how it works | [What is Aria](docs/what-is-aria.md) |
+| Install, first run, and the first agent session | [Quickstart](docs/QUICKSTART.md) |
+| Upgrade, rollback, service lifecycle, uninstall | [Install and upgrade](docs/install-and-upgrade.md) |
+| Daemon, profiles, process registry, safe config changes | [Operate the bridge](docs/operate-the-bridge.md) |
+| Addressing, session commands, mid-turn follow-ups | [Talk to your agent](docs/talk-to-your-agent.md) |
+| Reminders, triggers, and agent grants | [Scheduled actions](docs/scheduled-actions.md) |
+| Supervisor and browser console | [Web console](docs/web-console.md) |
+| Channel-free managed worker | [Worker mode](docs/worker-mode.md) |
+| Prepared execution spaces and profile migration | [Execution spaces](docs/execution-spaces.md) |
+| Keystore, access lists, permission modes | [Secrets and access](docs/secrets-and-access.md) |
+| Diagnosing a broken bot | [Troubleshooting](docs/troubleshooting.md) |
+| Lark / Feishu channel, its tool identity policy, and document comments | [Lark / Feishu channel](docs/LARK_CHANNEL.md) |
+| WeChat Customer Service channel | [WeChat KF channel](docs/WECHAT_KF_CHANNEL.md) |
+
+### Reference
+
+| Need | Document |
+| --- | --- |
+| Every CLI command and flag | [CLI reference](docs/CLI_REFERENCE.md) |
+| Built-in engine ids and capabilities | [Engine plugins](docs/PLUGINS.md) |
+| Versioned channel package/runtime contract and test kit | [Channel Plugin ABI v1](docs/CHANNEL_PLUGIN_ABI_V1.md) |
+
+### Internals — engineering specifications
+
 | Need | Canonical document |
 | --- | --- |
-| Install, first run, and the first agent session | [Quickstart](docs/QUICKSTART.md) |
 | Active-run follow-ups, group addressing, freshness, and duplicate suppression | [Conversation coordination](docs/COORDINATION.md) |
 | Codex App Server, native steering, live status, and service tiers | [Codex App Server runtime](docs/CODEX_APP_SERVER.md) |
 | Grok Agent stdio, ACP sessions, and direct steering | [Grok Agent stdio runtime](docs/GROK_AGENT_STDIO.md) |
 | Mid-turn steering mechanisms across engines, from loop-native to mailbox pull | [Steering](docs/STEERING.md) |
-| Built-in and external engine contracts | [Engine plugins](docs/PLUGINS.md) |
 | Multi-channel plugins, lifecycle, isolation, and progressive delivery | [Channel platform architecture](docs/CHANNEL_PLATFORM_ARCHITECTURE.md) |
-| Lark / Feishu channel, its tool identity policy, and document comments | [Lark / Feishu channel](docs/LARK_CHANNEL.md) |
 | Stored channel instances and reversible schema v2→v3 migration | [Channel profile schema v3](docs/CHANNEL_SCHEMA_V3.md) |
-| Versioned channel package/runtime contract and test kit | [Channel Plugin ABI v1](docs/CHANNEL_PLUGIN_ABI_V1.md) |
 | Scheduled runs, reminders, future trigger sources, and result routing | [Trigger platform architecture](docs/TRIGGER_PLATFORM_ARCHITECTURE.md) |
 | Private Release installation, update transactions, stable launcher, and rollback | [CLI distribution architecture](docs/DISTRIBUTION.md) |
 | Profile state, managed workspaces, and engine-owned layout | [Workspace and state layout](docs/WORKSPACE_AND_STATE_LAYOUT.md) |
@@ -581,12 +610,10 @@ legacy global command as a rollback baseline; it does not delete it.
 ### Full index
 
 One document per topic, grouped by role.
-[Documentation policy](docs/DOCUMENTATION_POLICY.md) defines the roles and the
-status header every document carries.
 
 **Current specifications** — describe what is true today.
 
-[Agent Runtime architecture](docs/AGENT_RUNTIME_ARCHITECTURE.md) · [Channel platform architecture](docs/CHANNEL_PLATFORM_ARCHITECTURE.md) · [Channel Plugin ABI v1](docs/CHANNEL_PLUGIN_ABI_V1.md) · [Channel reliability primitives](docs/CHANNEL_RELIABILITY.md) · [Channel profile schema v3](docs/CHANNEL_SCHEMA_V3.md) · [Codex App Server runtime](docs/CODEX_APP_SERVER.md) · [Console development preview](docs/CONSOLE_DEVELOPMENT.md) · [Supervisor console behind a reverse proxy](docs/CONSOLE_REVERSE_PROXY.md) · [Management control plane](docs/CONTROL_PLANE.md) · [Management control plane 中文版](docs/CONTROL_PLANE.zh.md) · [Conversation coordination](docs/COORDINATION.md) · [Deterministic scheduled actions](docs/DETERMINISTIC_SCHEDULED_ACTIONS.md) · [Aria CLI distribution architecture](docs/DISTRIBUTION.md) · [Aria CLI distribution architecture 中文版](docs/DISTRIBUTION.zh.md) · [Documentation policy](docs/DOCUMENTATION_POLICY.md) · [Execution space architecture](docs/EXECUTION_SPACE_ARCHITECTURE.md) · [Grok Agent stdio runtime](docs/GROK_AGENT_STDIO.md) · [Lark / Feishu Channel](docs/LARK_CHANNEL.md) · [Lark / Feishu Channel 中文版](docs/LARK_CHANNEL.zh.md) · [Lark CLI argument ownership](docs/LARK_CLI_ARGUMENT_POLICY.md) · [Native read API architecture](docs/NATIVE_READ_API.md) · [Aria Engine Plugins](docs/PLUGINS.md) · [Quickstart](docs/QUICKSTART.md) · [Quickstart 中文版](docs/QUICKSTART.zh.md) · [Aria release policy](docs/RELEASE_POLICY.md) · [Mid-turn steering](docs/STEERING.md) · [Mid-turn steering 中文版](docs/STEERING.zh.md) · [Business workspace provisioning](docs/SPACE_WORKSPACE_PROVISIONING.md) · [Aria toolchain](docs/TOOLCHAIN.md) · [Trigger platform architecture](docs/TRIGGER_PLATFORM_ARCHITECTURE.md) · [WeChat Customer Service Channel](docs/WECHAT_KF_CHANNEL.md) · [Workspace and state layout architecture](docs/WORKSPACE_AND_STATE_LAYOUT.md) · [Cooperative replies](docs/agent-cooperation.md) · [Aria bug ledger](docs/bug-ledger.md) · [Personal agent groups](docs/personal-agent-groups.md) · [Personal agent groups 中文版](docs/personal-agent-groups.zh.md) · [Deployment public capabilities](docs/space-public-capabilities.md) · [Deployment-selected Space navigation](docs/space-workspaces.md) · [Team presentation and changing audiences](docs/team-presentation.md)
+[Agent Runtime architecture](docs/AGENT_RUNTIME_ARCHITECTURE.md) · [Channel platform architecture](docs/CHANNEL_PLATFORM_ARCHITECTURE.md) · [Channel Plugin ABI v1](docs/CHANNEL_PLUGIN_ABI_V1.md) · [Channel reliability primitives](docs/CHANNEL_RELIABILITY.md) · [Channel profile schema v3](docs/CHANNEL_SCHEMA_V3.md) · [Codex App Server runtime](docs/CODEX_APP_SERVER.md) · [Console development preview](docs/CONSOLE_DEVELOPMENT.md) · [Supervisor console behind a reverse proxy](docs/CONSOLE_REVERSE_PROXY.md) · [Management control plane](docs/CONTROL_PLANE.md) · [Management control plane 中文版](docs/CONTROL_PLANE.zh.md) · [Conversation coordination](docs/COORDINATION.md) · [Deterministic scheduled actions](docs/DETERMINISTIC_SCHEDULED_ACTIONS.md) · [Aria CLI distribution architecture](docs/DISTRIBUTION.md) · [Aria CLI distribution architecture 中文版](docs/DISTRIBUTION.zh.md) · [Documentation policy](docs/DOCUMENTATION_POLICY.md) · [Execution space architecture](docs/EXECUTION_SPACE_ARCHITECTURE.md) · [Grok Agent stdio runtime](docs/GROK_AGENT_STDIO.md) · [Lark / Feishu Channel](docs/LARK_CHANNEL.md) · [Lark / Feishu Channel 中文版](docs/LARK_CHANNEL.zh.md) · [Lark CLI argument ownership](docs/LARK_CLI_ARGUMENT_POLICY.md) · [Native read API architecture](docs/NATIVE_READ_API.md) · [Aria Engine Plugins](docs/PLUGINS.md) · [Quickstart](docs/QUICKSTART.md) · [Quickstart 中文版](docs/QUICKSTART.zh.md) · [Aria release policy](docs/RELEASE_POLICY.md) · [Mid-turn steering](docs/STEERING.md) · [Mid-turn steering 中文版](docs/STEERING.zh.md) · [Business workspace provisioning](docs/SPACE_WORKSPACE_PROVISIONING.md) · [Aria toolchain](docs/TOOLCHAIN.md) · [Trigger platform architecture](docs/TRIGGER_PLATFORM_ARCHITECTURE.md) · [WeChat Customer Service Channel](docs/WECHAT_KF_CHANNEL.md) · [Workspace and state layout architecture](docs/WORKSPACE_AND_STATE_LAYOUT.md) · [Cooperative replies](docs/agent-cooperation.md) · [Aria bug ledger](docs/bug-ledger.md) · [Personal agent groups](docs/personal-agent-groups.md) · [Personal agent groups 中文版](docs/personal-agent-groups.zh.md) · [Deployment public capabilities](docs/space-public-capabilities.md) · [Deployment-selected Space navigation](docs/space-workspaces.md) · [Team presentation and changing audiences](docs/team-presentation.md) · [What is Aria](docs/what-is-aria.md) · [What is Aria 中文版](docs/what-is-aria.zh.md) · [Install and upgrade](docs/install-and-upgrade.md) · [Install and upgrade 中文版](docs/install-and-upgrade.zh.md) · [Operate the bridge](docs/operate-the-bridge.md) · [Operate the bridge 中文版](docs/operate-the-bridge.zh.md) · [Talk to your agent](docs/talk-to-your-agent.md) · [Talk to your agent 中文版](docs/talk-to-your-agent.zh.md) · [Scheduled actions](docs/scheduled-actions.md) · [Scheduled actions 中文版](docs/scheduled-actions.zh.md) · [Web console](docs/web-console.md) · [Web console 中文版](docs/web-console.zh.md) · [Worker mode](docs/worker-mode.md) · [Worker mode 中文版](docs/worker-mode.zh.md) · [Execution spaces](docs/execution-spaces.md) · [Execution spaces 中文版](docs/execution-spaces.zh.md) · [Secrets and access](docs/secrets-and-access.md) · [Secrets and access 中文版](docs/secrets-and-access.zh.md) · [Troubleshooting](docs/troubleshooting.md) · [Troubleshooting 中文版](docs/troubleshooting.zh.md) · [CLI reference](docs/CLI_REFERENCE.md) · [CLI reference 中文版](docs/CLI_REFERENCE.zh.md)
 
 **Runbooks** — active work that still has open items.
 

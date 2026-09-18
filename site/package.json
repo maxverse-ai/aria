@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "sync:docs": "node scripts/sync-docs.mjs",
+    "gen:cli-reference": "node scripts/gen-cli-reference.mjs",
     "build": "pnpm sync:docs && next build",
     "dev": "pnpm sync:docs && next dev",
     "start": "next start",
