@@ -65,6 +65,7 @@ import {
 } from './commands/trigger';
 import { runWorker } from './commands/worker';
 import { runSpaceCommand, type SpaceCliOptions } from './commands/space';
+import { runInboxCheck, runInboxPull, type InboxCliOptions } from './commands/inbox';
 
 // Announce an unsupported-but-not-yet-removed runtime before any command runs.
 const nodeVersionWarning = runtimeNotice();
@@ -212,6 +213,26 @@ program
   .action(async (opts: { profile?: string; hours?: string; json?: boolean }) => {
     await runInspect(opts);
   });
+
+const inbox = program
+  .command('inbox')
+  .description('Read the per-scope steering mailbox (agent-facing pull side)');
+
+for (const action of ['check', 'pull'] as const) {
+  inbox
+    .command(action)
+    .description(
+      action === 'check'
+        ? 'Report the unread steering count for this scope'
+        : 'Print every unread steering body and mark it pulled',
+    )
+    .option('--scope <scope>', 'conversation scope (defaults to ARIA_INBOX_SCOPE)')
+    .option('--dir <path>', 'mailbox directory (defaults to the profile inbox layout)')
+    .option('--json', 'print machine-readable JSON')
+    .action((opts: InboxCliOptions) => {
+      process.exitCode = action === 'check' ? runInboxCheck(opts) : runInboxPull(opts);
+    });
+}
 
 const control = program
   .command('control')

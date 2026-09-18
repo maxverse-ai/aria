@@ -133,6 +133,13 @@ import {
   SteerDeliveryTracker,
   type SteerDeliveryRecord,
 } from '../conversation/steer-delivery';
+import {
+  buildSteerNoticePrompt,
+  markSteerMail,
+  putSteerMail,
+  sweepSteerMails,
+  sweptSteerMailInstruction,
+} from '../conversation/steer-mailbox';
 import { LoopStore } from './loop-store';
 import { FinalReplyCommit, type FinalReplyArtifact } from './final-reply-commit';
 import {
@@ -607,6 +614,7 @@ export async function startChannel(deps: StartChannelDeps): Promise<BridgeChanne
               finalReplyFreshness,
               personalGroups,
               onSteerDelivery,
+              ...(inboxDir ? { inboxDir } : {}),
             }),
         );
         if (spaceGate) {
@@ -646,6 +654,10 @@ export async function startChannel(deps: StartChannelDeps): Promise<BridgeChanne
   // reports delivery evidence; a `failed` record requeues the input so a
   // transport that dropped it does not silently swallow the message.
   const steerDeliveries = new SteerDeliveryTracker<ConversationInput>();
+  // Mailbox root for the notice+pull steer fallback (delivery:'none' engines).
+  const inboxDir = deps.appPaths?.profileDir
+    ? join(deps.appPaths.profileDir, 'inbox')
+    : undefined;
   const onSteerDelivery = (record: SteerDeliveryRecord, scope: string): void => {
     const disposition = steerDeliveries.handle(record);
     if (disposition.kind === 'requeue') {
@@ -786,6 +798,7 @@ export async function startChannel(deps: StartChannelDeps): Promise<BridgeChanne
               outboundFinalOnly: outboundPolicy?.streamStrategy === 'final-only',
               outboundControlChannel: outboundPolicy?.controlChannel,
               taskAdmission,
+              ...(inboxDir ? { inboxDir } : {}),
               taskRuntime,
               taskCoordinator: deps.taskCoordinator,
             }),
@@ -1362,6 +1375,7 @@ interface IntakeDeps {
   taskAdmission?: TaskAdmissionService;
   taskRuntime?: TaskRuntime;
   taskCoordinator?: TaskCoordinator;
+  inboxDir?: string;
 }
 
 type LogThreadModeOverride = (input: {
@@ -1619,6 +1633,7 @@ async function intakeMessage(deps: IntakeDeps): Promise<void> {
     scope,
     input: conversationInput,
     botIdentity: channel.botIdentity,
+    ...(deps.inboxDir ? { inboxDir: deps.inboxDir } : {}),
   });
 }
 
@@ -1630,6 +1645,7 @@ async function tryMergeLiveFollowup(input: {
   scope: string;
   input: ConversationInput;
   botIdentity?: { openId: string; name?: string };
+  inboxDir?: string;
 }): Promise<void> {
   const activeRun = input.activeRuns.get(input.scope)?.run;
   if (!activeRun) return;
@@ -1660,13 +1676,46 @@ async function tryMergeLiveFollowup(input: {
     return;
   }
 
+  // Notice+pull fallback (Raft-style two envelopes): transports with no
+  // delivery evidence get a content-free notice; the body waits in the
+  // mailbox for the agent to pull — or for the host to sweep into the next
+  // turn — instead of pushing unacknowledged text into the pipe.
+  let useMailbox =
+    input.inboxDir !== undefined && activeRun.steering?.delivery === 'none';
+  let steerPrompt: string;
+  if (useMailbox && input.inboxDir) {
+    try {
+      const unread = putSteerMail(input.inboxDir, input.scope, {
+        requestId,
+        body: buildLiveFollowupPrompt(message, input.botIdentity),
+        ...(message.senderId ? { senderId: message.senderId } : {}),
+        ...(message.senderName ? { senderName: message.senderName } : {}),
+      });
+      steerPrompt = buildSteerNoticePrompt(input.scope, unread);
+    } catch (err) {
+      // Mailbox unavailable (disk/perm) — degrade to a direct body push
+      // rather than stranding the claimed input.
+      useMailbox = false;
+      steerPrompt = buildLiveFollowupPrompt(message, input.botIdentity);
+      log.warn('followup', 'mailbox-unavailable', {
+        scope: input.scope,
+        err: err instanceof Error ? err.message : String(err),
+      });
+    }
+  } else {
+    steerPrompt = buildLiveFollowupPrompt(message, input.botIdentity);
+  }
+
   const result = await input.conversations.trySteer({
     scopeId: input.scope,
     requestId,
     inputId: message.messageId,
-    prompt: buildLiveFollowupPrompt(message, input.botIdentity),
+    prompt: steerPrompt,
   }, input.input.spaceOperation?.context);
   if (result.kind === 'accepted') {
+    if (useMailbox && input.inboxDir) {
+      markSteerMail(input.inboxDir, input.scope, requestId, 'noticed');
+    }
     input.pending.acknowledge(claim);
     // Retain the input while the engine's landing is still unconfirmed —
     // a later `steer_delivery` record either clears it or requeues it.
@@ -1682,11 +1731,20 @@ async function tryMergeLiveFollowup(input: {
       scope: input.scope,
       runId: result.runId,
       ...(result.insertion ? { insertion: result.insertion } : {}),
+      ...(useMailbox ? { via: 'notice' } : {}),
     });
-    reportMetric('live_followup_message', 1, { outcome: 'accepted' });
+    reportMetric('live_followup_message', 1, {
+      outcome: 'accepted',
+      ...(useMailbox ? { via: 'notice' } : {}),
+    });
     return;
   }
 
+  // The notice never landed, so nobody will pull the body — drop the mail
+  // and let the original input flow back through the deferred queue.
+  if (useMailbox && input.inboxDir) {
+    markSteerMail(input.inboxDir, input.scope, requestId, 'dropped');
+  }
   input.pending.release(claim);
   log.info('followup', result.kind, {
     scope: input.scope,
@@ -1717,6 +1775,7 @@ interface RunBatchDeps {
   finalReplyFreshness: FinalReplyFreshness;
   personalGroups?: PersonalAgentGroups;
   onSteerDelivery?: (record: SteerDeliveryRecord, scope: string) => void;
+  inboxDir?: string;
 }
 
 async function runAgentBatch(deps: RunBatchDeps): Promise<Terminal | undefined> {
@@ -1885,7 +1944,11 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<Terminal | undefined> 
   const modelSwitched = prevModel !== undefined && prevModel !== modelSelection;
   lastRunModelByScope.set(scope, modelSelection);
   const freshnessHandoff = finalReplyFreshness.handoff(scope);
+  // Reconcile the steer mailbox: bodies the previous turn was notified about
+  // but never pulled are re-issued as part of this turn so nothing is lost.
+  const sweptMails = deps.inboxDir ? sweepSteerMails(deps.inboxDir, scope) : [];
   const extraInstructions = [
+    ...(sweptMails.length > 0 ? [sweptSteerMailInstruction(sweptMails)] : []),
     ...(cooperative ? [COOPERATIVE_REPLY_INSTRUCTION] : []),
     ...(modelSwitched
       ? [

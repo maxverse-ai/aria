@@ -521,7 +521,7 @@ Per engine, today and forward:
 | --- | --- | --- | --- |
 | Codex | `turn/steer` (native) | confirmed — turn id returned | deferred → auto-flush |
 | Devin | `session/prompt` merge | inferred — `userMessageId` comparison | deferred → auto-flush; mailbox last |
-| Claude/Kimi | stdio user-line push (`--input-format stream-json`) | none — echo observed but never relied on; post-tool gate defers | deferred → auto-flush |
+| Claude/Kimi | notice + pull over stdio user-line push (`--input-format stream-json`) | none — echo observed but never relied on; post-tool gate defers | mailbox → next-turn sweep; deferred → auto-flush |
 | Grok | existing stdio path | per implementation | deferred → auto-flush |
 | Future ACP engine | `session/inject` > `_session/steering` > prompt-merge | explicit `messageId` | deferred → auto-flush |
 
@@ -536,6 +536,26 @@ Enablement is `agentInfo`-detected plus config-gated
 first observed success promotes the path, observed failure demotes it to
 deferral — undocumented behavior is treated as a runtime probe, not a
 contract.
+
+Claude/Kimi specifics — the shipped mailbox. Transports reporting
+`delivery: 'none'` take the Raft two-envelope path instead of pushing the
+body: the follow-up prompt is deposited in a per-scope mailbox
+(`<profileDir>/inbox/<scope>/<requestId>.json`, atomic tmp+rename per
+record, 30-minute TTL), and only a content-free `<steer_notice>` — scope,
+unread count, pull command — is written to stdin. The agent pulls bodies
+at a natural breakpoint with `aria inbox pull --scope <scope>` (the
+scope travels inside the notice itself; the mailbox directory resolves
+via the channel env already in the agent's environment), and the bridge
+system prompt carries the contract:
+deferral is legal and must be reported, silent discard is not. Anything
+still unread when the next turn builds is swept into that turn's prompt
+by the host, so a noticed-but-unpulled body can land late but never
+silently. Two honest caveats: a pulled body arrives as a tool result —
+not a user message — because Aria owns no code inside the engine loop
+(the prompt-contract variant, weaker than Raft's plugin pull); and the
+notice's own transport evidence stays `none` — the stdin write has no
+acknowledgement, so `accepted` means "written", not "seen". If the
+mailbox write itself fails, the path degrades to the legacy direct push.
 
 Rollout order: **(1)** contract fields + the Devin prompt-merge adapter —
 the change that makes Devin steer at all; **(2)** deferred auto-flush in

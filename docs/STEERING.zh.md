@@ -471,6 +471,7 @@ outcome 应该如实说明而不是猜。
 | --- | --- | --- | --- |
 | Codex | `turn/steer`（native） | confirmed——返回 turn id | deferred → auto-flush |
 | Devin | `session/prompt` merge | inferred——`userMessageId` 对比 | deferred → auto-flush；mailbox 最后 |
+| Claude/Kimi | notice + pull，底层走 stdio 用户行推送（`--input-format stream-json`） | none——echo 能观测到但从不作为依据；post-tool 门闩降级 | mailbox → 下轮 sweep；deferred → auto-flush |
 | Grok | 现有 stdio 路径 | 视实现 | deferred → auto-flush |
 | 未来 ACP 引擎 | `session/inject` > `_session/steering` > prompt-merge | 显式 `messageId` | deferred → auto-flush |
 
@@ -483,6 +484,21 @@ turn 事件重复 emit。启用方式是 `agentInfo` 探测 + 配置开关
 （`devin.steering: 'auto' | 'off'`），外加 learned-capability 缓存：
 首次观测成功点亮该路径，观测失败降级回 deferral——未文档化行为按
 运行时探针对待，不当成契约。
+
+Claude/Kimi 的细节——已落地的 mailbox。`delivery: 'none'` 的
+transport 不再直接推正文，改走 Raft 式双信封：follow-up prompt 先存
+进按 scope 分的信箱（`<profileDir>/inbox/<scope>/<requestId>.json`，
+每条记录 tmp+rename 原子写，TTL 30 分钟），stdin 里只推一条无正文的
+`<steer_notice>`——scope、未读数、拉取命令。agent 在自然断点跑
+`aria inbox pull --scope <scope>` 拉正文（scope 写在通知里，信箱目
+录经 agent 环境里已有的 channel env 解析），bridge system prompt
+携带契约：推迟合法但要如实说明，悄悄丢弃不合法。下轮构建 prompt
+时仍没被拉走的正文由宿主 sweep 进补发段——notice 了但没读的消息可
+以迟到，不会无声丢失。两个如实说明的短板：拉到的正文落地是 tool
+result 而不是 user 消息——Aria 在引擎循环内没有自己的代码（这是
+prompt-contract 变体，弱于 Raft 的插件拉取）；notice 自身的送达证
+据仍是 `none`——stdin 写入没有回执，`accepted` 只代表"写了"不代表
+"看到了"。信箱写入本身失败时降级回旧的直接推送。
 
 落地顺序：**(1)** 契约字段 + Devin prompt-merge adapter——让 Devin
 能 steer 的那一刀；**(2)** `TurnCoordinator` 的 deferred 自动
