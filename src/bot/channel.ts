@@ -129,6 +129,10 @@ import { decideLiveFollowup } from '../conversation/live-followup-policy';
 import { commandSessionCatalogIdentity } from './session-catalog-identity';
 import { startKeepalive } from './keepalive';
 import { PendingQueue } from './pending-queue';
+import {
+  SteerDeliveryTracker,
+  type SteerDeliveryRecord,
+} from '../conversation/steer-delivery';
 import { LoopStore } from './loop-store';
 import { FinalReplyCommit, type FinalReplyArtifact } from './final-reply-commit';
 import {
@@ -602,6 +606,7 @@ export async function startChannel(deps: StartChannelDeps): Promise<BridgeChanne
               outboundFinalOnly: outboundPolicy?.streamStrategy === 'final-only',
               finalReplyFreshness,
               personalGroups,
+              onSteerDelivery,
             }),
         );
         if (spaceGate) {
@@ -637,6 +642,31 @@ export async function startChannel(deps: StartChannelDeps): Promise<BridgeChanne
       }
     });
   });
+  // Accepted-but-unconfirmed steers retain their input here until the engine
+  // reports delivery evidence; a `failed` record requeues the input so a
+  // transport that dropped it does not silently swallow the message.
+  const steerDeliveries = new SteerDeliveryTracker<ConversationInput>();
+  const onSteerDelivery = (record: SteerDeliveryRecord, scope: string): void => {
+    const disposition = steerDeliveries.handle(record);
+    if (disposition.kind === 'requeue') {
+      const queueSize = pending.push(scope, disposition.value);
+      log.warn('followup', 'steer-requeued', {
+        scope,
+        requestId: record.requestId,
+        queueSize,
+      });
+      reportMetric('live_followup_message', 1, {
+        outcome: 'requeued',
+        reason: 'steer-delivery-failed',
+      });
+    } else if (disposition.kind === 'delivered') {
+      log.info('followup', 'steer-delivered', {
+        scope,
+        requestId: record.requestId,
+        insertion: disposition.insertion,
+      });
+    }
+  };
   finalReplyFreshness = new FinalReplyFreshness({
     channel,
     chatTopology,
@@ -742,6 +772,7 @@ export async function startChannel(deps: StartChannelDeps): Promise<BridgeChanne
               workspaces: scoped?.workspaces ?? workspaces,
               activeRuns,
               pending,
+              steerDeliveries,
               loops,
               conversation,
               controls: scoped?.controls ?? controls,
@@ -1315,6 +1346,7 @@ interface IntakeDeps {
   workspaces: WorkspaceStore;
   activeRuns: ActiveRuns;
   pending: PendingQueue;
+  steerDeliveries: SteerDeliveryTracker<ConversationInput>;
   loops: LoopStore;
   conversation: ResolvedMessageConversation;
   controls: Controls;
@@ -1348,6 +1380,7 @@ async function intakeMessage(deps: IntakeDeps): Promise<void> {
     workspaces,
     activeRuns,
     pending,
+    steerDeliveries,
     conversation,
     controls,
     chatTopology,
@@ -1582,6 +1615,7 @@ async function intakeMessage(deps: IntakeDeps): Promise<void> {
     conversations,
     activeRuns,
     pending,
+    steerDeliveries,
     scope,
     input: conversationInput,
     botIdentity: channel.botIdentity,
@@ -1592,6 +1626,7 @@ async function tryMergeLiveFollowup(input: {
   conversations: ConversationRuntime;
   activeRuns: ActiveRuns;
   pending: PendingQueue;
+  steerDeliveries: SteerDeliveryTracker<ConversationInput>;
   scope: string;
   input: ConversationInput;
   botIdentity?: { openId: string; name?: string };
@@ -1633,7 +1668,16 @@ async function tryMergeLiveFollowup(input: {
   }, input.input.spaceOperation?.context);
   if (result.kind === 'accepted') {
     input.pending.acknowledge(claim);
-    log.info('followup', 'accepted', { scope: input.scope, runId: result.runId });
+    // Retain the input while the engine's landing is still unconfirmed —
+    // a later `steer_delivery` record either clears it or requeues it.
+    if (!result.insertion || result.insertion === 'unconfirmed') {
+      input.steerDeliveries.remember(requestId, input.input);
+    }
+    log.info('followup', 'accepted', {
+      scope: input.scope,
+      runId: result.runId,
+      ...(result.insertion ? { insertion: result.insertion } : {}),
+    });
     reportMetric('live_followup_message', 1, { outcome: 'accepted' });
     return;
   }
@@ -1667,6 +1711,7 @@ interface RunBatchDeps {
   outboundFinalOnly?: boolean;
   finalReplyFreshness: FinalReplyFreshness;
   personalGroups?: PersonalAgentGroups;
+  onSteerDelivery?: (record: SteerDeliveryRecord, scope: string) => void;
 }
 
 async function runAgentBatch(deps: RunBatchDeps): Promise<Terminal | undefined> {
@@ -1674,7 +1719,10 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<Terminal | undefined> 
   // stream drain below reports through this wrapper.
   let lastTerminal: Terminal | undefined;
   const trackedStream: typeof processAgentStream = async (...args) => {
-    const state = await processAgentStream(...args);
+    const state = await processAgentStream(
+      args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7],
+      deps.onSteerDelivery,
+    );
     lastTerminal = state.terminal;
     return state;
   };
@@ -2841,6 +2889,7 @@ async function processAgentStream(
   recordSession: (event: AgentEvent) => Promise<void>,
   flush: (state: RunState) => Promise<void>,
   runInitialState: RunState = initialState,
+  onSteerDelivery?: (record: SteerDeliveryRecord, scope: string) => void,
 ): Promise<RunState> {
   const runStart = Date.now();
   let state: RunState = runInitialState;
@@ -2931,6 +2980,18 @@ async function processAgentStream(
       }
       armOrPauseIdle();
 
+      if (evt.type === 'steer_delivery') {
+        log.info('agent', 'steer-delivery', {
+          scope,
+          requestId: evt.requestId,
+          insertion: evt.insertion,
+        });
+        reportMetric('steer_delivery', 1, { insertion: evt.insertion });
+        onSteerDelivery?.(
+          { requestId: evt.requestId, insertion: evt.insertion },
+          scope,
+        );
+      }
       if (evt.type === 'system') await recordSession(evt);
       if (evt.type === 'done') {
         // Engines that only report their resume key on `done` (OpenCode) still

@@ -375,6 +375,7 @@ export class DevinAgentRun implements AgentRun {
   }
 
   private onSteerSettled(requestId: string, result: DevinPromptResult | Error): void {
+    this.steerAttempts.delete(requestId);
     if (result instanceof Error) {
       log.warn('devin-acp', 'steer-failed', { requestId, message: result.message });
       this.steerDeliveries.push({ requestId, insertion: 'failed' });
@@ -410,6 +411,27 @@ export class DevinAgentRun implements AgentRun {
     insertion: AgentSteeringInsertion | 'failed';
   }> {
     return this.steerDeliveries.splice(0);
+  }
+
+  /**
+   * The run's event stream is ending — anything still unaccounted for gets a
+   * terminal record so downstream delivery ledgers can close the request out.
+   * Settled-but-unclassifiable results and attempts that never resolved are
+   * recorded 'unconfirmed': the prompt was dispatched without refusal, so the
+   * evidence says the engine owns it even though its landing is unknown.
+   * Requeueing those would risk a duplicate.
+   */
+  private flushOrphanedSteers(): void {
+    for (const requestId of this.steerResults.keys()) {
+      log.info('devin-acp', 'steer-delivered', { requestId, insertion: 'unconfirmed' });
+      this.steerDeliveries.push({ requestId, insertion: 'unconfirmed' });
+    }
+    this.steerResults.clear();
+    for (const requestId of this.steerAttempts.keys()) {
+      log.warn('devin-acp', 'steer-unsettled', { requestId });
+      this.steerDeliveries.push({ requestId, insertion: 'unconfirmed' });
+    }
+    this.steerAttempts.clear();
   }
 
   private classifySteerResult(result: DevinPromptResult): AgentSteeringInsertion {
@@ -535,6 +557,10 @@ export class DevinAgentRun implements AgentRun {
           this.promptInFlight = false;
           this.turnClosing = true;
           for (const event of messages.finish(false)) yield event;
+          this.flushOrphanedSteers();
+          for (const delivery of this.takeSteerDeliveries()) {
+            yield { type: 'steer_delivery', ...delivery };
+          }
           yield {
             type: 'error',
             message: signal.error.message,
@@ -566,6 +592,7 @@ export class DevinAgentRun implements AgentRun {
             ]);
           }
           this.classifySteerResults();
+          this.flushOrphanedSteers();
           for (const delivery of this.takeSteerDeliveries()) {
             yield { type: 'steer_delivery', ...delivery };
           }
@@ -596,6 +623,10 @@ export class DevinAgentRun implements AgentRun {
     } catch (error) {
       this.turnClosing = true;
       for (const event of messages.finish(false)) yield event;
+      this.flushOrphanedSteers();
+      for (const delivery of this.takeSteerDeliveries()) {
+        yield { type: 'steer_delivery', ...delivery };
+      }
       yield {
         type: 'error',
         message: error instanceof Error ? error.message : String(error),

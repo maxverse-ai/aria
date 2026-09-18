@@ -256,10 +256,21 @@ describe('Devin ACP runtime', () => {
       expectedRunId: run.runId,
       prompt: 'not ready',
     })).resolves.toEqual({ kind: 'deferred', reason: 'turn-not-ready' });
-    await firstTurnEvent;
-    while (!(await events.next()).done) {
-      // Drain the turn.
+    const rest: AgentEvent[] = [];
+    const first = await firstTurnEvent;
+    if (!first.done) rest.push(first.value);
+    while (true) {
+      const next = await events.next();
+      if (next.done) break;
+      rest.push(next.value);
     }
+    // The outcome defers the input for the next turn while the delivery
+    // record honestly reports the transport refused it.
+    expect(rest).toContainEqual({
+      type: 'steer_delivery',
+      requestId: 'steer-unready',
+      insertion: 'failed',
+    });
     await runtime.dispose();
   });
 
