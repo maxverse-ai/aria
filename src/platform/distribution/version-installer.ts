@@ -6,6 +6,7 @@ import type {
   VersionInstaller,
 } from '../../application/distribution/types';
 import type { InstallPaths } from './install-layout';
+import { currentRuntime } from '../runtime';
 import type { CommandRunner } from './command-runner';
 import { ProcessCommandRunner } from './command-runner';
 
@@ -63,7 +64,7 @@ export class NpmTarballVersionInstaller implements VersionInstaller {
   }
 
   async smokeTest(version: InstalledVersion): Promise<void> {
-    const result = await this.runner.run(process.execPath, [version.entryPath, '--version'], {
+    const result = await this.runner.run(currentRuntime.execPath, [version.entryPath, '--version'], {
       cwd: version.installDir,
     });
     const actual = result.stdout.trim();

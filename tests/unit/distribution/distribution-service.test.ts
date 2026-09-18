@@ -142,7 +142,7 @@ async function createFixture(options: { failFirstHealthCheck?: boolean } = {}) {
   };
   const launcher: StableLauncherPort = {
     write: vi.fn(async () => {}),
-    launchSpec: vi.fn(() => ({ nodePath: '/usr/bin/node', entryPath: '/stable/launcher.mjs' })),
+    launchSpec: vi.fn(() => ({ runtimePath: '/usr/bin/node', entryPath: '/stable/launcher.mjs' })),
   };
   const service = new DistributionService(
     store,

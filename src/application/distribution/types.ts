@@ -132,7 +132,7 @@ export interface ServiceOrchestrator {
   assertSafe(targets: UpdateServiceTarget[], force: boolean): Promise<void>;
   reconcileLaunchers(
     targets: UpdateServiceTarget[],
-    launcher: { nodePath: string; entryPath: string },
+    launcher: { runtimePath: string; entryPath: string },
   ): Promise<void>;
   restartAndCheck(targets: UpdateServiceTarget[], expectedVersion: string): Promise<void>;
 }
@@ -156,6 +156,6 @@ export interface DistributionRepository {
 }
 
 export interface StableLauncherPort {
-  launchSpec(): { nodePath: string; entryPath: string };
+  launchSpec(): { runtimePath: string; entryPath: string };
   write(): Promise<void>;
 }

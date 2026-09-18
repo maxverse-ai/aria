@@ -10,13 +10,15 @@ import {
   systemdUnitPath,
 } from './paths';
 import { paths } from '../config/paths';
+import { currentRuntime, isBunRuntime, runtimeEntryPath } from '../platform/runtime';
 import type { ServiceLaunchSpec } from './service-adapter';
 
 export interface UnitInputs {
-  /** Absolute path to the node binary that should run the bridge. */
-  nodePath: string;
-  /** Absolute path to the bridge CLI entry (the file currently executing). */
-  bridgeEntryPath: string;
+  /** Absolute path to the JS runtime (node or bun) that runs the bridge. */
+  runtimePath: string;
+  /** Absolute path to the bridge CLI entry (the file currently executing).
+   * Omitted for embedded entries inside a compiled runtime binary. */
+  bridgeEntryPath?: string;
   /** PATH for the daemon process — captured from current shell so child
    * tools (lark-cli, claude) can be resolved by name. systemd user units
    * inherit a minimal env otherwise. */
@@ -49,6 +51,7 @@ export function buildUnit(inputs: UnitInputs): string {
   // Profile names / flags are validated safe tokens (no spaces), so appending
   // them unquoted is fine.
   const runArgs = inputs.runArgs.join(' ');
+  const entry = inputs.bridgeEntryPath ? ` "${escape(inputs.bridgeEntryPath)}"` : '';
   return `[Unit]
 Description=Lark Channel Bridge bot
 After=network-online.target
@@ -56,7 +59,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart="${escape(inputs.nodePath)}" "${escape(inputs.bridgeEntryPath)}" ${runArgs}
+ExecStart="${escape(inputs.runtimePath)}"${entry} ${runArgs}
 Restart=always
 RestartSec=5
 StandardOutput=append:${daemonStdoutPath(inputs.profile)}
@@ -74,12 +77,12 @@ export async function writeUnit(
   runArgs: string[] = ['run'],
   launchSpec?: ServiceLaunchSpec,
 ): Promise<void> {
-  const bridgeEntryPath = launchSpec?.bridgeEntryPath ?? process.argv[1];
-  if (!bridgeEntryPath) {
+  const bridgeEntryPath = launchSpec?.bridgeEntryPath ?? runtimeEntryPath();
+  if (!bridgeEntryPath && !isBunRuntime()) {
     throw new Error('cannot determine bridge entry path (process.argv[1] is empty)');
   }
   const content = buildUnit({
-    nodePath: launchSpec?.nodePath ?? process.execPath,
+    runtimePath: launchSpec?.runtimePath ?? currentRuntime.execPath,
     bridgeEntryPath,
     envPath: process.env.PATH ?? '',
     profile,

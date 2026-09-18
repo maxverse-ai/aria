@@ -22,6 +22,6 @@ describe('node version deprecation notice', () => {
 
   it('is wired into the CLI entry so it cannot silently stop appearing', async () => {
     const source = await readFile(new URL('../../../src/cli/index.ts', import.meta.url), 'utf8');
-    expect(source).toContain('nodeVersionNotice(process.versions.node)');
+    expect(source).toContain('runtimeNotice()');
   });
 });

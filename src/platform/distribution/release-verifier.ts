@@ -4,6 +4,7 @@ import { lstat, readFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { validateReleaseManifest } from '../../application/distribution/release-manifest';
 import { compareStableVersions, parseStableVersion } from '../../application/distribution/semver';
+import { currentRuntime, isBunRuntime, REQUIRED_BUN_MAJOR } from '../runtime';
 import {
   INSTALL_STATE_SCHEMA_VERSION,
   type ReleaseDescriptor,
@@ -141,6 +142,15 @@ function safeBasename(value: unknown, field: string): string {
 function assertNodeRange(range: string): void {
   const match = /^>=(\d+\.\d+\.\d+)$/.exec(range.trim());
   if (!match) throw new Error(`unsupported Node.js engine range: ${range}`);
+  if (isBunRuntime()) {
+    // The manifest's Node.js engine floor does not apply to Bun; enforce the
+    // Bun runtime floor instead.
+    const major = Number.parseInt(currentRuntime.version.split('.')[0] ?? '', 10);
+    if (!Number.isFinite(major) || major < REQUIRED_BUN_MAJOR) {
+      throw new Error(`release requires Bun ${REQUIRED_BUN_MAJOR} or newer; current version is ${currentRuntime.version}`);
+    }
+    return;
+  }
   const current = process.versions.node.split('-')[0]!;
   if (compareStableVersions(current, match[1]!) < 0) {
     throw new Error(`release requires Node.js ${range}; current version is ${process.versions.node}`);

@@ -5,6 +5,7 @@ import type {
   UpdateOperationV1,
 } from '../../application/distribution/types';
 import { UPDATE_OPERATION_SCHEMA_VERSION } from '../../application/distribution/types';
+import { currentRuntime } from '../runtime';
 import { spawnProcess } from '../spawn';
 import type { CommandRunner } from './command-runner';
 import { ProcessCommandRunner } from './command-runner';
@@ -15,7 +16,7 @@ export class OsDetachedUpdateExecutor implements DetachedUpdateExecutor {
     private readonly updaterEntry: string,
     private readonly runner: CommandRunner = new ProcessCommandRunner(),
     private readonly platform: NodeJS.Platform = process.platform,
-    private readonly nodePath = process.execPath,
+    private readonly runtimePath = currentRuntime.execPath,
     private readonly now: () => Date = () => new Date(),
     private readonly env: NodeJS.ProcessEnv = process.env,
   ) {}
@@ -78,19 +79,19 @@ export class OsDetachedUpdateExecutor implements DetachedUpdateExecutor {
         '--unit', label,
         '--property=Type=exec',
         ...(githubConfig ? [`--setenv=GH_CONFIG_DIR=${githubConfig}`] : []),
-        this.nodePath,
+        this.runtimePath,
         ...updaterArgs,
       ]);
       return;
     }
     if (this.platform === 'darwin') {
       await this.runner.run('launchctl', [
-        'submit', '-l', `ai.maxverse.${label}`, '--', this.nodePath, ...updaterArgs,
+        'submit', '-l', `ai.maxverse.${label}`, '--', this.runtimePath, ...updaterArgs,
       ]);
       return;
     }
     if (this.platform === 'win32') {
-      const child = spawnProcess(this.nodePath, updaterArgs, {
+      const child = spawnProcess(this.runtimePath, updaterArgs, {
         detached: true,
         stdio: 'ignore',
         windowsHide: true,

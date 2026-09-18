@@ -1,10 +1,12 @@
 import { chmod, mkdir } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
 import { writeFileAtomic } from '../atomic-write';
+import { currentRuntime, type RuntimeKind } from '../runtime';
 import type { InstallPaths } from './install-layout';
 
 export interface LauncherSpec {
-  nodePath: string;
+  /** JS runtime executable (node or bun) used by generated launchers. */
+  runtimePath: string;
   entryPath: string;
 }
 
@@ -13,11 +15,12 @@ export class StableLauncher {
   constructor(
     private readonly paths: InstallPaths,
     private readonly platform: NodeJS.Platform = process.platform,
-    private readonly nodePath = process.execPath,
+    private readonly runtimePath = currentRuntime.execPath,
+    private readonly runtimeKind: RuntimeKind = currentRuntime.kind,
   ) {}
 
   launchSpec(): LauncherSpec {
-    return { nodePath: this.nodePath, entryPath: this.paths.launcherModuleFile };
+    return { runtimePath: this.runtimePath, entryPath: this.paths.launcherModuleFile };
   }
 
   async write(): Promise<void> {
@@ -27,10 +30,10 @@ export class StableLauncher {
     ]);
     await writeFileAtomic(this.paths.launcherModuleFile, launcherSource(this.paths.stateFile), { mode: 0o755 });
     if (this.platform === 'win32') {
-      await writeFileAtomic(this.paths.commandFile, windowsCommand(this.nodePath, this.paths.launcherModuleFile), { mode: 0o755 });
+      await writeFileAtomic(this.paths.commandFile, windowsCommand(this.runtimePath, this.paths.launcherModuleFile), { mode: 0o755 });
       return;
     }
-    await writeFileAtomic(this.paths.commandFile, unixCommand(this.paths.launcherModuleFile), { mode: 0o755 });
+    await writeFileAtomic(this.paths.commandFile, unixCommand(this.paths.launcherModuleFile, this.runtimeKind), { mode: 0o755 });
     await chmod(this.paths.commandFile, 0o755);
   }
 }
@@ -48,12 +51,12 @@ await import(pathToFileURL(state.current.entryPath).href);
 `;
 }
 
-function unixCommand(launcherModuleFile: string): string {
-  return `#!/usr/bin/env node\nimport ${JSON.stringify(pathToFileURL(launcherModuleFile).href)};\n`;
+function unixCommand(launcherModuleFile: string, kind: RuntimeKind = 'node'): string {
+  return `#!/usr/bin/env ${kind === 'bun' ? 'bun' : 'node'}\nimport ${JSON.stringify(pathToFileURL(launcherModuleFile).href)};\n`;
 }
 
-function windowsCommand(nodePath: string, launcherModuleFile: string): string {
-  return `@echo off\r\n"${escapeCmd(nodePath)}" "${escapeCmd(launcherModuleFile)}" %*\r\n`;
+function windowsCommand(runtimePath: string, launcherModuleFile: string): string {
+  return `@echo off\r\n"${escapeCmd(runtimePath)}" "${escapeCmd(launcherModuleFile)}" %*\r\n`;
 }
 
 function escapeCmd(value: string): string {

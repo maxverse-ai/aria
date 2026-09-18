@@ -10,13 +10,15 @@ import {
   windowsLauncherCmdPath,
 } from './paths';
 import { paths } from '../config/paths';
+import { currentRuntime, isBunRuntime, runtimeEntryPath } from '../platform/runtime';
 import type { ServiceLaunchSpec } from './service-adapter';
 
 export interface LauncherInputs {
-  /** Absolute path to node.exe. */
-  nodePath: string;
-  /** Absolute path to the bridge CLI entry. */
-  bridgeEntryPath: string;
+  /** Absolute path to the JS runtime executable (node.exe or bun.exe). */
+  runtimePath: string;
+  /** Absolute path to the bridge CLI entry. Omitted for embedded entries
+   * inside a compiled runtime binary. */
+  bridgeEntryPath?: string;
   /** PATH for the child process; baked into the .cmd via `set PATH=`. */
   envPath: string;
   /** Service id (profile name, or the reserved supervisor id) — drives the
@@ -48,7 +50,7 @@ export function buildLauncherCmd(inputs: LauncherInputs): string {
     '@echo off',
     `set "LARK_CHANNEL_HOME=${inputs.channelHome}"`,
     `set "PATH=${inputs.envPath}"`,
-    `"${inputs.nodePath}" "${inputs.bridgeEntryPath}" ${runArgs} >> "${daemonStdoutPath(inputs.profile)}" 2>> "${daemonStderrPath(inputs.profile)}"`,
+    `"${inputs.runtimePath}"${inputs.bridgeEntryPath ? ` "${inputs.bridgeEntryPath}"` : ''} ${runArgs} >> "${daemonStdoutPath(inputs.profile)}" 2>> "${daemonStderrPath(inputs.profile)}"`,
     '',
   ].join('\r\n');
 }
@@ -58,12 +60,12 @@ async function writeLauncherCmd(
   runArgs: string[] = ['run'],
   launchSpec?: ServiceLaunchSpec,
 ): Promise<void> {
-  const bridgeEntryPath = launchSpec?.bridgeEntryPath ?? process.argv[1];
-  if (!bridgeEntryPath) {
+  const bridgeEntryPath = launchSpec?.bridgeEntryPath ?? runtimeEntryPath();
+  if (!bridgeEntryPath && !isBunRuntime()) {
     throw new Error('cannot determine bridge entry path (process.argv[1] is empty)');
   }
   const content = buildLauncherCmd({
-    nodePath: launchSpec?.nodePath ?? process.execPath,
+    runtimePath: launchSpec?.runtimePath ?? currentRuntime.execPath,
     bridgeEntryPath,
     envPath: process.env.PATH ?? '',
     profile,

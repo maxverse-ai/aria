@@ -1,6 +1,6 @@
 import { Command } from 'commander';
 import pkg from '../../package.json';
-import { nodeVersionNotice } from './node-version';
+import { runtimeNotice } from './node-version';
 import { formatAgentPreflightDiagnostic, getAgentPreflightDiagnostic } from '../agent/preflight';
 import { runKillCli, runPs } from './commands/ps';
 import {
@@ -67,7 +67,7 @@ import { runWorker } from './commands/worker';
 import { runSpaceCommand, type SpaceCliOptions } from './commands/space';
 
 // Announce an unsupported-but-not-yet-removed runtime before any command runs.
-const nodeVersionWarning = nodeVersionNotice(process.versions.node);
+const nodeVersionWarning = runtimeNotice();
 if (nodeVersionWarning) process.stderr.write(nodeVersionWarning);
 
 const program = new Command();

@@ -15,7 +15,7 @@ describe('StableLauncher', () => {
 
     expect(await readFile(paths.launcherModuleFile, 'utf8')).toContain(JSON.stringify(paths.stateFile));
     expect(await readFile(paths.commandFile, 'utf8')).toContain(paths.launcherModuleFile);
-    expect(launcher.launchSpec()).toEqual({ nodePath: process.execPath, entryPath: paths.launcherModuleFile });
+    expect(launcher.launchSpec()).toEqual({ runtimePath: process.execPath, entryPath: paths.launcherModuleFile });
   });
 
   it('loads the selected version and preserves CLI arguments', async () => {

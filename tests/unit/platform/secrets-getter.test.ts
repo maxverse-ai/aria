@@ -18,7 +18,7 @@ describe('secrets getter wrapper platform output', () => {
 
     const result = await ensureSecretsGetterWrapper(
       { rootDir: root, secretsGetterScript: script },
-      { platform: 'darwin', nodePath: '/opt/node/bin/node', bridgeEntry: '/opt/bridge/bin.mjs' },
+      { platform: 'darwin', runtimePath: '/opt/node/bin/node', bridgeEntry: '/opt/bridge/bin.mjs' },
     );
 
     expect(result).toBe(script);
@@ -39,7 +39,7 @@ describe('secrets getter wrapper platform output', () => {
       { rootDir: root, secretsGetterScript: script },
       {
         platform: 'win32',
-        nodePath: 'C:\\Program Files\\nodejs\\node.exe',
+        runtimePath: 'C:\\Program Files\\nodejs\\node.exe',
         bridgeEntry: 'C:\\bridge\\bin\\bridge.mjs',
       },
     );

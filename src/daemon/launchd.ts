@@ -11,13 +11,15 @@ import {
   launchAgentPlistPath,
 } from './paths';
 import { paths } from '../config/paths';
+import { currentRuntime, isBunRuntime, runtimeEntryPath } from '../platform/runtime';
 import type { ServiceLaunchSpec } from './service-adapter';
 
 export interface PlistInputs {
-  /** Absolute path to the node binary that should run the bridge. */
-  nodePath: string;
-  /** Absolute path to the bridge CLI entry (the file currently executing). */
-  bridgeEntryPath: string;
+  /** Absolute path to the JS runtime (node or bun) that runs the bridge. */
+  runtimePath: string;
+  /** Absolute path to the bridge CLI entry (the file currently executing).
+   * Omitted for embedded entries inside a compiled runtime binary. */
+  bridgeEntryPath?: string;
   /** PATH for the daemon process — captured from current shell so child
    * tools (lark-cli, claude) can be resolved by name. launchd defaults
    * to a very minimal PATH otherwise. */
@@ -40,6 +42,7 @@ export function buildPlist(inputs: PlistInputs): string {
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;');
   const argStrings = inputs.runArgs.map((a) => `        <string>${escape(a)}</string>`).join('\n');
+  const entry = inputs.bridgeEntryPath ? `        <string>${escape(inputs.bridgeEntryPath)}</string>\n` : '';
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -48,9 +51,8 @@ export function buildPlist(inputs: PlistInputs): string {
     <string>${launchAgentLabel(inputs.profile)}</string>
     <key>ProgramArguments</key>
     <array>
-        <string>${escape(inputs.nodePath)}</string>
-        <string>${escape(inputs.bridgeEntryPath)}</string>
-${argStrings}
+        <string>${escape(inputs.runtimePath)}</string>
+${entry}${argStrings}
     </array>
     <key>RunAtLoad</key>
     <true/>
@@ -77,12 +79,12 @@ export async function writePlist(
   runArgs: string[] = ['run'],
   launchSpec?: ServiceLaunchSpec,
 ): Promise<void> {
-  const bridgeEntryPath = launchSpec?.bridgeEntryPath ?? process.argv[1];
-  if (!bridgeEntryPath) {
+  const bridgeEntryPath = launchSpec?.bridgeEntryPath ?? runtimeEntryPath();
+  if (!bridgeEntryPath && !isBunRuntime()) {
     throw new Error('cannot determine bridge entry path (process.argv[1] is empty)');
   }
   const content = buildPlist({
-    nodePath: launchSpec?.nodePath ?? process.execPath,
+    runtimePath: launchSpec?.runtimePath ?? currentRuntime.execPath,
     bridgeEntryPath,
     envPath: process.env.PATH ?? '',
     profile,

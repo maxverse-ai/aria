@@ -59,7 +59,8 @@
     "ci:local": "git diff --check && pnpm infra:doctor && pnpm release:check -- --base-ref origin/main && pnpm test && pnpm typecheck && pnpm build",
     "ci:platform": "pnpm infra:doctor && pnpm release:check && pnpm test && pnpm typecheck && pnpm build",
     "prepare": "pnpm build",
-    "prepublishOnly": "node tools/release.mjs publish-gate && pnpm release:check && pnpm typecheck && pnpm build"
+    "prepublishOnly": "node tools/release.mjs publish-gate && pnpm release:check && pnpm typecheck && pnpm build",
+    "artifact:bun": "pnpm build && bun build bin/aria.mjs --compile --outfile dist/aria-bun"
   },
   "dependencies": {
     "@clack/prompts": "^1.4.0",

@@ -185,7 +185,7 @@ export class DistributionService {
       await this.store.writeOperation(operation);
       const spec = this.launcher.launchSpec();
       await this.services.reconcileLaunchers(targets, {
-        nodePath: spec.nodePath,
+        runtimePath: spec.runtimePath,
         entryPath: spec.entryPath,
       });
       await this.services.restartAndCheck(targets, installed.version);
@@ -247,7 +247,7 @@ export class DistributionService {
       await this.store.writeState({ ...state, current: target, previous: current });
       switched = true;
       const spec = this.launcher.launchSpec();
-      await this.services.reconcileLaunchers(targets, { nodePath: spec.nodePath, entryPath: spec.entryPath });
+      await this.services.reconcileLaunchers(targets, { runtimePath: spec.runtimePath, entryPath: spec.entryPath });
       transition(operation, 'restarting', this.now());
       await this.store.writeOperation(operation);
       await this.services.restartAndCheck(targets, target.version);
@@ -263,7 +263,7 @@ export class DistributionService {
           await this.store.writeState({ ...state, current, previous: target });
           const spec = this.launcher.launchSpec();
           targets = await this.services.discover();
-          await this.services.reconcileLaunchers(targets, { nodePath: spec.nodePath, entryPath: spec.entryPath });
+          await this.services.reconcileLaunchers(targets, { runtimePath: spec.runtimePath, entryPath: spec.entryPath });
           await this.services.restartAndCheck(targets, current.version);
         } catch (restoreErr) {
           const restoreFailure = normalizeError(restoreErr);
@@ -305,7 +305,7 @@ export class DistributionService {
     });
     if (previous) {
       const spec = this.launcher.launchSpec();
-      await this.services.reconcileLaunchers(targets, { nodePath: spec.nodePath, entryPath: spec.entryPath });
+      await this.services.reconcileLaunchers(targets, { runtimePath: spec.runtimePath, entryPath: spec.entryPath });
       await this.services.restartAndCheck(targets, previous.version);
     }
   }

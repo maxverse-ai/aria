@@ -65,10 +65,10 @@ export class OsServiceOrchestrator implements ServiceOrchestrator {
 
   async reconcileLaunchers(
     targets: UpdateServiceTarget[],
-    launcher: { nodePath: string; entryPath: string },
+    launcher: { runtimePath: string; entryPath: string },
   ): Promise<void> {
     const launchSpec: ServiceLaunchSpec = {
-      nodePath: launcher.nodePath,
+      runtimePath: launcher.runtimePath,
       bridgeEntryPath: launcher.entryPath,
     };
     for (const target of targets) {

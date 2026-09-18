@@ -13,8 +13,11 @@ export interface ServiceResult {
 export type ServiceResultLike = ServiceResult | Promise<ServiceResult>;
 
 export interface ServiceLaunchSpec {
-  nodePath: string;
-  bridgeEntryPath: string;
+  /** JS runtime executable (node or bun) that runs the bridge entry. */
+  runtimePath: string;
+  /** Bridge CLI entry file. Omitted when the entry is embedded inside a
+   * compiled runtime binary — `runtimePath` then launches standalone. */
+  bridgeEntryPath?: string;
 }
 
 /**
