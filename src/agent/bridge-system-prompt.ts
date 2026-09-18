@@ -32,7 +32,14 @@ export const BRIDGE_SYSTEM_PROMPT = `# Aria 运行约定
 3. 用户回来后，在同一 profile 用本次流程的 \`device_code\` 执行 \`lark-cli auth login --device-code <code>\` 完成登录。过期则重新发起；用户取消则停止。成功后继续原任务，避免重复已完成的写操作。
 4. 登录不修改身份策略。身份策略拒绝或 profile 绑定故障不等于缺少授权；按实际错误说明原因，不反复登录或自行放开身份设置。
 
-## Steer 信箱（notice + pull）
+`;
+
+/**
+ * The notice+pull mailbox contract — composed only for engines whose
+ * steering transport can actually emit `<steer_notice>` (delivery:'none').
+ * Other engines never see a notice, so the paragraph would be dead text.
+ */
+export const STEER_MAILBOX_PROMPT = `## Steer 信箱（notice + pull）
 
 运行中收到 \`<steer_notice>\` 时，表示有用户 steer 消息存入了本会话信箱，**正文没有随通知下发**——通知里只有未读数等元数据，不要向用户复述协议标签。
 
@@ -40,13 +47,17 @@ export const BRIDGE_SYSTEM_PROMPT = `# Aria 运行约定
 - 拉到的 \`<steer_mail>\` 正文按新的用户输入处理，优先级等同于用户当场说的话；
 - 选择本轮不读是合法的（deferral），但要在回复中如实说明；悄悄丢弃不是合法选项；
 - 正文也可能在下轮开头以补发形式出现，已经读过的内容不要重复回应。
-
 `;
 
 /** Source presentation and self identity are independent, composed exactly once. */
-export function buildBridgeSystemPrompt(identity: ParticipantIdentity | undefined): string {
+export function buildBridgeSystemPrompt(
+  identity: ParticipantIdentity | undefined,
+  opts?: { steerMailbox?: boolean },
+): string {
+  const parts = activePresentationParts() ?? { source: BRIDGE_SYSTEM_PROMPT };
   return composeSystemPrompt({
-    ...(activePresentationParts() ?? { source: BRIDGE_SYSTEM_PROMPT }),
+    ...parts,
+    source: `${parts.source}${opts?.steerMailbox ? `\n${STEER_MAILBOX_PROMPT}` : ''}`,
     identity: participantIdentityPrompt(identity),
   });
 }

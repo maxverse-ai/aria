@@ -53,8 +53,13 @@ describe('ClaudeAdapter system prompt wiring', () => {
     // (cmd.exe would mangle it on Windows). stdin stays open for steering.
     expect(await readPromptText(child.stdin)).toBe('hi');
     expect(systemPromptFileContent()).toBe(
-      buildBridgeSystemPrompt({ providerId: 'lark', accountId: 'app', subjectId: 'ou_bot_self', displayName: 'Bridge' }),
+      buildBridgeSystemPrompt(
+        { providerId: 'lark', accountId: 'app', subjectId: 'ou_bot_self', displayName: 'Bridge' },
+        { steerMailbox: true },
+      ),
     );
+    // delivery:'none' engines compose the notice+pull contract in.
+    expect(systemPromptFileContent()).toContain('## Steer 信箱');
   });
 
   it('falls back to the base system prompt when no identity was set', async () => {
@@ -65,7 +70,7 @@ describe('ClaudeAdapter system prompt wiring', () => {
     adapter.run({ runId: 'r1', scopeId: 'scope-test', prompt: 'hi', cwd: '/tmp' });
 
     expect(await readPromptText(child.stdin)).toBe('hi');
-    expect(systemPromptFileContent()).toBe(buildBridgeSystemPrompt(undefined));
+    expect(systemPromptFileContent()).toBe(buildBridgeSystemPrompt(undefined, { steerMailbox: true }));
   });
 
   function systemPromptFileContent(): string {

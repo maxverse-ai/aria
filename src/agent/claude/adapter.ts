@@ -89,7 +89,13 @@ export class ClaudeAdapter implements AgentAdapter {
     // stream-json response. Pass the prompt via stdin and the appended system
     // prompt via a temp file (the same approach the Codex adapter uses) so no
     // special characters ever reach the shell.
-    const systemPromptFile = writeSystemPromptFile(buildBridgeSystemPrompt(opts.identity), this.systemPromptDirectory);
+    const systemPromptFile = writeSystemPromptFile(
+      buildBridgeSystemPrompt(opts.identity, {
+        // Only transports that can receive <steer_notice> need the contract.
+        steerMailbox: CLAUDE_STEERING_SUPPORT.delivery === 'none',
+      }),
+      this.systemPromptDirectory,
+    );
 
     const args = [
       '-p',

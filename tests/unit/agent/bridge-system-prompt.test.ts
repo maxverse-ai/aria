@@ -49,6 +49,20 @@ describe('buildBridgeSystemPrompt', () => {
   });
 });
 
+describe('steer mailbox contract', () => {
+  it('stays out of the base prompt by default', () => {
+    expect(BRIDGE_SYSTEM_PROMPT).not.toContain('<steer_notice>');
+    expect(buildBridgeSystemPrompt(undefined)).not.toContain('<steer_notice>');
+  });
+
+  it('is composed in only for mailbox-capable engines', () => {
+    const prompt = buildBridgeSystemPrompt(undefined, { steerMailbox: true });
+    expect(prompt).toContain('## Steer 信箱');
+    expect(prompt).toContain('<steer_notice>');
+    expect(prompt).toContain('inbox pull');
+  });
+});
+
 describe('prefixBridgeSystemPrompt', () => {
   it('prefixes the identity-aware system prompt before the user message', () => {
     const prompt = prefixBridgeSystemPrompt('hello world', { providerId: 'lark', accountId: 'app', subjectId: 'ou_bot_self' });
