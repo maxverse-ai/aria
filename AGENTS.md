@@ -18,6 +18,7 @@
 - If `main` changes during validation or the push is rejected as non-fast-forward, fetch, rebase, rerun the required gates, and retry the normal push.
 - Merge conflicts MUST stop and be reported. Do not guess through conflicts, and do not stage, commit, stash, reset, or overwrite changes owned by another task.
 - Release and deployment artifacts MUST be built from the exact merged commit, never from a development worktree.
+- A worktree is scratch space, not storage. After the task commit lands on `origin/main`, remove the task worktree and delete the merged `agent/*` branch (`git worktree remove <path> && git branch -d <branch>`); do not leave stale worktrees behind.
 
 ## External contributions
 
@@ -69,4 +70,9 @@
 - [docs/DOCUMENTATION_POLICY.md](docs/DOCUMENTATION_POLICY.md) owns how documents
   are classified and maintained. Read it before adding, moving, or restructuring
   a document, and keep the status header it requires accurate.
+- A change is incomplete while it invalidates a `current` document: update the
+  document in the same commit that changes the behavior. Before finishing,
+  grep `docs/` for the terms the change renames or removes.
+- `site/` republishes `docs/` on every build, so updating `docs/` is the entire
+  docs-site sync step. Never edit `site/content/` — it is generated.
 - Do not restate a fact that already has a single source of truth; reference it.
