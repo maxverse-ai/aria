@@ -66,6 +66,12 @@ export interface EnginePlugin {
   }): Promise<EngineHistoryEntry[]>;
   /** Live model list; falls back to {@link modelOptions} when absent/failing. */
   modelLister?(input: { profileConfig: EngineProfileConfig; signal: AbortSignal }): Promise<ModelOption[]>;
+  /**
+   * Extra acceptance check for a `/model` value outside the picker list —
+   * engines whose server resolves free-form model ids (Devin family/variant
+   * uids) return true for values they can prove valid.
+   */
+  modelValueAllowed?(input: { profileConfig: EngineProfileConfig; value: string }): boolean;
   /** CLI args for a reasoning effort value, e.g. `['--variant', 'high']`. */
   effortFlag?(value: string): string[];
   /** Proven fallback capability when the live model catalog has no metadata. */

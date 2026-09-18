@@ -6,6 +6,11 @@ import { defineEngineRuntimeFactory } from '../../runtime/construction';
 import { resolveExecutablePath } from '../../../platform/executable';
 import { DevinAcpRuntime } from './acp/runtime';
 import { listDevinSessionHistory } from './history';
+import {
+  devinModelFamiliesSnapshot,
+  findDevinFamily,
+  listDevinModelOptions,
+} from './models';
 
 export const devinRuntimeFactory = defineEngineRuntimeFactory(
   'devin',
@@ -74,6 +79,20 @@ export const devinEnginePlugin: EnginePlugin = {
   }),
   createRuntime: devinRuntimeFactory.createRuntime,
   modelOptions: () => DEVIN_MODELS,
+  modelLister: async ({ profileConfig }) => {
+    const binary = profileConfig.devin?.binaryPath;
+    if (!binary) return [];
+    return listDevinModelOptions({ binary, ...(profileConfig.devin?.apiKeyEnv ? { apiKeyEnv: profileConfig.devin.apiKeyEnv } : {}) });
+  },
+  modelValueAllowed: ({ profileConfig, value }) => {
+    const binary = profileConfig.devin?.binaryPath;
+    if (!binary) return false;
+    const families = devinModelFamiliesSnapshot({
+      binary,
+      ...(profileConfig.devin?.apiKeyEnv ? { apiKeyEnv: profileConfig.devin.apiKeyEnv } : {}),
+    });
+    return families ? findDevinFamily(families, value) !== undefined : false;
+  },
 };
 
 registerModelOptions('devin', () => DEVIN_MODELS);

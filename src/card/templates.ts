@@ -268,11 +268,24 @@ export function agentCard(
   return shell('🤖 引擎管理', elements);
 }
 
+/** Long catalogs (e.g. a live engine catalog) render only the head of the
+ *  list; the current selection is always kept visible and the footer tells
+ *  users how to pick values outside the card. */
+const MODEL_CARD_MAX_OPTIONS = 30;
+
 export function modelsCard(options: ModelOption[], current: string): object {
   const elements: object[] = [];
   elements.push(divMd(`当前模型：\`${escapeCode(current)}\``));
   elements.push(HR);
-  options.forEach((option, i) => {
+  let shown = options;
+  if (options.length > MODEL_CARD_MAX_OPTIONS) {
+    shown = options.slice(0, MODEL_CARD_MAX_OPTIONS);
+    const currentOption = options.find((option) => option.value === current);
+    if (currentOption && !shown.some((option) => option.value === current)) {
+      shown = [...shown, currentOption];
+    }
+  }
+  shown.forEach((option, i) => {
     const marker = option.value === current ? '  ← 当前' : '';
     elements.push(
       divMd(`**${escapeMd(option.label)}**\n\`${escapeCode(option.value)}\`${marker}`),
@@ -288,8 +301,15 @@ export function modelsCard(options: ModelOption[], current: string): object {
         ]),
       );
     }
-    if (i < options.length - 1) elements.push(HR);
+    if (i < shown.length - 1) elements.push(HR);
   });
+  if (shown.length < options.length) {
+    elements.push(HR);
+    elements.push(divMd(
+      `_共 ${options.length} 个模型，仅展示前 ${MODEL_CARD_MAX_OPTIONS} 个；` +
+      `其余可用 \`/model <名称>\` 精确选择。_`,
+    ));
+  }
   elements.push(HR);
   elements.push(actions([{ text: '刷新模型列表', value: { cmd: 'model.refresh' } }]));
   return shell('🧠 模型管理', elements);
@@ -373,7 +393,7 @@ export function fastModeCard(info: FastModeCardInfo): object {
       ? `${info.configuredTier}（Fast off）`
       : info.current === 'off'
       ? 'Fast off（标准速度）'
-      : '跟随 Codex 配置';
+      : '跟随 Agent 配置';
   elements.push(
     divMd([
       `Agent：\`${escapeCode(info.agent)}\``,
@@ -451,7 +471,7 @@ export function helpCard(agentName = 'Agent', team = false): object {
         '- `/effort` — 查看并选择推理强度',
         '- `/goal` — 查看或设置当前会话的长期目标（Codex，默认暂停）',
         '- `/loop [--max <n>] <任务>` — 同一任务循环跑多轮，每轮独立回复；`/loop stop` 停止（管理员）',
-        '- `/fast [on|off|status]` — 管理 Codex Fast 模式（管理员）',
+        '- `/fast [on|off|status]` — 管理加速服务档位（管理员）',
         '- `/status` — 当前状态',
         '- `/remind at <ISO时间> <任务>` — 在当前会话创建提醒；`/remind list` 查看',
         '- `/stop` — 结束当前正在跑的任务（也可点卡片底部 ⏹ 终止 按钮）',

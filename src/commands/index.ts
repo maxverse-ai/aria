@@ -10,7 +10,7 @@ import { homedir } from 'node:os';
 import { dirname, isAbsolute } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import type { LarkChannel, NormalizedMessage } from '@larksuite/channel';
-import { capabilityFor, requireEnginePlugin } from '../agent/plugin/registry';
+import { capabilityFor, getEnginePlugin, requireEnginePlugin } from '../agent/plugin/registry';
 import { probeEngineStatus, snapshotEngineStatus } from '../agent/plugin/probe';
 import { getEngineModelCatalog, listEngineModels } from '../agent/model-catalog';
 import { resolveReasoning, savedReasoningEffort, reasoningPreferenceKey } from '../agent/reasoning';
@@ -1239,7 +1239,7 @@ async function runModelsCardFlow(
 
     if (!target) throw new Error('缺少目标模型。');
     const options = await listModelsForContext(ctx);
-    if (target !== DEFAULT_MODEL && !options.some((option) => option.value === target)) {
+    if (target !== DEFAULT_MODEL && !modelValueAllowedForContext(ctx, target, options)) {
       throw new Error(`未知模型：${target}。请重新刷新模型列表。`);
     }
     await setModelPreference(ctx, target);
@@ -1272,7 +1272,7 @@ async function handleModelsCore(args: string, ctx: CommandContext): Promise<void
   if (sub === 'use' && rest[0]) {
     const value = rest[0]!;
     const options = await listModelsForContext(ctx);
-    if (value !== DEFAULT_MODEL && !options.some((o) => o.value === value)) {
+    if (value !== DEFAULT_MODEL && !modelValueAllowedForContext(ctx, value, options)) {
       await presentCardFailureOrReply(
         ctx,
         '🧠 模型管理',
@@ -1293,9 +1293,38 @@ async function handleModelsCore(args: string, ctx: CommandContext): Promise<void
     return;
   }
 
+  // `/model <value>` selects directly; engine hooks may accept catalog
+  // values the picker does not list (e.g. concrete variant uids).
+  if (sub && sub !== 'refresh') {
+    const options = await listModelsForContext(ctx);
+    if (!modelValueAllowedForContext(ctx, sub, options)) {
+      await reply(ctx, `未知模型：${sub}。请重新刷新模型列表。`);
+      return;
+    }
+    await setModelPreference(ctx, sub);
+    const reasoning = await reasoningStateForContext(ctx);
+    await reply(
+      ctx,
+      `已设置模型：\`${sub}\`，推理配置：\`${reasoning.resolution.selected}\`（下一条消息生效）。`,
+    );
+    return;
+  }
+
   const force = sub === 'refresh';
   const options = includeConfiguredModel(await listModelsForContext(ctx, force), current);
   await presentCommandCard(ctx, modelsCard(options, current));
+}
+
+function modelValueAllowedForContext(
+  ctx: CommandContext,
+  value: string,
+  options: ModelOption[],
+): boolean {
+  if (options.some((option) => option.value === value)) return true;
+  return getEnginePlugin(ctx.controls.profileConfig.agentKind)?.modelValueAllowed?.({
+    profileConfig: ctx.controls.profileConfig,
+    value,
+  }) === true;
 }
 
 function listModelsForContext(ctx: CommandContext, force = false): Promise<ModelOption[]> {
@@ -1462,7 +1491,7 @@ async function handleFast(args: string, ctx: CommandContext): Promise<void> {
     ctx.controls.profileConfig.agentKind,
     ctx.controls.profileConfig,
   ).supportsServiceTiers) {
-    await reply(ctx, '当前 Agent 没有可切换的服务档位；Fast 目前仅由支持该能力的 Codex Runtime 提供。');
+    await reply(ctx, '当前 Agent 没有可切换的服务档位。');
     return;
   }
 
@@ -1482,13 +1511,13 @@ async function handleFast(args: string, ctx: CommandContext): Promise<void> {
       if (!state.card.fastOption) {
         await reply(
           ctx,
-          '当前模型没有声明 Fast 能力。请先执行 `/fast refresh`；若仍不可用，请切换到 Codex 支持 Fast 的模型。',
+          '当前模型没有声明 Fast 能力。请先执行 `/fast refresh`；若仍不可用，请切换到声明了 Fast 能力的模型。',
         );
         return;
       }
     }
     await setFastPreference(ctx, choice);
-    const label = choice === 'on' ? 'Fast on' : choice === 'off' ? 'Fast off' : '跟随 Codex 配置';
+    const label = choice === 'on' ? 'Fast on' : choice === 'off' ? 'Fast off' : '跟随 Agent 配置';
     await reply(ctx, `已设置：\`${label}\`（下一次运行生效，状态栏会显示实际结果）。`);
     return;
   }

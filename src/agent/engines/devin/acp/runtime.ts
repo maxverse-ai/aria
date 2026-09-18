@@ -45,6 +45,11 @@ import {
   type DevinSteeringMethod,
 } from './protocol';
 import { resolveDevinApiKey, startDevinAcp } from './process';
+import {
+  devinModelFamiliesSnapshot,
+  resolveDevinModelUid,
+  type DevinModelFamily,
+} from '../models';
 
 export interface DevinAcpRuntimeOptions {
   binary: string;
@@ -76,7 +81,7 @@ export class DevinAcpRuntime implements EngineRuntime {
       inputs: ['text', 'image'],
       liveInput: { mode: 'direct', inputs: ['text'] },
       sessions: ['resume', 'list'],
-      controls: ['interrupt', 'model'],
+      controls: ['interrupt', 'model', 'reasoning', 'service-tier'],
       interactions: [],
       telemetry: ['usage'],
     },
@@ -93,6 +98,20 @@ export class DevinAcpRuntime implements EngineRuntime {
     registerRuntimeQueries(this, {
       listHistory: async (input) => listDevinSessionsWithClient(await this.client(), input),
     });
+  }
+
+  /** Binary/key identity shared by the catalog cache and fetcher. */
+  modelCatalogInput(): { binary: string; apiKeyEnv?: string } {
+    return {
+      binary: this.options.binary,
+      ...(this.options.apiKeyEnv ? { apiKeyEnv: this.options.apiKeyEnv } : {}),
+    };
+  }
+
+  /** Live family/variant catalog snapshot; undefined until the first
+   *  background `devin models list` refresh completes. */
+  modelCatalog(): DevinModelFamily[] | undefined {
+    return devinModelFamiliesSnapshot(this.modelCatalogInput());
   }
 
   async client(): Promise<DevinAcpClient> {
@@ -551,7 +570,20 @@ export class DevinAgentRun implements AgentRun {
     // (a replay burst overflows the message_cot update batch and fails the run's
     // progress bubble with field-validation errors).
     let loadingSession = false;
-    const model = this.options.model && this.options.model !== 'default' ? this.options.model : undefined;
+    const modelSelection = resolveDevinModelUid(this.runtime.modelCatalog(), {
+      model: this.options.model,
+      effort: this.options.reasoningEffort,
+      speed: this.options.serviceTier,
+    });
+    for (const warning of modelSelection.warnings) {
+      log.warn('devin-acp', 'model-resolve-fallback', {
+        model: this.options.model,
+        effort: this.options.reasoningEffort,
+        speed: this.options.serviceTier,
+        warning,
+      });
+    }
+    const model = modelSelection.model;
     try {
       this.client = await this.runtime.client();
       offNotification = this.client.onNotification((notification) => {

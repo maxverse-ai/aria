@@ -90,6 +90,7 @@ export function devinCapability(profile: Pick<ProfileConfig, 'permissions'>): Ag
     },
     finalReply: 'separate',
     supportsImages: true,
+    supportsServiceTiers: true,
     steering: { mode: 'direct', textOnly: true, mechanism: 'prompt-merge', delivery: 'inferred' },
   };
 }

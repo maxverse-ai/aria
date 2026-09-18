@@ -34,7 +34,7 @@ describe('Devin ACP runtime', () => {
         inputs: ['text', 'image'],
         liveInput: { mode: 'direct', inputs: ['text'] },
         sessions: ['resume', 'list'],
-        controls: ['interrupt', 'model'],
+        controls: ['interrupt', 'model', 'reasoning', 'service-tier'],
       },
     });
 
