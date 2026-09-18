@@ -156,6 +156,15 @@ export interface AppPreferences {
    */
   runIdleTimeoutMinutes?: number;
   /**
+   * Silence warn threshold for agent runs, in minutes. When a run produces
+   * no stream events for this long its card/markdown status is annotated as
+   * silent — a presentation hint only, the run is never killed. Long-running
+   * in-flight tool calls do not pause this timer (a silent tool call is
+   * exactly the case worth surfacing). Default 20; 0 disables.
+   * Clamps to [1, 720] minutes when set.
+   */
+  runSilenceWarnMinutes?: number;
+  /**
    * Whether the bot only responds to messages that @-mention it in groups
    * (regular and topic groups). p2p is always unrestricted. Default true:
    * groups are quiet unless the user @bot. Set false to let any group
@@ -297,5 +306,18 @@ export function getRunIdleTimeoutMs(cfg: AppConfig): number | undefined {
   const raw = cfg.preferences?.runIdleTimeoutMinutes;
   if (typeof raw !== 'number' || !Number.isFinite(raw) || raw <= 0) return undefined;
   const clamped = Math.min(Math.max(Math.floor(raw), 1), 120);
+  return clamped * 60_000;
+}
+
+/**
+ * Silence warn threshold for agent runs. Defaults to 20 minutes when unset;
+ * an explicit 0 (or non-positive / non-numeric value) disables the annotation.
+ * Returns ms.
+ */
+export function getRunSilenceWarnMs(cfg: Pick<AppConfig, 'preferences'>): number | undefined {
+  const raw = cfg.preferences?.runSilenceWarnMinutes;
+  if (raw === undefined) return 20 * 60_000;
+  if (typeof raw !== 'number' || !Number.isFinite(raw) || raw <= 0) return undefined;
+  const clamped = Math.min(Math.max(Math.floor(raw), 1), 720);
   return clamped * 60_000;
 }

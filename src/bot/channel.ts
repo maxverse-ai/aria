@@ -33,6 +33,8 @@ import { CallbackAuth } from '../card/callback-auth';
 import { CallbackNonceStore } from '../card/callback-store';
 import { renderCard, type RunCardRenderOptions } from '../card/run-renderer';
 import {
+  annotateSilence,
+  clearSilence,
   finalizeIfRunning,
   createRunState,
   initialState,
@@ -63,6 +65,7 @@ import {
   getMaxConcurrentRuns,
   getMessageReplyMode,
   getRunIdleTimeoutMs,
+  getRunSilenceWarnMs,
   getShowToolCalls,
 } from '../config/schema';
 import { resolveAppSecret } from '../config/secret-resolver';
@@ -1217,6 +1220,7 @@ export function createEngineTurnDelivery(
         scopeOverride !== undefined
           ? scopeOverride > 0 ? scopeOverride * 60_000 : undefined
           : getRunIdleTimeoutMs(controls.cfg),
+        getRunSilenceWarnMs(controls.cfg),
         async () => {},
         async () => {},
       );
@@ -2050,6 +2054,11 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<Terminal | undefined> 
     log.info('flush', 'idle-watchdog', { idleTimeoutMs });
   }
 
+  // Silence warn is a global presentation knob — no per-scope override:
+  // unlike the kill watchdog it never touches the run, so there is nothing
+  // a scope would need to defend itself from.
+  const silenceWarnMs = getRunSilenceWarnMs(controls.cfg);
+
   const replyMode = getMessageReplyMode(controls.cfg);
   log.info('flush', 'reply-mode', { mode: replyMode });
   const presentation = controls.presentationStatus?.() ?? resolvePresentation(controls.cfg,
@@ -2123,7 +2132,7 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<Terminal | undefined> 
   try {
     if (!admissions.length && presentation.reasons.length) await channel.send(chatId, { text: presentationDescription(presentation) }, sendOpts);
     if (cooperative) {
-      const finalState = await trackedStream(handle, eventStream, scope, idleTimeoutMs,
+      const finalState = await trackedStream(handle, eventStream, scope, idleTimeoutMs, silenceWarnMs,
         recordSession, async () => {}, runInitialState);
       await sendFinalReply({ channel, chatId, scope, state: finalAnswerOnlyState(filterForPrefs(finalState)),
         replyMode, sendOpts, cardRenderOptions, commit: finalReplyCommit });
@@ -2153,7 +2162,7 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<Terminal | undefined> 
           handle,
           eventStream,
           scope,
-          idleTimeoutMs,
+          idleTimeoutMs, silenceWarnMs,
           recordSession,
           async () => {},
           runInitialState,
@@ -2194,7 +2203,7 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<Terminal | undefined> 
         progressFailed = true;
         await progressCard!.close().catch(() => log.warn('progress', 'card-cleanup-pending'));
       };
-      const finalState = await trackedStream(handle, eventStream, scope, idleTimeoutMs, recordSession,
+      const finalState = await trackedStream(handle, eventStream, scope, idleTimeoutMs, silenceWarnMs, recordSession,
         async (state) => {
           if (!progressFailed && (progressCard!.opened() || shouldOpenProgressStream(filterForPrefs(state)))) {
             try { progressCard!.queue(renderCard(filterForPrefs(state), cardRenderOptions)); }
@@ -2221,7 +2230,7 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<Terminal | undefined> 
         handle,
         eventStream,
         scope,
-        idleTimeoutMs,
+        idleTimeoutMs, silenceWarnMs,
         recordSession,
         async () => {},
         runInitialState,
@@ -2267,7 +2276,7 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<Terminal | undefined> 
         handle,
         eventStream,
         scope,
-        idleTimeoutMs,
+        idleTimeoutMs, silenceWarnMs,
         recordSession,
         async (state) => {
           latestState = state;
@@ -2344,7 +2353,7 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<Terminal | undefined> 
         handle,
         eventStream,
         scope,
-        idleTimeoutMs,
+        idleTimeoutMs, silenceWarnMs,
         recordSession,
         async (state) => {
           latestState = state;
@@ -2407,7 +2416,7 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<Terminal | undefined> 
         handle,
         eventStream,
         scope,
-        idleTimeoutMs,
+        idleTimeoutMs, silenceWarnMs,
         recordSession,
         async () => {},
         runInitialState,
@@ -2828,6 +2837,7 @@ async function processAgentStream(
   events: AsyncIterable<AgentEvent>,
   scope: string,
   idleTimeoutMs: number | undefined,
+  silenceWarnMs: number | undefined,
   recordSession: (event: AgentEvent) => Promise<void>,
   flush: (state: RunState) => Promise<void>,
   runInitialState: RunState = initialState,
@@ -2868,9 +2878,43 @@ async function processAgentStream(
   };
   armOrPauseIdle();
 
+  // Silence warn: presentation-only counterpart of the kill watchdog. After
+  // `silenceWarnMs` without stream events the run is annotated as silent —
+  // the run itself is never touched (turns have no duration cap). Unlike
+  // the kill watchdog this timer is NOT paused by in-flight tools: a tool
+  // call that has produced no output for a long time is exactly the case
+  // worth surfacing. Re-arms so the displayed minute count stays fresh.
+  let lastEventAt = Date.now();
+  let silenceTimer: NodeJS.Timeout | undefined;
+  const armSilenceWarn = (): void => {
+    if (!silenceWarnMs) return;
+    if (silenceTimer) clearTimeout(silenceTimer);
+    silenceTimer = setTimeout(() => {
+      if (state.terminal !== 'running') return;
+      const mins = Math.max(1, Math.round((Date.now() - lastEventAt) / 60_000));
+      state = annotateSilence(state, mins, inFlightTools.size);
+      log.info('agent', 'silence-warn', {
+        scope,
+        silentMinutes: mins,
+        inFlight: inFlightTools.size,
+      });
+      void flush(state).catch(() => {
+        /* annotation failures are non-fatal */
+      });
+      armSilenceWarn();
+    }, silenceWarnMs);
+  };
+  armSilenceWarn();
+
   try {
     for await (const evt of events) {
       if (handle.interrupted) break;
+
+      // Any stream event proves the run is alive: refresh the silence clock
+      // and drop the annotation so the next flush renders a live status.
+      lastEventAt = Date.now();
+      const clearedSilence = state.silentMinutes !== undefined;
+      if (clearedSilence) state = clearSilence(state);
 
       // Track tool flight before re-arming the idle timer so the arm step
       // sees the correct set size. tool_use opens a window; tool_result
@@ -2921,7 +2965,12 @@ async function processAgentStream(
       const prevTerminal = state.terminal;
       const prevFooter = state.footer;
       const nextState = reduce(state, evt);
-      if (nextState === state) continue;
+      if (nextState === state) {
+        // The event produced no visible transition but still cleared a
+        // silence annotation — flush so the card returns to a live status.
+        if (clearedSilence) await flush(state);
+        continue;
+      }
       state = nextState;
       if (state.footer !== prevFooter || state.terminal !== prevTerminal) {
         log.info('card', 'transition', { footer: state.footer, terminal: state.terminal });
@@ -2934,6 +2983,7 @@ async function processAgentStream(
     }
   } finally {
     if (timer) clearTimeout(timer);
+    if (silenceTimer) clearTimeout(silenceTimer);
   }
 
   // If state already reached a terminal event (done/error/etc.) before the

@@ -406,10 +406,15 @@ export class DevinAgentRun implements AgentRun {
         ...await imageBlocks(this.options.images ?? []),
       ];
       this.promptInFlight = true;
+      // No request deadline: a turn may legitimately run for hours. Its
+      // lifecycle is governed by run policy on the event stream (silence
+      // warnings, explicit stop → session/cancel), not by a transport
+      // timeout. This promise settles on the turn-end response, an abort,
+      // or the transport closing.
       void this.client.request<DevinPromptResult>('session/prompt', {
         sessionId: this.sessionId,
         prompt,
-      }, 30 * 60_000).then(
+      }, 0).then(
         (result) => queue.push({ type: 'prompt-result', result }),
         (error) => queue.push({
           type: 'prompt-error',

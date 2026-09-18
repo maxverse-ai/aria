@@ -52,6 +52,7 @@ export function renderCard(state: RunState, options: RunCardRenderOptions = {}):
 
   if (state.terminal === 'running') {
     if (state.footer) elements.push(footerStatus(state.footer));
+    if (state.silentMinutes !== undefined) elements.push(silenceNote(state));
     elements.push(stopButton(options));
   }
 
@@ -207,6 +208,15 @@ function footerStatus(status: Exclude<FooterStatus, null>): object {
       : status === 'tool_running'
         ? '🧰 正在调用工具'
         : '✍️ 正在输出';
+  return noteMd(text);
+}
+
+function silenceNote(state: RunState): object {
+  const mins = state.silentMinutes ?? 0;
+  const tools = state.silentInFlightTools ?? 0;
+  const text = tools > 0
+    ? `_⏳ 已 ${mins} 分钟无新输出（${tools} 个工具仍在执行中）_`
+    : `_💤 已 ${mins} 分钟无响应，任务仍在运行_`;
   return noteMd(text);
 }
 

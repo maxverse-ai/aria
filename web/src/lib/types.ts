@@ -58,6 +58,7 @@ export interface ConfigView {
   cotMessages: CotMessages;
   maxConcurrentRuns: number;
   runIdleTimeoutMinutes: number;
+  runSilenceWarnMinutes: number;
   requireMentionInGroup: boolean;
   larkCliIdentity: LarkCliIdentity;
   meeting: MeetingConfig;

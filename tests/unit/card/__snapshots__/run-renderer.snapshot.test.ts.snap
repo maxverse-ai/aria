@@ -1,5 +1,230 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
+exports[`run card renderer snapshots > annotates silent runs without changing their terminal state 1`] = `
+{
+  "body": {
+    "elements": [
+      {
+        "border": {
+          "color": "grey",
+          "corner_radius": "5px",
+        },
+        "elements": [
+          {
+            "content": "still working",
+            "tag": "markdown",
+            "text_size": "notation",
+          },
+        ],
+        "expanded": true,
+        "header": {
+          "icon": {
+            "size": "16px 16px",
+            "tag": "standard_icon",
+            "token": "down-small-ccm_outlined",
+          },
+          "icon_expanded_angle": -180,
+          "icon_position": "follow_text",
+          "title": {
+            "content": "🧠 **思考中**",
+            "tag": "markdown",
+          },
+          "vertical_align": "center",
+        },
+        "padding": "8px 8px 8px 8px",
+        "tag": "collapsible_panel",
+        "vertical_spacing": "8px",
+      },
+      {
+        "content": "🧠 正在思考",
+        "tag": "markdown",
+        "text_size": "notation",
+      },
+      {
+        "content": "_💤 已 20 分钟无响应，任务仍在运行_",
+        "tag": "markdown",
+        "text_size": "notation",
+      },
+      {
+        "behaviors": [
+          {
+            "type": "callback",
+            "value": {
+              "cmd": "stop",
+            },
+          },
+        ],
+        "tag": "button",
+        "text": {
+          "content": "⏹ 终止",
+          "tag": "plain_text",
+        },
+        "type": "danger",
+      },
+    ],
+  },
+  "config": {
+    "streaming_mode": true,
+    "summary": {
+      "content": "思考中",
+    },
+  },
+  "schema": "2.0",
+}
+`;
+
+exports[`run card renderer snapshots > annotates silent runs without changing their terminal state 2`] = `
+"_🧠 正在思考…_
+
+_💤 已 20 分钟无响应，任务仍在运行_"
+`;
+
+exports[`run card renderer snapshots > annotates silent runs without changing their terminal state 3`] = `
+{
+  "body": {
+    "elements": [
+      {
+        "border": {
+          "color": "grey",
+          "corner_radius": "5px",
+        },
+        "elements": [
+          {
+            "content": "**Command**
+\`\`\`bash
+make
+\`\`\`
+
+_运行中…_",
+            "tag": "markdown",
+            "text_size": "notation",
+          },
+        ],
+        "expanded": false,
+        "header": {
+          "icon": {
+            "size": "16px 16px",
+            "tag": "standard_icon",
+            "token": "down-small-ccm_outlined",
+          },
+          "icon_expanded_angle": -180,
+          "icon_position": "follow_text",
+          "title": {
+            "content": "⏳ **Bash** — make",
+            "tag": "markdown",
+          },
+          "vertical_align": "center",
+        },
+        "padding": "8px 8px 8px 8px",
+        "tag": "collapsible_panel",
+        "vertical_spacing": "8px",
+      },
+      {
+        "content": "🧰 正在调用工具",
+        "tag": "markdown",
+        "text_size": "notation",
+      },
+      {
+        "content": "_⏳ 已 45 分钟无新输出（1 个工具仍在执行中）_",
+        "tag": "markdown",
+        "text_size": "notation",
+      },
+      {
+        "behaviors": [
+          {
+            "type": "callback",
+            "value": {
+              "cmd": "stop",
+            },
+          },
+        ],
+        "tag": "button",
+        "text": {
+          "content": "⏹ 终止",
+          "tag": "plain_text",
+        },
+        "type": "danger",
+      },
+    ],
+  },
+  "config": {
+    "streaming_mode": true,
+    "summary": {
+      "content": "正在调用工具",
+    },
+  },
+  "schema": "2.0",
+}
+`;
+
+exports[`run card renderer snapshots > annotates silent runs without changing their terminal state 4`] = `
+{
+  "body": {
+    "elements": [
+      {
+        "border": {
+          "color": "grey",
+          "corner_radius": "5px",
+        },
+        "elements": [
+          {
+            "content": "still working",
+            "tag": "markdown",
+            "text_size": "notation",
+          },
+        ],
+        "expanded": true,
+        "header": {
+          "icon": {
+            "size": "16px 16px",
+            "tag": "standard_icon",
+            "token": "down-small-ccm_outlined",
+          },
+          "icon_expanded_angle": -180,
+          "icon_position": "follow_text",
+          "title": {
+            "content": "🧠 **思考中**",
+            "tag": "markdown",
+          },
+          "vertical_align": "center",
+        },
+        "padding": "8px 8px 8px 8px",
+        "tag": "collapsible_panel",
+        "vertical_spacing": "8px",
+      },
+      {
+        "content": "🧠 正在思考",
+        "tag": "markdown",
+        "text_size": "notation",
+      },
+      {
+        "behaviors": [
+          {
+            "type": "callback",
+            "value": {
+              "cmd": "stop",
+            },
+          },
+        ],
+        "tag": "button",
+        "text": {
+          "content": "⏹ 终止",
+          "tag": "plain_text",
+        },
+        "type": "danger",
+      },
+    ],
+  },
+  "config": {
+    "streaming_mode": true,
+    "summary": {
+      "content": "思考中",
+    },
+  },
+  "schema": "2.0",
+}
+`;
+
 exports[`run card renderer snapshots > collapses consecutive tools while preserving the latest running tool 1`] = `
 {
   "body": {

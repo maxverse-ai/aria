@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { renderCard } from '../../../src/card/run-renderer.js';
 import {
+  annotateSilence,
+  clearSilence,
   initialState,
   markIdleTimeout,
   markInterrupted,
@@ -98,6 +100,31 @@ describe('run card renderer snapshots', () => {
       __bridge_cb: true,
       bridge_token: 'token-for-stop',
     });
+  });
+
+  it('annotates silent runs without changing their terminal state', () => {
+    const silentThinking = annotateSilence(
+      stateFrom([{ type: 'thinking', delta: 'still working' }]),
+      20,
+      0,
+    );
+    expect(silentThinking.terminal).toBe('running');
+    expectCard(silentThinking).toMatchSnapshot();
+    expect(renderText(silentThinking)).toMatchSnapshot();
+
+    const silentTool = annotateSilence(
+      stateFrom([{ type: 'tool_use', id: 'tool-1', name: 'Bash', input: { command: 'make' } }]),
+      45,
+      1,
+    );
+    expect(silentTool.terminal).toBe('running');
+    expectCard(silentTool).toMatchSnapshot();
+
+    // Silence clears on the next stream event — back to a live status.
+    const resumed = clearSilence(silentThinking);
+    expect(resumed.silentMinutes).toBeUndefined();
+    expect(resumed.silentInFlightTools).toBeUndefined();
+    expectCard(resumed).toMatchSnapshot();
   });
 
   it('keeps local paths in user-visible cards and text fallbacks', () => {

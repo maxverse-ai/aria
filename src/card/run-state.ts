@@ -29,6 +29,11 @@ export interface RunState {
   /** Set when terminal === 'idle_timeout' — how long claude was idle before
    * the watchdog gave up (so the message can say "N 分钟无响应"). */
   idleTimeoutMinutes?: number;
+  /** Presentation hint set while the run is silent — minutes since the last
+   * stream event. Does not affect execution; cleared by the next event. */
+  silentMinutes?: number;
+  /** In-flight tool count captured when `silentMinutes` was annotated. */
+  silentInFlightTools?: number;
   /** Presentation-neutral, extensible facts rendered by the status-line sinks. */
   runStatus: RunStatusState;
 }
@@ -162,6 +167,15 @@ export function markInterrupted(state: RunState): RunState {
     footer: null,
     runStatus: finalizeRunStatus(state.runStatus),
   };
+}
+
+export function annotateSilence(state: RunState, minutes: number, inFlightTools: number): RunState {
+  return { ...state, silentMinutes: minutes, silentInFlightTools: inFlightTools };
+}
+
+export function clearSilence(state: RunState): RunState {
+  if (state.silentMinutes === undefined) return state;
+  return { ...state, silentMinutes: undefined, silentInFlightTools: undefined };
 }
 
 export function markIdleTimeout(state: RunState, minutes: number): RunState {

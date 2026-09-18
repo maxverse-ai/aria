@@ -17,7 +17,7 @@ export type DevinServerRequestHandler = (request: DevinJsonRpcRequest) => Promis
 interface PendingRequest {
   resolve(value: unknown): void;
   reject(error: Error): void;
-  timer: ReturnType<typeof setTimeout>;
+  timer?: ReturnType<typeof setTimeout>;
   removeAbortListener?: () => void;
 }
 
@@ -137,6 +137,13 @@ export class DevinAcpClient {
     return result;
   }
 
+  /**
+   * `timeoutMs` bounds how long a single response may take; `<= 0` means no
+   * deadline — the request then settles only on a response, abort, or
+   * transport close. Long-lived requests (e.g. `session/prompt`, which spans
+   * a whole turn) must use no deadline: turn duration is run-policy, decided
+   * on the event stream, not a wire-level concern.
+   */
   request<T>(
     method: string,
     params: unknown = {},
@@ -147,12 +154,14 @@ export class DevinAcpClient {
     if (signal?.aborted) return Promise.reject(abortError(signal));
     const id = this.nextId++;
     return new Promise<T>((resolve, reject) => {
-      const timer = setTimeout(() => {
-        const pending = this.pending.get(id);
-        this.pending.delete(id);
-        pending?.removeAbortListener?.();
-        reject(new Error(`devin acp request timed out: ${method}`));
-      }, timeoutMs);
+      const timer = timeoutMs > 0
+        ? setTimeout(() => {
+            const pending = this.pending.get(id);
+            this.pending.delete(id);
+            pending?.removeAbortListener?.();
+            reject(new Error(`devin acp request timed out: ${method}`));
+          }, timeoutMs)
+        : undefined;
       const pending: PendingRequest = {
         resolve: (value) => resolve(value as T),
         reject,

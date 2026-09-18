@@ -176,6 +176,7 @@ export function ConfigView({ profile }: { profile: string }) {
         cotMessages: current.cotMessages,
         maxConcurrentRuns: current.maxConcurrentRuns,
         runIdleTimeoutMinutes: current.runIdleTimeoutMinutes,
+        runSilenceWarnMinutes: current.runSilenceWarnMinutes,
         requireMentionInGroup: current.requireMentionInGroup,
         larkCliIdentity: current.larkCliIdentity,
       });
@@ -348,6 +349,16 @@ export function ConfigView({ profile }: { profile: string }) {
             max={120}
             isIntegerOnly
             onChange={(value) => update("runIdleTimeoutMinutes", value)}
+            width="100%"
+          />
+          <NumberInput
+            label="静默提醒分钟"
+            description="任务无新事件超过该时长时在卡片上标注静默，不终止任务。0 表示关闭，默认 20，最大 720 分钟。"
+            value={cfg.runSilenceWarnMinutes}
+            min={0}
+            max={720}
+            isIntegerOnly
+            onChange={(value) => update("runSilenceWarnMinutes", value)}
             width="100%"
           />
         </Grid>

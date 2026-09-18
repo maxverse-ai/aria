@@ -48,6 +48,7 @@ import {
   getMessageReplyMode,
   getRequireMentionInGroup,
   getRunIdleTimeoutMs,
+  getRunSilenceWarnMs,
   getShowToolCalls,
   type AppPreferences,
   type CotMessagesMode,
@@ -89,6 +90,7 @@ export interface ConfigView {
   cotMessages: CotMessagesMode;
   maxConcurrentRuns: number;
   runIdleTimeoutMinutes: number;
+  runSilenceWarnMinutes: number;
   requireMentionInGroup: boolean;
   larkCliIdentity: LarkCliIdentityPreset;
   meeting: MeetingConfig;
@@ -119,6 +121,7 @@ export function buildConfigView(state: MutableProfileState, live = false): Confi
     cotMessages: getCotMessages(state.cfg),
     maxConcurrentRuns: getMaxConcurrentRuns(state.cfg),
     runIdleTimeoutMinutes: ms ? Math.round(ms / 60_000) : 0,
+    runSilenceWarnMinutes: Math.round((getRunSilenceWarnMs(state.cfg) ?? 0) / 60_000),
     requireMentionInGroup: getRequireMentionInGroup(state.cfg),
     larkCliIdentity: state.profileConfig.larkCli.identityPreset,
     meeting: state.profileConfig.meeting,
@@ -274,6 +277,18 @@ function parseConfigBody(state: MutableProfileState, body: unknown): ParsedConfi
       !Number.isFinite(n) || n < 0 ? currentIdleMinutes : n === 0 ? 0 : clampInt(n, 1, 120, currentIdleMinutes);
   }
 
+  const currentSilenceWarnMinutes = Math.round((getRunSilenceWarnMs(state.cfg) ?? 0) / 60_000);
+  let runSilenceWarnMinutes: number;
+  if (fv.runSilenceWarnMinutes === undefined) {
+    runSilenceWarnMinutes = currentSilenceWarnMinutes;
+  } else {
+    const n = Number(fv.runSilenceWarnMinutes);
+    runSilenceWarnMinutes =
+      !Number.isFinite(n) || n < 0
+        ? currentSilenceWarnMinutes
+        : n === 0 ? 0 : clampInt(n, 1, 720, currentSilenceWarnMinutes);
+  }
+
   const requireMentionInGroup =
     typeof fv.requireMentionInGroup === 'boolean'
       ? fv.requireMentionInGroup
@@ -301,6 +316,7 @@ function parseConfigBody(state: MutableProfileState, body: unknown): ParsedConfi
       cotMessages,
       maxConcurrentRuns,
       runIdleTimeoutMinutes,
+      runSilenceWarnMinutes,
     },
   };
 }

@@ -38,6 +38,12 @@ export function renderText(state: RunState, options: TextRenderOptions = {}): st
   } else if (state.terminal === 'running' && state.footer) {
     parts.push(footerLine(state.footer));
   }
+  if (state.terminal === 'running' && state.silentMinutes !== undefined) {
+    const tools = state.silentInFlightTools ?? 0;
+    parts.push(tools > 0
+      ? `_⏳ 已 ${state.silentMinutes} 分钟无新输出（${tools} 个工具仍在执行中）_`
+      : `_💤 已 ${state.silentMinutes} 分钟无响应，任务仍在运行_`);
+  }
 
   if (options.includeRunStatus !== false) {
     const statusLine = renderRunStatusLine(state.runStatus, options.runStatusItems);
