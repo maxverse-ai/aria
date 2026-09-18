@@ -11,6 +11,7 @@ import { larkSpaceNativeTool } from '../../../src/lark-cli/space-tool';
 import type { SpaceToolCredentialProvider } from '../../../src/space/tool-credentials';
 import { authorityId } from '../../../src/space/identity';
 import { digest } from '../../../src/space/deployment';
+import { nodeHelperBinary, runtimeProbeVersion } from '../../helpers/runtime';
 
 const cleanups: Array<() => Promise<unknown>> = [];
 // This fixture observes on the real clock. No case here asserts that a lease
@@ -38,8 +39,8 @@ export function createSpaceTool(host) {return {id:'example', authorityId:host.au
         skills: [], resources: [], requiresTools: [{ id: 'example', revision: 'v1' }] }], assignments: [],
       common: [{ kind: 'user' as const, authorityId: authorityId(sourceDefinition), bundles: ['public'] }],
       extensions: [{ id: 'example', revision: 'v1', module, sha256: digest(sourceCode) }] } } : {}),
-    deployment: { engineId: 'claude', binary: process.execPath, binaryVersion: process.version, queryNode: process.execPath,
-      tools: { larkCli: { binary: process.execPath, binaryVersion: process.version, userAuthorization } },
+    deployment: { engineId: 'claude', binary: process.execPath, binaryVersion: runtimeProbeVersion, queryNode: nodeHelperBinary,
+      tools: { larkCli: { binary: process.execPath, binaryVersion: runtimeProbeVersion, userAuthorization } },
       launch: { driver, workspaceAccess: 'workspace', executableRoots: [], environment: {} } } });
   cleanups.push(() => spaces.services.close());
   const source = spaces.services.authorization.registerSource(sourceDefinition);

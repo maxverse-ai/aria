@@ -5,6 +5,7 @@ import { afterEach, expect, it } from 'vitest';
 import { PreparedSpaceProfile } from '../../../src/space/profile';
 import { SpaceOperationGate } from '../../../src/space/operation-gate';
 import { createDefaultProfileConfig } from '../../../src/config/profile-schema';
+import { runtimeProbeVersion } from '../../helpers/runtime';
 
 // This fixture observes on the real clock. No case here asserts that a lease
 // expires, so the lease only has to outlive the slowest host the suite runs on;
@@ -19,7 +20,7 @@ async function fixture(directory?: string) {
   const profile = createDefaultProfileConfig({ agentKind: 'claude', mode: 'team',
     accounts: { app: { id: 'fixture', secret: 'fixture', tenant: 'feishu' } } });
   const spaces = await PreparedSpaceProfile.create({ profileId: 'p', profile, directory: root,
-    deployment: { engineId: 'claude', binary: process.execPath, binaryVersion: process.version,
+    deployment: { engineId: 'claude', binary: process.execPath, binaryVersion: runtimeProbeVersion,
       launch: { driver: 'trusted-process', workspaceAccess: 'workspace', executableRoots: [], environment: {} } } });
   cleanups.push(() => spaces.services.close());
   const source = spaces.services.authorization.registerSource({ profileId: 'p', providerId: 'fixture', accountId: 'account', instanceId: 'source' });

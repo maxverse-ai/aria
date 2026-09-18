@@ -12,6 +12,7 @@ import { createSelectedSpaceProfile } from '../../../src/space/selected-profile'
 import { acquireProfileRuntimeLock } from '../../../src/runtime/locks';
 import { ConfigChangeService } from '../../../src/application/control/config-change-service';
 import { managementCommandRegistry } from '../../../src/application/control/management-commands';
+import { runtimeProbeVersion } from '../../helpers/runtime';
 import { PROFILE_MODE_TRANSITION_COMMAND } from '../../../src/application/control/profile-mode-command';
 import { ManagementCommandRegistry } from '../../../src/application/control/management-command-registry';
 
@@ -26,7 +27,7 @@ async function fixture(migration?: SpaceMigrationAdapter) {
     accounts: { app: { id: 'fixture-app', secret: 'fixture-only', tenant: 'feishu' } } });
   await saveRootConfig(createRootConfig('bot', profile), paths.configFile);
   const deployment: SpaceDeploymentDefinition = { schema: 'aria.space.deployment.v1', engineId: 'codex',
-    binary: process.execPath, binaryVersion: process.version, driver: 'trusted-process',
+    binary: process.execPath, binaryVersion: runtimeProbeVersion, driver: 'trusted-process',
     workspaceAccess: profile.permissions.defaultAccess, executableRoots: [], environmentKeys: [], templates: [] };
   const service = new SpaceManagementService({ rootDir, migration,
     authorize: (candidate, name) => candidate.principal === actor.principal && candidate.source === actor.source && name === 'bot' });

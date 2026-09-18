@@ -16,16 +16,30 @@ export interface JsRuntime {
   execPath: string;
   /** Runtime version (`process.versions.bun` / `process.versions.node`). */
   version: string;
+  /** Version string exactly as `execPath --version` prints it — `vX.Y.Z`
+   * under node, bare `X.Y.Z` under bun. Differs from `version` only by
+   * node's `v` prefix. */
+  reportedVersion: string;
 }
 
 const bunVersion = (process.versions as Record<string, string | undefined>).bun;
 
 export const currentRuntime: JsRuntime = bunVersion
-  ? { kind: 'bun', execPath: process.execPath, version: bunVersion }
-  : { kind: 'node', execPath: process.execPath, version: process.versions.node };
+  ? { kind: 'bun', execPath: process.execPath, version: bunVersion, reportedVersion: bunVersion }
+  : { kind: 'node', execPath: process.execPath, version: process.versions.node, reportedVersion: process.version };
 
 export function isBunRuntime(): boolean {
   return currentRuntime.kind === 'bun';
+}
+
+/**
+ * True when Aria runs embedded inside a bun-compiled binary (`bun build
+ * --compile`). The binary cannot evaluate `-e` snippets or execute JS entry
+ * files, so any "re-launch myself" path that needs one must use the binary's
+ * own CLI argv or refuse cleanly.
+ */
+export function isCompiledRuntime(argv: readonly string[] = process.argv): boolean {
+  return isBunRuntime() && runtimeEntryPath(argv) === undefined;
 }
 
 /** Minimum Bun major version Aria supports. */

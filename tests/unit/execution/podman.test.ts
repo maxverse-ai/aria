@@ -40,9 +40,12 @@ describe('Podman execution adapter', () => {
   it('keeps a Space usable after a successful Codex metadata probe closes stdin', async () => {
     const f = fixture(); const env = await f.backend.open(spec());
     const child = new ChildProcess();
-    child.stdin = new PassThrough(); child.stdout = new PassThrough(); child.stderr = new PassThrough();
+    // stdio slots are readonly getters under bun — define them instead of assigning.
+    Object.defineProperty(child, 'stdin', { value: new PassThrough(), configurable: true });
+    Object.defineProperty(child, 'stdout', { value: new PassThrough(), configurable: true });
+    Object.defineProperty(child, 'stderr', { value: new PassThrough(), configurable: true });
     const kill = vi.fn(() => true); child.kill = kill;
-    child.stdin.once('finish', () => {
+    child.stdin!.once('finish', () => {
       Object.defineProperty(child, 'exitCode', { value: 0 }); child.emit('exit', 0, null);
     });
     env.prepare({ command: '/bin/codex', args: ['app-server'], cwd: '/work', env: {} }).onSpawn!(child);
@@ -59,12 +62,14 @@ describe('Podman execution adapter', () => {
   it('still fences a Codex probe that ignores graceful shutdown', async () => {
     const f = fixture(); const env = await f.backend.open(spec());
     const child = new ChildProcess();
-    child.stdin = new PassThrough(); child.stdout = new PassThrough(); child.stderr = new PassThrough();
+    Object.defineProperty(child, 'stdin', { value: new PassThrough(), configurable: true });
+    Object.defineProperty(child, 'stdout', { value: new PassThrough(), configurable: true });
+    Object.defineProperty(child, 'stderr', { value: new PassThrough(), configurable: true });
     const kill = vi.fn(() => true); child.kill = kill;
     env.prepare({ command: '/bin/codex', args: ['app-server'], cwd: '/work', env: {} }).onSpawn!(child);
     const client = new CodexAppServerClient(child as AppServerChild);
     await client.dispose(10);
-    expect(child.stdin.writableEnded).toBe(true);
+    expect(child.stdin!.writableEnded).toBe(true);
     expect(kill).toHaveBeenCalledWith('SIGTERM');
     expect(kill).toHaveBeenCalledWith('SIGKILL');
     expect(env.isUsable!()).toBe(false);

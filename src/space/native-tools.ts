@@ -200,7 +200,11 @@ export class SpaceNativeTools implements RunTools {
         if (!started) return;
         const { server, directory } = started;
         server.closeAllConnections();
-        await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+        // An already-closed endpoint is a success, not a failure — some
+        // runtimes surface the socket teardown before this close() call.
+        await new Promise<void>((resolve, reject) => server.close(error =>
+          error && (error as NodeJS.ErrnoException).code !== 'ERR_SERVER_NOT_RUNNING' && !/not running/i.test(error.message)
+            ? reject(error) : resolve()));
         await rm(directory, { recursive: true, force: true });
       }));
       this.servers.clear();

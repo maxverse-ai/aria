@@ -12,6 +12,7 @@ import { resolveAppPaths } from '../../../src/config/app-paths';
 import { SessionCatalog } from '../../../src/session/catalog';
 import type { NativeReadRepository } from '../../../src/application/control/native-read-repository';
 import { FileNativeReadRepository } from '../../../src/platform/file-native-read-repository';
+import { runtimeProbeVersion } from '../../helpers/runtime';
 
 const cleanups: Array<() => Promise<unknown>> = [];
 // This fixture observes on the real clock. No case here asserts that a lease
@@ -33,7 +34,7 @@ async function fixture() {
   const profile = createDefaultProfileConfig({ agentKind: 'claude', mode: 'team',
     accounts: { app: { id: 'fixture', secret: 'fixture', tenant: 'feishu' } } });
   const spaces = await PreparedSpaceProfile.create({ profileId: 'p', profile, directory: join(root, 'prepared'),
-    deployment: { engineId: 'claude', binary: process.execPath, binaryVersion: process.version,
+    deployment: { engineId: 'claude', binary: process.execPath, binaryVersion: runtimeProbeVersion,
       launch: { driver: 'trusted-process', workspaceAccess: 'full', executableRoots: [], environment: {} } } });
   cleanups.push(() => spaces.services.close());
   const source = spaces.services.authorization.registerSource({ profileId: 'p', providerId: 'fixture', accountId: 'bot', instanceId: 'source' });

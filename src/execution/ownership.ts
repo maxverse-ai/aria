@@ -1,5 +1,4 @@
 import { spawn } from 'node:child_process';
-import { currentRuntime } from '../platform/runtime';
 import { mkdir, readFile, open, lstat } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { join } from 'node:path';
@@ -34,8 +33,12 @@ export class FileExecutionOwnership implements ExecutionOwnership {
     }
     const path = join(this.directory, key);
     const file = await open(path + '.lock', constants.O_CREAT | constants.O_RDWR | constants.O_NOFOLLOW, 0o600);
-    const child = spawn('/usr/bin/flock', ['--nonblock', '--exclusive', '/proc/self/fd/3', currentRuntime.execPath, '-e',
-      "process.stdout.write('ready\\n');process.stdin.resume();process.stdin.once('end',()=>process.exit(0))"], {
+    // The lock holder is a plain /bin/sh helper, not the JS runtime: it only
+    // needs to signal readiness and stay alive until stdin closes. Keeping it
+    // runtime-agnostic makes the lock work under a bun-compiled binary, which
+    // cannot evaluate `-e` snippets.
+    const child = spawn('/usr/bin/flock', ['--nonblock', '--exclusive', '/proc/self/fd/3',
+      '/bin/sh', '-c', "printf 'ready\\n'; read _"], {
       stdio: ['pipe', 'pipe', 'ignore', file.fd], env: { PATH: '/usr/bin:/bin' },
     });
     let healthy = false;

@@ -10,6 +10,7 @@ import { SpaceManagementService } from '../../../src/space/management';
 import { SpaceTransitionCoordinator, pendingSpaceTransition, type SpaceTransitionRuntime } from '../../../src/space/transition';
 import type { SpaceDeploymentDefinition } from '../../../src/space/deployment';
 import { readPreparation, preparationStoragePaths } from '../../../src/space/preparation-store';
+import { nodeHelperBinary, runtimeProbeVersion } from '../../helpers/runtime';
 
 const cleanups: Array<() => Promise<unknown>> = [];
 afterEach(async () => { for (const close of cleanups.splice(0).reverse()) await close(); });
@@ -35,7 +36,7 @@ async function fixture() {
   const management = new SpaceManagementService({ rootDir, authorize: candidate => candidate.principal === actor.principal && candidate.source === actor.source });
   const coordinator = new SpaceTransitionCoordinator({ rootDir, management, runtime });
   const deployment: SpaceDeploymentDefinition = { schema: 'aria.space.deployment.v1', engineId: 'codex', binary: process.execPath,
-    binaryVersion: process.version, driver: 'trusted-process', workspaceAccess: profile.permissions.defaultAccess,
+    binaryVersion: runtimeProbeVersion, driver: 'trusted-process', workspaceAccess: profile.permissions.defaultAccess,
     executableRoots: [], environmentKeys: [], templates: [] };
   return { rootDir, paths, runtime, trace, management, coordinator, deployment };
 }
@@ -194,8 +195,8 @@ it('rejects an unavailable rollback target before draining or changing the curre
 it('rejects a native user-identity downgrade before stopping the current service', async () => {
   const f = await fixture();
   await f.coordinator.enable('bot', f.deployment, actor);
-  await f.coordinator.upgrade('bot', { ...f.deployment, queryNode: process.execPath,
-    tools: { larkCli: { binary: process.execPath, binaryVersion: process.version, userAuthorization: true } } }, actor);
+  await f.coordinator.upgrade('bot', { ...f.deployment, queryNode: nodeHelperBinary,
+    tools: { larkCli: { binary: process.execPath, binaryVersion: runtimeProbeVersion, userAuthorization: true } } }, actor);
   const before = await readFile(f.paths.configFile, 'utf8');
   const trace = [...f.trace];
   await expect(f.coordinator.rollback('bot', actor)).rejects.toThrow('personal identity isolation');

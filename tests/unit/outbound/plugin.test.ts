@@ -1,4 +1,8 @@
 import type { LarkChannel } from '@larksuite/channel';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   loadOutboundPolicy,
@@ -14,14 +18,24 @@ function channel(): LarkChannel {
   } as unknown as LarkChannel;
 }
 
-function moduleUrl(body: string): string {
-  return `data:text/javascript,${encodeURIComponent(`${body}\n// ${Math.random()}`)}`;
+const moduleRoots: string[] = [];
+
+// Real files, not data: URLs — bun does not expose a default export through
+// `import('data:text/javascript,...')`, while file modules behave the same
+// on both runtimes.
+async function moduleUrl(body: string): Promise<string> {
+  const root = await mkdtemp(join(tmpdir(), 'aria-policy-'));
+  moduleRoots.push(root);
+  const file = join(root, `policy-${Math.random().toString(36).slice(2)}.mjs`);
+  await writeFile(file, body, 'utf8');
+  return pathToFileURL(file).href;
 }
 
-afterEach(() => {
+afterEach(async () => {
   delete (globalThis as Record<string, unknown>).__ariaPolicyMeta;
   delete (globalThis as Record<string, unknown>).__ariaPolicyContext;
   delete (globalThis as Record<string, unknown>).__ariaPolicyClosed;
+  for (const root of moduleRoots.splice(0)) await rm(root, { recursive: true, force: true });
 });
 
 describe('outbound policy loader', () => {
@@ -55,7 +69,7 @@ describe('outbound policy loader', () => {
 
   it('loads the v2 ABI, validates coverage, scopes work, and closes once', async () => {
     const rawChannel = channel();
-    const specifier = moduleUrl(`
+    const specifier = await moduleUrl(`
       export default async function(meta) {
         globalThis.__ariaPolicyMeta = meta;
         return {
@@ -111,7 +125,7 @@ describe('outbound policy loader', () => {
   });
 
   it('rejects a plugin that does not cover the exact stable sink set', async () => {
-    const specifier = moduleUrl(`
+    const specifier = await moduleUrl(`
       export default async function() {
         return {
           id: 'incomplete-policy', apiVersion: 2,

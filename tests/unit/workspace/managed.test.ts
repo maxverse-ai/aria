@@ -30,7 +30,7 @@ describe('initializeManagedWorkspace', () => {
       scaffolded: true,
     });
 
-    expect(await readdir(workspace)).toEqual(['AGENTS.md', 'README.md', 'scratch']);
+    expect((await readdir(workspace)).sort()).toEqual(['AGENTS.md', 'README.md', 'scratch']);
     expect(await readFile(join(workspace, 'AGENTS.md'), 'utf8')).toBe(MANAGED_WORKSPACE_AGENTS);
     expect(await readFile(join(workspace, 'README.md'), 'utf8')).toBe(MANAGED_WORKSPACE_README);
     if (process.platform !== 'win32') {
@@ -57,7 +57,7 @@ describe('initializeManagedWorkspace', () => {
       created: false,
       scaffolded: true,
     });
-    expect(await readdir(workspace)).toEqual(['AGENTS.md', 'README.md', 'scratch']);
+    expect((await readdir(workspace)).sort()).toEqual(['AGENTS.md', 'README.md', 'scratch']);
   });
 
   it('does not modify a pre-existing user directory', async () => {

@@ -5,7 +5,7 @@ import type {
   UpdateOperationV1,
 } from '../../application/distribution/types';
 import { UPDATE_OPERATION_SCHEMA_VERSION } from '../../application/distribution/types';
-import { currentRuntime } from '../runtime';
+import { currentRuntime, isCompiledRuntime } from '../runtime';
 import { spawnProcess } from '../spawn';
 import type { CommandRunner } from './command-runner';
 import { ProcessCommandRunner } from './command-runner';
@@ -63,6 +63,13 @@ export class OsDetachedUpdateExecutor implements DetachedUpdateExecutor {
   }
 
   private async launch(args: string[], operationId: string): Promise<void> {
+    // A bun-compiled binary cannot execute the script updater entry — it only
+    // runs its own embedded program. Compiled installs update by replacing
+    // the binary, so refuse here instead of failing on a $bunfs path or
+    // launching a process that treats the entry as a CLI argument.
+    if (isCompiledRuntime()) {
+      throw new Error('compiled Aria binaries cannot run the script updater; install updates by replacing the binary');
+    }
     await access(this.updaterEntry);
     const updaterArgs = [this.updaterEntry, ...args];
     const label = `aria-update-${operationId}`;

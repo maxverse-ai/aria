@@ -3,6 +3,7 @@ import { mkdtemp, rm, writeFile, chmod, symlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { digest } from '../../../src/space/deployment';
+import { nodeHelperBinary, runtimeProbeVersion } from '../../helpers/runtime';
 import { loadSpaceToolExtension, type SpaceToolExtensionHost } from '../../../src/space/tool-extension';
 
 const roots: string[] = [];
@@ -45,8 +46,8 @@ it('prepares workspace extension transport without enabling Lark user authorizat
   const profile = createDefaultProfileConfig({ agentKind: 'codex', mode: 'team', codex: { binaryPath: process.execPath },
     accounts: { app: { id: 'fixture', secret: 'fixture', tenant: 'feishu' } } });
   for (const driver of ['trusted-process', 'execution'] as const) {
-    const deployment = { engineId: 'codex' as const, binary: process.execPath, binaryVersion: process.version,
-      queryNode: process.execPath, launch: { driver, workspaceAccess: 'workspace' as const, executableRoots: [], environment: {} } };
+    const deployment = { engineId: 'codex' as const, binary: process.execPath, binaryVersion: runtimeProbeVersion,
+      queryNode: nodeHelperBinary, launch: { driver, workspaceAccess: 'workspace' as const, executableRoots: [], environment: {} } };
     const input = { profileId: 'profile', profile, directory: join(f.root, driver), deployment,
       workspaces: { schema: 'aria.space.workspaces.v1' as const, bundles: [], assignments: [], extensions: [f.definition] } };
     const prepared = await PreparedSpaceProfile.create(input);
