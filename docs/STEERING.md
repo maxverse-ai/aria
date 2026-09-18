@@ -2,6 +2,8 @@
 
 > Status: current
 
+> 中文版：[STEERING.zh.md](STEERING.zh.md)
+
 Aria connects chat users to coding engines that run turns. A turn is an
 opaque loop — model call, tool calls, model call — owned by the engine, not
 by Aria. When a user sends a message *while* a turn is running, the bridge
