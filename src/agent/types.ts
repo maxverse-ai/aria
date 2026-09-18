@@ -2,6 +2,7 @@ import type { ParticipantIdentity } from '../conversation/participant-identity';
 import type { AgentAvailability } from './preflight';
 import type { ClaudePermissionMode, CodexSandboxMode } from '../config/permissions';
 import type {
+  AgentSteeringInsertion,
   AgentSteeringOutcome,
   AgentSteeringRequest,
   AgentSteeringSupport,
@@ -53,6 +54,16 @@ export type AgentEvent =
       sessionId?: string;
       threadId?: string;
       terminationReason: 'normal' | 'interrupted' | 'timeout';
+    }
+  /**
+   * Delivery evidence for a steering request the adapter had already accepted
+   * optimistically. `failed` means the transport later reported the input
+   * never reached the engine.
+   */
+  | {
+      type: 'steer_delivery';
+      requestId: string;
+      insertion: AgentSteeringInsertion | 'failed';
     }
   | { type: 'error'; message: string; terminationReason: 'failed' | 'interrupted' | 'timeout' };
 

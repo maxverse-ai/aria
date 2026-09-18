@@ -23,28 +23,12 @@ export interface DevinJsonRpcResponse {
 export interface DevinInitializeResult {
   protocolVersion?: number;
   authMethods?: Array<{ id?: string; name?: string }>;
+  agentInfo?: { name?: string; version?: string };
   agentCapabilities?: {
     loadSession?: boolean;
     promptCapabilities?: { image?: boolean };
-    session?: { inject?: DevinSessionInjectCapability };
-    sessionCapabilities?: {
-      list?: unknown;
-      inject?: DevinSessionInjectCapability;
-    };
+    sessionCapabilities?: { list?: unknown };
   };
-}
-
-/** ACP v2's negotiated mid-turn input surface. */
-export interface DevinSessionInjectCapability {
-  modes?: unknown;
-  steer_in_stream?: unknown;
-  pending?: unknown;
-}
-
-export interface DevinInjectResult {
-  messageId?: string;
-  sessionId?: string;
-  _meta?: Record<string, unknown>;
 }
 
 export interface DevinSessionResult {
@@ -184,10 +168,20 @@ function finiteNumber(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
 }
 
-export function supportsDevinSteering(result: DevinInitializeResult | undefined): boolean {
-  const capabilities = result?.agentCapabilities;
-  const inject = capabilities?.session?.inject ?? capabilities?.sessionCapabilities?.inject;
-  return isRecord(inject)
-    && Array.isArray(inject.modes)
-    && inject.modes.includes('steer');
+/**
+ * Devin tags each prompt result with the id of the user message that opened
+ * the turn (`_meta['cognition.ai/userMessageId']`). Two concurrent
+ * `session/prompt` requests that resolve with the same id merged into one
+ * turn — the observed prompt-merge signature. Absent or differing ids mean
+ * the second prompt started a turn of its own.
+ */
+export function extractUserMessageId(result: unknown): string | undefined {
+  if (!isRecord(result)) return;
+  const meta = isRecord(result._meta) ? result._meta : undefined;
+  const flat = meta?.['cognition.ai/userMessageId'];
+  if (typeof flat === 'string' && flat) return flat;
+  const nested = isRecord(meta?.['cognition.ai']) ? meta['cognition.ai'] : undefined;
+  return typeof nested?.userMessageId === 'string' && nested.userMessageId
+    ? nested.userMessageId
+    : undefined;
 }

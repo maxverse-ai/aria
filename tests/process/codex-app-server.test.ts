@@ -298,7 +298,12 @@ describe('Codex App Server runtime', () => {
       prompt: 'hold-for-steer',
       cwd: root,
     });
-    expect(run.steering).toEqual({ mode: 'direct', textOnly: true });
+    expect(run.steering).toEqual({
+      mode: 'direct',
+      textOnly: true,
+      mechanism: 'native',
+      delivery: 'confirmed',
+    });
     const iterator = run.events[Symbol.asyncIterator]();
     await expect(iterator.next()).resolves.toMatchObject({ value: { type: 'system' } });
     const nextEvent = iterator.next();

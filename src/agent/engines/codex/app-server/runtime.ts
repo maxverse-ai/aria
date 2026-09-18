@@ -348,7 +348,7 @@ class CodexAppServerAdapter implements AgentAdapter {
 export class AppServerRun implements AgentRun {
   readonly runId: string;
   readonly events: AsyncIterable<AgentEvent>;
-  readonly steering = { mode: 'direct' as const, textOnly: true };
+  readonly steering = { mode: 'direct' as const, textOnly: true, mechanism: 'native' as const, delivery: 'confirmed' as const };
   private threadId: string | undefined;
   private turnId: string | undefined;
   private client: CodexAppServerClient | undefined;

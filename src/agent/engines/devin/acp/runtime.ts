@@ -16,6 +16,7 @@ import type {
   AgentRunOptions,
 } from '../../../types';
 import type {
+  AgentSteeringInsertion,
   AgentSteeringOutcome,
   AgentSteeringRequest,
   AgentSteeringSupport,
@@ -32,10 +33,9 @@ import { DevinMessageTranslator } from './message-translator';
 import {
   extractDevinUsage,
   extractSessionId,
+  extractUserMessageId,
   findConfigOption,
   isRecord,
-  supportsDevinSteering,
-  type DevinInjectResult,
   type DevinJsonRpcNotification,
   type DevinJsonRpcRequest,
   type DevinPromptResult,
@@ -51,6 +51,11 @@ export interface DevinAcpRuntimeOptions {
   model?: string;
   apiKeyEnv?: string;
   ariaChannel?: ChannelEnvContext;
+  /**
+   * 'auto' (default) steers by merging a second session/prompt into the
+   * active turn; 'off' exposes no steering and defers all mid-turn input.
+   */
+  steering?: 'auto' | 'off';
 }
 
 /** Aria access level → Devin ACP session mode id candidates. */
@@ -67,7 +72,7 @@ export class DevinAcpRuntime implements EngineRuntime {
     topology: 'profile-daemon',
     capabilities: {
       inputs: ['text', 'image'],
-      liveInput: { mode: 'gated', inputs: ['text'] },
+      liveInput: { mode: 'direct', inputs: ['text'] },
       sessions: ['resume', 'list'],
       controls: ['interrupt', 'model'],
       interactions: [],
@@ -168,6 +173,10 @@ export class DevinAcpRuntime implements EngineRuntime {
     return this.options.access;
   }
 
+  get steeringDisabled(): boolean {
+    return this.options.steering === 'off';
+  }
+
   private async handleServerRequest(request: DevinJsonRpcRequest): Promise<unknown> {
     if (request.method !== 'session/request_permission') {
       throw new DevinServerRequestError(`unsupported Devin ACP server request: ${request.method}`);
@@ -223,20 +232,55 @@ type RunSignal =
   | { type: 'notification'; notification: DevinJsonRpcNotification; replay: boolean }
   | { type: 'prompt-result'; result: DevinPromptResult }
   | { type: 'prompt-error'; error: Error }
+  | { type: 'steer-delivery' }
   | { type: 'closed'; error: Error };
 
-const DEVIN_STEERING_SUPPORT: AgentSteeringSupport = { mode: 'direct', textOnly: true };
+const DEVIN_STEERING_SUPPORT: AgentSteeringSupport = {
+  mode: 'direct',
+  textOnly: true,
+  mechanism: 'prompt-merge',
+  delivery: 'inferred',
+};
+
+/**
+ * A merged session/prompt only resolves when a turn completes, so a refused
+ * steer is told apart from an absorbed one by timing: a protocol error lands
+ * immediately, while silence within this window means the engine took it.
+ */
+const STEER_DISPATCH_GRACE_MS = 750;
+/**
+ * Like the primary prompt, a merged steer has no transport deadline — it
+ * settles when a turn ends, which may be far in the future.
+ */
+const STEER_PROMPT_TIMEOUT_MS = 0;
+/**
+ * Bounded wait for steer prompt results when the owning turn finishes.
+ * Merged steers resolve together with the turn; a steer that became a turn
+ * of its own may still be pending — those stay log-only.
+ */
+const STEER_RESULT_SETTLE_MS = 500;
 
 export class DevinAgentRun implements AgentRun {
   readonly runId: string;
   readonly events: AsyncIterable<AgentEvent>;
   private sessionId: string | undefined;
   private client: DevinAcpClient | undefined;
+  private queue: RunQueue | undefined;
   private promptInFlight = false;
   private stopRequested = false;
   private turnClosing = false;
   private exited = false;
+  private turnUserMessageId: string | undefined;
   private readonly steeringRequests = new Map<string, Promise<AgentSteeringOutcome>>();
+  /** In-flight steer prompt requests, keyed by steering requestId. */
+  private readonly steerAttempts = new Map<string, Promise<DevinPromptResult>>();
+  /** Steer prompt results parked until the turn's own userMessageId is known. */
+  private readonly steerResults = new Map<string, DevinPromptResult>();
+  /** Classified steer deliveries waiting to be emitted as stream events. */
+  private readonly steerDeliveries: Array<{
+    requestId: string;
+    insertion: AgentSteeringInsertion | 'failed';
+  }> = [];
   private readonly exitPromise: Promise<void>;
   private resolveExit!: () => void;
 
@@ -261,9 +305,8 @@ export class DevinAgentRun implements AgentRun {
   }
 
   get steering(): AgentSteeringSupport | undefined {
-    return supportsDevinSteering(this.client?.initializeResult)
-      ? DEVIN_STEERING_SUPPORT
-      : undefined;
+    if (!this.client?.initializeResult || this.runtime.steeringDisabled) return;
+    return DEVIN_STEERING_SUPPORT;
   }
 
   steer(request: AgentSteeringRequest): Promise<AgentSteeringOutcome> {
@@ -274,6 +317,16 @@ export class DevinAgentRun implements AgentRun {
     return attempt;
   }
 
+  /**
+   * Devin ACP exposes no named steering method, but a second session/prompt
+   * issued while a turn is running merges into that turn. The request is not
+   * awaited like an ordinary prompt — its result only arrives when a turn
+   * ends — so dispatch it and race a short grace window: an immediate
+   * protocol error means the input was refused (defer it for the next turn),
+   * silence means the engine absorbed it. Actual landing (merge vs. new
+   * turn) is classified later by comparing userMessageId metadata and
+   * surfaced as a steer_delivery event.
+   */
   private async performSteer(request: AgentSteeringRequest): Promise<AgentSteeringOutcome> {
     if (request.expectedRunId !== this.runId) {
       return { kind: 'rejected', reason: 'stale-run' };
@@ -291,41 +344,79 @@ export class DevinAgentRun implements AgentRun {
       return { kind: 'deferred', reason: 'turn-not-ready' };
     }
 
-    try {
-      const response = await client.request<DevinInjectResult>('session/inject', {
-        sessionId,
-        mode: 'steer',
-        content: [{ type: 'text', text: request.prompt }],
-      }, 5_000);
-      if (response.sessionId && response.sessionId !== sessionId) {
-        return { kind: 'rejected', reason: 'stale-run' };
-      }
-      if (typeof response.messageId !== 'string' || !response.messageId) {
-        return {
-          kind: 'rejected',
-          reason: 'transport-error',
-          message: 'Devin ACP session/inject response did not include messageId',
-        };
-      }
-      return { kind: 'accepted', runId: this.runId };
-    } catch (error) {
-      if (error instanceof DevinRpcError) {
-        const reason = isRecord(error.data) && typeof error.data.reason === 'string'
-          ? error.data.reason
-          : undefined;
-        if (error.code === -32601 || reason === 'unsupported_mode') {
-          return { kind: 'deferred', reason: 'unsupported' };
-        }
-        if (error.code === -32602 || reason === 'no_running_turn') {
-          return { kind: 'deferred', reason: 'turn-not-ready' };
-        }
-      }
-      return {
-        kind: 'rejected',
-        reason: 'transport-error',
-        message: error instanceof Error ? error.message : String(error),
-      };
+    const attempt = client.request<DevinPromptResult>('session/prompt', {
+      sessionId,
+      prompt: [{ type: 'text', text: request.prompt }],
+    }, STEER_PROMPT_TIMEOUT_MS);
+    this.steerAttempts.set(request.requestId, attempt);
+    attempt.then(
+      (result) => this.onSteerSettled(request.requestId, result),
+      (error: unknown) => this.onSteerSettled(
+        request.requestId,
+        error instanceof Error ? error : new Error(String(error)),
+      ),
+    );
+    return Promise.race<AgentSteeringOutcome>([
+      attempt.then(
+        (result): AgentSteeringOutcome => ({
+          kind: 'accepted',
+          runId: this.runId,
+          insertion: this.classifySteerResult(result),
+        }),
+        (error: unknown): AgentSteeringOutcome => steerErrorOutcome(error),
+      ),
+      new Promise<AgentSteeringOutcome>((resolve) => {
+        setTimeout(
+          () => resolve({ kind: 'accepted', runId: this.runId, insertion: 'unconfirmed' }),
+          STEER_DISPATCH_GRACE_MS,
+        );
+      }),
+    ]);
+  }
+
+  private onSteerSettled(requestId: string, result: DevinPromptResult | Error): void {
+    if (result instanceof Error) {
+      log.warn('devin-acp', 'steer-failed', { requestId, message: result.message });
+      this.steerDeliveries.push({ requestId, insertion: 'failed' });
+      this.queue?.push({ type: 'steer-delivery' });
+      return;
     }
+    this.steerResults.set(requestId, result);
+    this.classifySteerResults();
+  }
+
+  /**
+   * Classify parked steer results once the turn's own userMessageId is known.
+   * Same id means the prompt merged into the active turn; a different or
+   * missing id means it became a turn of its own. Classified records land
+   * in steerDeliveries and nudge the stream loop to emit them; the signal
+   * is only a hint — events are taken from the array so none can be lost.
+   */
+  private classifySteerResults(): void {
+    if (this.turnUserMessageId === undefined) return;
+    for (const [requestId, result] of this.steerResults) {
+      const insertion = extractUserMessageId(result) === this.turnUserMessageId
+        ? 'into-active-turn'
+        : 'as-new-turn';
+      this.steerResults.delete(requestId);
+      log.info('devin-acp', 'steer-delivered', { requestId, insertion });
+      this.steerDeliveries.push({ requestId, insertion });
+    }
+    if (this.steerDeliveries.length > 0) this.queue?.push({ type: 'steer-delivery' });
+  }
+
+  private takeSteerDeliveries(): Array<{
+    requestId: string;
+    insertion: AgentSteeringInsertion | 'failed';
+  }> {
+    return this.steerDeliveries.splice(0);
+  }
+
+  private classifySteerResult(result: DevinPromptResult): AgentSteeringInsertion {
+    if (this.turnUserMessageId === undefined) return 'unconfirmed';
+    return extractUserMessageId(result) === this.turnUserMessageId
+      ? 'into-active-turn'
+      : 'as-new-turn';
   }
 
   async stop(): Promise<void> {
@@ -349,7 +440,7 @@ export class DevinAgentRun implements AgentRun {
   }
 
   private async *stream(): AsyncGenerator<AgentEvent> {
-    const queue = new RunQueue();
+    const queue = this.queue = new RunQueue();
     const messages = new DevinMessageTranslator();
     let offNotification: (() => void) | undefined;
     let offClosed: (() => void) | undefined;
@@ -415,7 +506,13 @@ export class DevinAgentRun implements AgentRun {
         sessionId: this.sessionId,
         prompt,
       }, 0).then(
-        (result) => queue.push({ type: 'prompt-result', result }),
+        (result) => {
+          // Capture the turn's message id before the signal reaches the
+          // generator so steer results settling in the same tick classify
+          // against it immediately.
+          this.turnUserMessageId = extractUserMessageId(result);
+          queue.push({ type: 'prompt-result', result });
+        },
         (error) => queue.push({
           type: 'prompt-error',
           error: error instanceof Error ? error : new Error(String(error)),
@@ -447,6 +544,12 @@ export class DevinAgentRun implements AgentRun {
           };
           return;
         }
+        if (signal.type === 'steer-delivery') {
+          for (const delivery of this.takeSteerDeliveries()) {
+            yield { type: 'steer_delivery', ...delivery };
+          }
+          continue;
+        }
         if (signal.type === 'prompt-result') {
           this.promptInFlight = false;
           this.turnClosing = true;
@@ -455,6 +558,16 @@ export class DevinAgentRun implements AgentRun {
           const usage = extractDevinUsage(signal.result);
           if (usage) {
             yield { type: 'usage', ...usage };
+          }
+          if (this.steerAttempts.size > 0) {
+            await Promise.race([
+              Promise.allSettled([...this.steerAttempts.values()]),
+              new Promise((resolve) => setTimeout(resolve, STEER_RESULT_SETTLE_MS)),
+            ]);
+          }
+          this.classifySteerResults();
+          for (const delivery of this.takeSteerDeliveries()) {
+            yield { type: 'steer_delivery', ...delivery };
           }
           yield {
             type: 'done',
@@ -585,6 +698,28 @@ function advertisedModel(session: DevinSessionResult): string | undefined {
   if (typeof session.models?.currentModelId === 'string') return session.models.currentModelId;
   const option = findConfigOption(session.configOptions, /model/i);
   return typeof option?.currentValue === 'string' ? option.currentValue : undefined;
+}
+
+/**
+ * A steer prompt that fails within the dispatch grace window never reached
+ * the engine — map the refusal so the coordinator can defer it to the next
+ * turn instead of counting it delivered.
+ */
+function steerErrorOutcome(error: unknown): AgentSteeringOutcome {
+  if (error instanceof DevinRpcError) {
+    const reason = isRecord(error.data) && typeof error.data.reason === 'string'
+      ? error.data.reason
+      : undefined;
+    if (error.code === -32602 || reason === 'no_running_turn') {
+      return { kind: 'deferred', reason: 'turn-not-ready' };
+    }
+  }
+  return {
+    kind: 'rejected',
+    reason: 'transport-error',
+    message: error instanceof Error ? error.message : String(error),
+    retryable: true,
+  };
 }
 
 function isCancelled(error: Error): boolean {

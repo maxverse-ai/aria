@@ -32,7 +32,7 @@ describe('Devin ACP runtime', () => {
       topology: 'profile-daemon',
       capabilities: {
         inputs: ['text', 'image'],
-        liveInput: { mode: 'gated', inputs: ['text'] },
+        liveInput: { mode: 'direct', inputs: ['text'] },
         sessions: ['resume', 'list'],
         controls: ['interrupt', 'model'],
       },
@@ -78,7 +78,12 @@ describe('Devin ACP runtime', () => {
       sessionId: 'devin-session-1',
       terminationReason: 'normal',
     });
-    expect(run.steering).toBeUndefined();
+    expect(run.steering).toEqual({
+      mode: 'direct',
+      textOnly: true,
+      mechanism: 'prompt-merge',
+      delivery: 'inferred',
+    });
 
     const log = await readFile(join(root, 'devin.log'), 'utf8');
     expect(log).toContain('args acp');
@@ -107,12 +112,12 @@ describe('Devin ACP runtime', () => {
     ]);
   });
 
-  it('steers an active turn only through an advertised session/inject capability', async () => {
+  it('steers an active turn by merging a second session/prompt', async () => {
     const root = await mkdtemp(join(tmpdir(), 'aria-devin-acp-steer-'));
     roots.push(root);
     vi.stubEnv('DEVIN_API_KEY', 'test-devin-key');
     const runtime = new DevinAcpRuntime({
-      binary: await writeFakeDevin(root, { steering: true, holdPrompt: true }),
+      binary: await writeFakeDevin(root, { holdPrompt: true }),
       profileStateDir: root,
       access: 'full',
     });
@@ -129,14 +134,20 @@ describe('Devin ACP runtime', () => {
     const firstTurnEvent = events.next();
     await waitForLog(root, 'prompt-active');
 
-    expect(run.steering).toEqual({ mode: 'direct', textOnly: true });
+    expect(run.steering).toEqual({
+      mode: 'direct',
+      textOnly: true,
+      mechanism: 'prompt-merge',
+      delivery: 'inferred',
+    });
     const request = {
       requestId: 'steer-1',
       expectedRunId: run.runId,
       prompt: 'change direction',
     };
-    await expect(run.steer!(request)).resolves.toEqual({ kind: 'accepted', runId: run.runId });
-    await expect(run.steer!(request)).resolves.toEqual({ kind: 'accepted', runId: run.runId });
+    const accepted = { kind: 'accepted', runId: run.runId, insertion: 'into-active-turn' };
+    await expect(run.steer!(request)).resolves.toEqual(accepted);
+    await expect(run.steer!(request)).resolves.toEqual(accepted);
     await expect(run.steer!({
       requestId: 'steer-stale',
       expectedRunId: 'other-run',
@@ -157,6 +168,11 @@ describe('Devin ACP runtime', () => {
       rest.push(next.value);
     }
     expect(rest).toContainEqual({ type: 'final_text', content: 'Done after steer.' });
+    expect(rest).toContainEqual({
+      type: 'steer_delivery',
+      requestId: 'steer-1',
+      insertion: 'into-active-turn',
+    });
     expect(rest.at(-1)).toMatchObject({ type: 'done', terminationReason: 'normal' });
     await expect(run.steer!({
       requestId: 'steer-closed',
@@ -165,19 +181,62 @@ describe('Devin ACP runtime', () => {
     })).resolves.toEqual({ kind: 'deferred', reason: 'turn-closing' });
 
     const log = await readFile(join(root, 'devin.log'), 'utf8');
-    expect(log.match(/session\/inject steer change direction/g)).toHaveLength(1);
+    expect(log.match(/session\/prompt steer change direction/g)).toHaveLength(1);
     await runtime.dispose();
   });
 
-  it('leaves injected input queued when the ACP server rejects the steer', async () => {
+  it('reports a steer that landed after the turn boundary as a new turn', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'aria-devin-acp-steer-newturn-'));
+    roots.push(root);
+    vi.stubEnv('DEVIN_API_KEY', 'test-devin-key');
+    const runtime = new DevinAcpRuntime({
+      binary: await writeFakeDevin(root, { holdPrompt: true, steerAsNewTurn: true }),
+      profileStateDir: root,
+      access: 'full',
+    });
+    const run = runtime.execution.run({
+      runId: 'run-devin-steer-newturn',
+      scopeId: 'scope-devin',
+      prompt: 'inspect',
+      cwd: root,
+    });
+    const events = run.events[Symbol.asyncIterator]();
+    await events.next();
+    const firstTurnEvent = events.next();
+    await waitForLog(root, 'prompt-active');
+    await expect(run.steer!({
+      requestId: 'steer-late',
+      expectedRunId: run.runId,
+      prompt: 'too late',
+    })).resolves.toEqual({
+      kind: 'accepted',
+      runId: run.runId,
+      insertion: 'as-new-turn',
+    });
+    const rest: AgentEvent[] = [];
+    const first = await firstTurnEvent;
+    if (!first.done) rest.push(first.value);
+    while (true) {
+      const next = await events.next();
+      if (next.done) break;
+      rest.push(next.value);
+    }
+    expect(rest).toContainEqual({
+      type: 'steer_delivery',
+      requestId: 'steer-late',
+      insertion: 'as-new-turn',
+    });
+    await runtime.dispose();
+  });
+
+  it('defers the steer when the ACP server refuses a mid-turn prompt', async () => {
     const root = await mkdtemp(join(tmpdir(), 'aria-devin-acp-steer-error-'));
     roots.push(root);
     vi.stubEnv('DEVIN_API_KEY', 'test-devin-key');
     const runtime = new DevinAcpRuntime({
       binary: await writeFakeDevin(root, {
-        steering: true,
         holdPrompt: true,
-        injectError: 'no-running-turn',
+        steerError: 'no-running-turn',
       }),
       profileStateDir: root,
       access: 'full',
@@ -308,9 +367,10 @@ describe('Devin ACP runtime', () => {
 });
 
 interface FakeDevinOptions {
-  steering?: boolean;
   holdPrompt?: boolean;
-  injectError?: 'method' | 'no-running-turn';
+  /** Steer prompts resolve with a different userMessageId — new-turn signature. */
+  steerAsNewTurn?: boolean;
+  steerError?: 'no-running-turn';
 }
 
 async function writeFakeDevin(root: string, fakeOptions: FakeDevinOptions = {}): Promise<string> {
@@ -325,6 +385,7 @@ log('args ' + process.argv.slice(2).join(' '));
 let buffer = '';
 let permissionId = 900;
 let activePrompt;
+const steerPrompts = [];
 const send = (value) => process.stdout.write(JSON.stringify(value) + '\\n');
 const finishPrompt = (text, delay = 0) => {
   const prompt = activePrompt;
@@ -341,8 +402,16 @@ const finishPrompt = (text, delay = 0) => {
     send({ jsonrpc: '2.0', id: prompt.id, result: {
       stopReason: 'end_turn', _meta: {
         inputTokens: 11, outputTokens: 4, cachedReadTokens: 3, reasoningTokens: 2,
+        'cognition.ai/userMessageId': 'umsg-1',
       },
     } });
+    for (const steer of steerPrompts.splice(0)) {
+      send({ jsonrpc: '2.0', id: steer.id, result: {
+        stopReason: 'end_turn', _meta: {
+          'cognition.ai/userMessageId': options.steerAsNewTurn ? 'umsg-steer-' + steer.id : 'umsg-1',
+        },
+      } });
+    }
   }, delay);
 };
 process.stdin.on('data', (chunk) => {
@@ -364,10 +433,6 @@ process.stdin.on('data', (chunk) => {
         agentCapabilities: {
           loadSession: true,
           promptCapabilities: { image: true },
-          ...(options.steering ? { session: { inject: {
-            modes: ['queue', 'steer'],
-            steer_in_stream: ['finish'],
-          } } } : {}),
         },
       } });
       continue;
@@ -419,9 +484,25 @@ process.stdin.on('data', (chunk) => {
       continue;
     }
     if (message.method === 'session/prompt') {
+      const sid = message.params.sessionId;
+      // A second prompt while a turn is active is a steer: it merges into the
+      // running turn unless the fake is configured to reject or fork it.
+      if (activePrompt && activePrompt.sessionId === sid) {
+        log('session/prompt steer ' + (message.params.prompt?.[0]?.text ?? ''));
+        if (options.steerError === 'no-running-turn') {
+          send({ jsonrpc: '2.0', id: message.id, error: {
+            code: -32010,
+            message: 'No running turn',
+            data: { reason: 'no_running_turn' },
+          } });
+          continue;
+        }
+        steerPrompts.push({ id: message.id, sessionId: sid });
+        finishPrompt('Done after steer.', 30);
+        continue;
+      }
       log('session/prompt');
       log('identity ' + String(message.params.prompt[0].text.includes('ou_aria')));
-      const sid = message.params.sessionId;
       activePrompt = { id: message.id, sessionId: sid };
       send({ jsonrpc: '2.0', method: 'session/update', params: { sessionId: sid, update: {
         sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'I will inspect.' },
@@ -435,30 +516,6 @@ process.stdin.on('data', (chunk) => {
       } });
       if (options.holdPrompt) log('prompt-active');
       finishPrompt('Done.', options.holdPrompt ? 250 : 100);
-      continue;
-    }
-    if (message.method === 'session/inject') {
-      const sid = message.params?.sessionId;
-      const text = message.params?.content?.[0]?.text ?? '';
-      log('session/inject ' + message.params?.mode + ' ' + text);
-      if (!activePrompt || activePrompt.sessionId !== sid || options.injectError === 'no-running-turn') {
-        send({ jsonrpc: '2.0', id: message.id, error: {
-          code: -32010,
-          message: 'Inject precondition failed',
-          data: { reason: 'no_running_turn' },
-        } });
-        continue;
-      }
-      if (message.params?.mode !== 'steer' || options.injectError === 'method') {
-        send({ jsonrpc: '2.0', id: message.id, error: { code: -32601, message: 'Method not found' } });
-        continue;
-      }
-      const messageId = 'inject-' + message.id;
-      send({ jsonrpc: '2.0', id: message.id, result: { messageId, sessionId: sid } });
-      send({ jsonrpc: '2.0', method: 'session/update', params: { sessionId: sid, update: {
-        sessionUpdate: 'user_message', messageId, content: [{ type: 'text', text }],
-      } } });
-      finishPrompt('Done after steer.', 30);
       continue;
     }
     send({ jsonrpc: '2.0', id: message.id, result: {} });

@@ -69,7 +69,7 @@ export function codexCapability(profile: Pick<ProfileConfig, 'permissions'>): Ag
     supportsImages: true,
     supportsServiceTiers: true,
     supportsGoal: true,
-    steering: { mode: 'direct', textOnly: true },
+    steering: { mode: 'direct', textOnly: true, mechanism: 'native', delivery: 'confirmed' },
   };
 }
 
@@ -89,7 +89,7 @@ export function devinCapability(profile: Pick<ProfileConfig, 'permissions'>): Ag
     },
     finalReply: 'separate',
     supportsImages: true,
-    steering: { mode: 'gated', textOnly: true },
+    steering: { mode: 'direct', textOnly: true, mechanism: 'prompt-merge', delivery: 'inferred' },
   };
 }
 
@@ -109,7 +109,7 @@ export function grokCapability(profile: Pick<ProfileConfig, 'permissions'>): Age
     },
     finalReply: 'separate',
     supportsImages: true,
-    steering: { mode: 'direct', textOnly: true },
+    steering: { mode: 'direct', textOnly: true, mechanism: 'native', delivery: 'confirmed' },
   };
 }
 

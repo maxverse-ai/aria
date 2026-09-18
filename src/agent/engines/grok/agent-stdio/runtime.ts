@@ -243,7 +243,7 @@ type RunSignal =
 export class GrokAgentRun implements AgentRun {
   readonly runId: string;
   readonly events: AsyncIterable<AgentEvent>;
-  readonly steering = { mode: 'direct' as const, textOnly: true };
+  readonly steering = { mode: 'direct' as const, textOnly: true, mechanism: 'native' as const, delivery: 'confirmed' as const };
   private sessionId: string | undefined;
   private client: GrokAgentStdioClient | undefined;
   private promptInFlight = false;
