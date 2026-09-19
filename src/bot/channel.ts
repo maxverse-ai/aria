@@ -140,7 +140,7 @@ import {
   sweepSteerMails,
   sweptSteerMailInstruction,
 } from '../conversation/steer-mailbox';
-import { LoopStore } from './loop-store';
+import { ObjectiveService } from './objective-service';
 import { FinalReplyCommit, type FinalReplyArtifact } from './final-reply-commit';
 import {
   FinalReplyFreshness,
@@ -564,11 +564,12 @@ export async function startChannel(deps: StartChannelDeps): Promise<BridgeChanne
   // chat in flight, and everything sent during a run merges into the next
   // batch (only flushed once 600ms of silence has passed *after* the run).
   let finalReplyFreshness!: FinalReplyFreshness;
-  const loops = new LoopStore();
-  controls.loops = {
-    get: (loopScope) => loops.get(loopScope),
-    stop: (loopScope) => loops.stop(loopScope),
-  };
+  const objectives = new ObjectiveService({
+    enqueue: (objectiveScope, input) => {
+      pending.push(objectiveScope, input);
+    },
+  });
+  controls.objectives = objectives;
   const pending = new PendingQueue(DEBOUNCE_MS, (scope, inputs) => {
     const firstInput = inputs[0];
     const firstMsg = firstInput?.message;
@@ -649,7 +650,7 @@ export async function startChannel(deps: StartChannelDeps): Promise<BridgeChanne
         pending.unblock(scope);
         // `/loop` continuation: a `done` run queues the next iteration as an
         // ordinary input; any other terminal ends the loop with a notice.
-        const loopNext = loops.afterRun(scope, flushTerminal);
+        const loopNext = objectives.afterRun(scope, flushTerminal);
         if (loopNext?.kind === 'continue') {
           const size = pending.push(scope, loopNext.input);
           log.info('loop', 'iteration-queued', {
@@ -660,7 +661,9 @@ export async function startChannel(deps: StartChannelDeps): Promise<BridgeChanne
         } else if (loopNext) {
           const notice = loopNext.kind === 'finished'
             ? `✅ loop 完成，共 ${loopNext.state.total} 轮。`
-            : `⏹ loop 已停止：上一轮未正常结束（${loopNext.terminal}）。`;
+            : loopNext.kind === 'paused'
+              ? `⏸ loop 已暂停，剩余 ${loopNext.state.remaining} 轮；\`/loop resume\` 继续。`
+              : `⏹ loop 已停止：上一轮未正常结束（${loopNext.terminal}）。`;
           void channel.send(firstMsg.chatId, { markdown: notice }, {
             replyTo: loopNext.replyTo,
           }).catch((err) => log.warn('loop', 'notify-failed', { scope, err: String(err) }));
@@ -805,7 +808,7 @@ export async function startChannel(deps: StartChannelDeps): Promise<BridgeChanne
               activeRuns,
               pending,
               steerDeliveries,
-              loops,
+              objectives,
               conversation,
               controls: scoped?.controls ?? controls,
               chatTopology,
@@ -1380,7 +1383,7 @@ interface IntakeDeps {
   activeRuns: ActiveRuns;
   pending: PendingQueue;
   steerDeliveries: SteerDeliveryTracker<ConversationInput>;
-  loops: LoopStore;
+  objectives: ObjectiveService;
   conversation: ResolvedMessageConversation;
   controls: Controls;
   chatTopology: ChatTopologyResolver;
@@ -1620,7 +1623,7 @@ async function intakeMessage(deps: IntakeDeps): Promise<void> {
     }
     if (loopStart) {
       if (conversationInput.personalGroup || conversationInput.spaceOperation) {
-        await channel.send(emsg.chatId, { markdown: '当前会话模式暂不支持 `/loop`。' }, {
+        await channel.send(emsg.chatId, { markdown: '当前会话模式暂不支持 `/loop` 或 `/goal`。' }, {
           replyTo: emsg.messageId,
         }).catch((err) => log.warn('intake', 'loop-reject-failed', { err: String(err) }));
       } else {
@@ -1628,7 +1631,7 @@ async function intakeMessage(deps: IntakeDeps): Promise<void> {
           ...conversationInput,
           message: { ...emsg, content: loopStart.prompt },
         };
-        deps.loops.start(scope, loopInput, loopStart.prompt, loopStart.max);
+        deps.objectives.startLoop(scope, loopInput, loopStart.prompt, loopStart.max);
         const size = pending.push(scope, loopInput);
         log.info('intake', 'loop-started', {
           scope,

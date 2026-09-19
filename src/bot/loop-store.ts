@@ -13,15 +13,35 @@ export interface LoopState {
   remaining: number;
   total: number;
   startedAt: number;
+  /**
+   * A paused loop keeps its budget but queues nothing: a run already in
+   * flight finishes, then `awaiting` marks the owed next iteration until
+   * `resume` enqueues it.
+   */
+  paused: boolean;
 }
 
 export type LoopAfterRun =
   | { kind: 'continue'; state: LoopState; input: ConversationInput }
+  | { kind: 'paused'; state: LoopState; replyTo: string }
   | { kind: 'finished'; state: LoopState; replyTo: string }
   | { kind: 'aborted'; state: LoopState; terminal: Terminal; replyTo: string };
 
+export interface LoopResume {
+  state: LoopState;
+  /** Present when a paused run already ended and owes its next iteration. */
+  input?: ConversationInput;
+}
+
+interface LoopEntry {
+  state: LoopState;
+  template: ConversationInput;
+  /** A paused run ended `done` and decremented but queued nothing. */
+  awaiting: boolean;
+}
+
 export class LoopStore {
-  private readonly loops = new Map<string, { state: LoopState; template: ConversationInput }>();
+  private readonly loops = new Map<string, LoopEntry>();
 
   /**
    * Register a loop whose first iteration the caller queues itself. The
@@ -29,8 +49,8 @@ export class LoopStore {
    * everything except content and message identity is reused.
    */
   start(scope: string, template: ConversationInput, prompt: string, max: number): LoopState {
-    const state: LoopState = { prompt, remaining: max, total: max, startedAt: Date.now() };
-    this.loops.set(scope, { state, template });
+    const state: LoopState = { prompt, remaining: max, total: max, startedAt: Date.now(), paused: false };
+    this.loops.set(scope, { state, template, awaiting: false });
     return state;
   }
 
@@ -44,17 +64,40 @@ export class LoopStore {
     return entry?.state;
   }
 
+  pause(scope: string): LoopState | undefined {
+    const entry = this.loops.get(scope);
+    if (!entry) return undefined;
+    entry.state.paused = true;
+    return entry.state;
+  }
+
+  /**
+   * Unpause a loop. When the run that was in flight at pause time already
+   * ended, its owed iteration is returned for the caller to enqueue; when a
+   * run is still in flight nothing is owed — its `afterRun` queues the next
+   * iteration normally.
+   */
+  resume(scope: string): LoopResume | undefined {
+    const entry = this.loops.get(scope);
+    if (!entry) return undefined;
+    entry.state.paused = false;
+    if (!entry.awaiting) return { state: entry.state };
+    entry.awaiting = false;
+    return { state: entry.state, input: nextIterationInput(entry) };
+  }
+
   /**
    * Resolve what a just-finished run means for the scope's loop. A `done`
-   * run queues the next iteration while budget remains; anything else
-   * (interrupted, error, idle timeout) ends the loop rather than burning the
-   * remaining iterations on a broken run.
+   * run queues the next iteration while budget remains — or, while paused,
+   * only marks it owed. Anything else (interrupted, error, idle timeout)
+   * ends the loop rather than burning the remaining iterations on a broken
+   * run.
    */
   afterRun(scope: string, terminal: Terminal | undefined): LoopAfterRun | undefined {
     const entry = this.loops.get(scope);
     if (!entry) return undefined;
-    const { state, template } = entry;
-    const replyTo = template.message.messageId;
+    const { state } = entry;
+    const replyTo = entry.template.message.messageId;
     if (terminal !== 'done') {
       this.loops.delete(scope);
       return { kind: 'aborted', state, terminal: terminal ?? 'error', replyTo };
@@ -64,9 +107,16 @@ export class LoopStore {
       this.loops.delete(scope);
       return { kind: 'finished', state, replyTo };
     }
-    const iteration = state.total - state.remaining + 1;
-    return { kind: 'continue', state, input: loopIterationInput(template, state.prompt, iteration) };
+    if (state.paused) {
+      entry.awaiting = true;
+      return { kind: 'paused', state, replyTo };
+    }
+    return { kind: 'continue', state, input: nextIterationInput(entry) };
   }
+}
+
+function nextIterationInput(entry: LoopEntry): ConversationInput {
+  return loopIterationInput(entry.template, entry.state.prompt, entry.state.total - entry.state.remaining + 1);
 }
 
 function loopIterationInput(

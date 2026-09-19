@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { tryHandleCommand, type CommandContext } from '../../../src/commands';
+import { ObjectiveService } from '../../../src/bot/objective-service';
+import type { ConversationInput } from '../../../src/bot/conversation-input';
 
 const owner = 'ou_owner';
 
@@ -22,6 +24,8 @@ function context(content: string, overrides: {
   goal?: CommandContext['controls']['engineGoal'];
   senderId?: string;
   botOwnerId?: string;
+  objectives?: ObjectiveService;
+  loopPrompt?: string;
 } = {}) {
   const send = vi.fn(async () => undefined);
   const goal = overrides.goal ?? {
@@ -29,6 +33,13 @@ function context(content: string, overrides: {
     set: vi.fn(async () => goalSnapshot()),
     clear: vi.fn(async () => undefined),
   };
+  const objectives = overrides.objectives ?? new ObjectiveService({ enqueue: vi.fn() });
+  if (overrides.loopPrompt) {
+    objectives.startLoop('chat-1', {
+      message: { messageId: 'om_origin', chatId: 'chat-1' },
+    } as unknown as ConversationInput, overrides.loopPrompt, 5);
+  }
+  const onLoopStart = vi.fn();
   const ctx = {
     msg: {
       content,
@@ -44,6 +55,7 @@ function context(content: string, overrides: {
     sessions: {
       getRaw: vi.fn(() => (overrides.sessionId === undefined ? { sessionId: 'thread-1', cwd: '/w', updatedAt: 1 } : overrides.sessionId === '' ? undefined : { sessionId: overrides.sessionId, cwd: '/w', updatedAt: 1 })),
     },
+    onLoopStart,
     controls: {
       profileConfig: {
         agentKind: overrides.agentKind ?? 'codex',
@@ -52,10 +64,11 @@ function context(content: string, overrides: {
         access: { admins: [], allowedUsers: [], allowedChats: [] },
       },
       botOwnerId: overrides.botOwnerId ?? owner,
+      objectives,
       ...(overrides.goal === undefined ? { engineGoal: goal } : { engineGoal: overrides.goal }),
     },
   } as unknown as CommandContext;
-  return { ctx, send, goal };
+  return { ctx, send, goal, objectives, onLoopStart };
 }
 
 function sent(send: ReturnType<typeof vi.fn>): string {
@@ -162,13 +175,43 @@ describe('/goal command', () => {
     expect(sent(send)).toContain('先发一条消息');
   });
 
-  it('refuses an engine without goals', async () => {
-    const { ctx, send, goal } = context('/goal 收尾', { agentKind: 'claude' });
+  it('refuses to set a goal while a loop owns the scope', async () => {
+    const { ctx, send, goal } = context('/goal 收尾', { loopPrompt: '跑测试' });
 
     await tryHandleCommand(ctx);
 
     expect(goal.set).not.toHaveBeenCalled();
-    expect(sent(send)).toContain('没有长期目标能力');
+    expect(sent(send)).toContain('/loop stop');
+  });
+
+  it('falls back to a bridge loop on an engine without goals', async () => {
+    const { ctx, send, goal, onLoopStart } = context('/goal 收尾', { agentKind: 'claude' });
+
+    await tryHandleCommand(ctx);
+
+    expect(goal.set).not.toHaveBeenCalled();
+    expect(onLoopStart).toHaveBeenCalledWith('收尾', 10);
+    expect(sent(send)).toContain('循环执行');
+  });
+
+  it('rejects a token budget in loop mode', async () => {
+    const { ctx, send, onLoopStart } = context('/goal --budget 5000 收尾', { agentKind: 'devin' });
+
+    await tryHandleCommand(ctx);
+
+    expect(onLoopStart).not.toHaveBeenCalled();
+    expect(sent(send)).toContain('仅引擎目标可用');
+  });
+
+  it('controls the fallback loop through goal subcommands', async () => {
+    const { ctx, send, objectives } = context('/goal status', { agentKind: 'devin', loopPrompt: '跑测试' });
+
+    await tryHandleCommand(ctx);
+
+    const md = sent(send);
+    expect(md).toContain('跑测试');
+    expect(md).toContain('bridge 循环');
+    expect(objectives.loopState('chat-1')).toBeDefined();
   });
 
   it('keeps writes to the owner or an admin', async () => {

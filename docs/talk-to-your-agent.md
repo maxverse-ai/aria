@@ -73,9 +73,15 @@ terminal-reply freshness check live in
 - **`/loop [--max <n>] <task>`** re-submits the same task as consecutive runs
   (default 10 iterations, capped at 100; admin only to start). A follow-up
   sent mid-iteration rides into the next round's prompt batch. `/loop status`,
-  `/loop stop`.
-- **`/goal [objective] [--budget <tokens>]`** sets a Codex session goal that
-  keeps working across turns; `/goal resume`, `/goal pause`, `/goal clear`.
+  `/loop pause`, `/loop resume`, `/loop stop`.
+- **`/goal [objective] [--budget <tokens>] [--max <n>]`** sets one objective
+  per scope. Engines that carry a native goal (Codex) own it on the thread —
+  `/goal resume` starts engine-driven turns under a token budget. Other
+  engines fall back to the bridge loop driver and honestly replay the same
+  prompt each round (`--max` bounds it). `/goal pause`, `/goal resume`,
+  `/goal clear` control whichever driver owns the scope. A scope runs either
+  a loop or a goal, never both; `/stop` drops a loop and pauses an active
+  engine goal.
 - **`/remind at <ISO time> <task>`** creates a session-anchored reminder;
   `list`, `snooze`, `update`, `cancel`, `history` manage it. For the
   deterministic trigger platform behind scheduled work, see

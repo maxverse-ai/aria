@@ -65,6 +65,37 @@ describe('LoopStore', () => {
     }
   });
 
+  it('pauses before queueing and resumes the owed iteration', () => {
+    const loops = new LoopStore();
+    loops.start('s', template(), 'prompt', 3);
+    loops.pause('s');
+    expect(loops.get('s')!.paused).toBe(true);
+
+    const after = loops.afterRun('s', 'done');
+    expect(after?.kind).toBe('paused');
+    expect(after?.state.remaining).toBe(2);
+
+    const resumed = loops.resume('s');
+    expect(resumed?.input).toBeDefined();
+    expect(resumed?.input?.message.content).toBe('prompt');
+    expect(resumed?.state.paused).toBe(false);
+
+    // Resumed iteration runs to completion and continues normally.
+    const next = loops.afterRun('s', 'done');
+    expect(next?.kind).toBe('continue');
+    expect(next?.state.remaining).toBe(1);
+  });
+
+  it('resume while a run is in flight owes no input', () => {
+    const loops = new LoopStore();
+    loops.start('s', template(), 'prompt', 3);
+    loops.pause('s');
+    const resumed = loops.resume('s');
+    expect(resumed?.input).toBeUndefined();
+    // The in-flight run's afterRun queues the next iteration itself.
+    expect(loops.afterRun('s', 'done')?.kind).toBe('continue');
+  });
+
   it('ignores scopes without a loop', () => {
     const loops = new LoopStore();
     expect(loops.afterRun('nope', 'done')).toBeUndefined();

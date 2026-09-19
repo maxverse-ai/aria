@@ -65,9 +65,14 @@ steering 目前仅支持文本。Aria 只有在引擎确认后才把消息移出
 
 - **`/loop [--max <n>] <task>`** 把同一任务作为连续运行重复提交（默认 10
   轮，上限 100；仅管理员可启动）。轮次中途发来的后续消息会并入下一轮的
-  prompt 批次。`/loop status`、`/loop stop`。
-- **`/goal [objective] [--budget <tokens>]`** 设置跨 turn 持续工作的 Codex
-  会话目标；`/goal resume`、`/goal pause`、`/goal clear`。
+  prompt 批次。`/loop status`、`/loop pause`、`/loop resume`、
+  `/loop stop`。
+- **`/goal [objective] [--budget <tokens>] [--max <n>]`** 每个会话一个目标。
+  有原生目标能力的引擎（Codex）把目标挂在线程上——`/goal resume` 在
+  token 预算内让引擎自动推进。其他引擎降级为 bridge 循环：同一 prompt
+  逐轮重放（`--max` 限轮数）。`/goal pause`、`/goal resume`、
+  `/goal clear` 对两种驱动通用。一个会话 loop 与 goal 互斥；`/stop`
+  会停掉 loop、暂停进行中的引擎目标。
 - **`/remind at <ISO时间> <任务>`** 创建锚定到当前会话的提醒；`list`、
   `snooze`、`update`、`cancel`、`history` 用于管理。其背后的确定性触发
   平台见[定时动作](scheduled-actions.zh.md)。

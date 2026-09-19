@@ -27,6 +27,11 @@ import {
 import type { AgentAdapter, AgentRun } from '../agent/types';
 import type { EngineStatusSnapshot } from '../agent/runtime/types';
 import type { EngineGoalSnapshot, EngineGoalStatus } from '../agent/runtime/queries';
+import type {
+  EngineObjectiveRef,
+  ObjectiveControl,
+  ObjectiveSnapshot,
+} from '../bot/objective-service';
 import {
   ConfigChangeService,
   ControlChangeError,
@@ -197,11 +202,8 @@ export interface Controls {
   engineModels?(signal: AbortSignal): Promise<ModelOption[] | undefined>;
   /** Read or change the live engine's long-running goal for one native thread. */
   engineGoal?: import('../agent/runtime/queries').EngineGoalControl;
-  /** Bridge-side `/loop` state, keyed by session scope. */
-  loops?: {
-    get(scope: string): import('../bot/loop-store').LoopState | undefined;
-    stop(scope: string): import('../bot/loop-store').LoopState | undefined;
-  };
+  /** One objective per scope: a bridge `/loop` replay or an engine `/goal`. */
+  objectives?: ObjectiveControl;
   /** Announces turns the engine started on its own, which nothing replied to. */
   engineTurns?: { subscribe(listener: (turn: import('../agent/runtime/queries').EngineTurnRef) => void): () => void };
   /** Attaches to one of those turns instead of starting a new one. */
@@ -548,7 +550,11 @@ async function handleNew(args: string, ctx: CommandContext): Promise<void> {
 
   const taskContent = trimmed || undefined;
   const wasRunning = ctx.activeRuns.interrupt(ctx.scope);
-  ctx.controls.loops?.stop(ctx.scope);
+  try {
+    await ctx.controls.objectives?.stop(ctx.scope, engineObjectiveRef(ctx));
+  } catch (err) {
+    log.warn('command', 'objective-stop-failed', { scope: ctx.scope, err: String(err) });
+  }
   if (ctx.sessionCatalog && ctx.sessionCatalogIdentity) {
     ctx.sessionCatalog.archiveActive({
       ...ctx.sessionCatalogIdentity,
@@ -743,17 +749,30 @@ async function handleDoc(args: string, ctx: CommandContext): Promise<void> {
   await reply(ctx, '云文档评论现在不需要绑定工作区；在支持的文档评论里 @bot 即可触发回复。');
 }
 
-// ─── /goal ────────────────────────────────────────────────────────────────
+// ─── objectives: /goal + /loop ────────────────────────────────────────────
 
 const GOAL_USAGE = [
-  '**长期目标（Codex）**',
+  '**长期目标**',
   '- `/goal` — 查看当前会话的目标',
-  '- `/goal <目标>` — 设置目标，状态为已暂停，不会自动推进',
-  '- `/goal --budget <tokens> <目标>` — 同时设置 token 预算',
-  '- `/goal pause` — 暂停',
-  '- `/goal clear` — 清除',
-  '- `/goal resume --budget <tokens>` — 开始自动推进；必须给预算上限',
+  '- `/goal <目标>` — 设置目标（引擎支持时挂到线程上，否则按 loop 逐轮重放）',
+  '- `/goal --budget <tokens> <目标>` — 引擎目标的 token 预算',
+  '- `/goal --max <n> <目标>` — loop 模式的轮数上限（默认 10，最大 100）',
+  '- `/goal pause` — 暂停推进',
+  '- `/goal resume [--budget <tokens>]` — 继续推进；引擎目标必须已有预算上限',
+  '- `/goal clear` — 清除目标',
 ].join('\n');
+
+const LOOP_USAGE = [
+  '**循环执行（引擎无关）**',
+  '- `/loop <任务>` — 把同一任务反复提交为新的 run（默认最多 10 轮）',
+  '- `/loop --max <n> <任务>` — 自定义轮数上限（最大 100）',
+  '- `/loop status` — 查看当前会话的 loop 状态',
+  '- `/loop pause` / `/loop resume` — 暂停 / 恢复排轮',
+  '- `/loop stop` — 停止 loop；`/stop`、`/new`、`/reset` 也会停掉它',
+].join('\n');
+
+const LOOP_DEFAULT_MAX = 10;
+const LOOP_MAX_CAP = 100;
 
 const GOAL_STATUS_LABELS: Record<EngineGoalStatus, string> = {
   active: '进行中',
@@ -775,6 +794,37 @@ function goalLine(goal: EngineGoalSnapshot): string {
   ].join('\n');
 }
 
+/** Unified status render for whichever driver owns the scope. */
+function objectiveLine(snapshot: ObjectiveSnapshot): string {
+  const lines = [
+    `${snapshot.driver === 'engine' ? '目标' : '任务'}：${snapshot.objective}`,
+    `状态：${GOAL_STATUS_LABELS[snapshot.status] ?? snapshot.status}`,
+  ];
+  if (snapshot.budget.kind === 'tokens') {
+    const limit = snapshot.budget.limit === null ? '未设' : snapshot.budget.limit.toLocaleString('en-US');
+    lines.push(`预算：${limit} ｜ 已用：${snapshot.budget.used.toLocaleString('en-US')} tokens`);
+  } else {
+    lines.push(`进度：第 ${snapshot.budget.completed + 1} / ${snapshot.budget.limit} 轮`);
+  }
+  lines.push(`模式：${snapshot.driver === 'engine' ? '引擎目标' : 'bridge 循环'}`);
+  lines.push(`开始于：${new Date(snapshot.startedAt).toISOString()}`);
+  return lines.join('\n');
+}
+
+/**
+ * The engine-goal channel for a scope, or undefined when the live engine
+ * cannot carry a goal or no native thread exists yet. Keys on the capability
+ * flag and control presence, never on the engine id.
+ */
+function engineObjectiveRef(ctx: CommandContext, scope = ctx.scope): EngineObjectiveRef | undefined {
+  if (!capabilityFor(ctx.controls.profileConfig.agentKind, ctx.controls.profileConfig).supportsGoal) {
+    return undefined;
+  }
+  const goal = ctx.controls.engineGoal;
+  const threadId = ctx.sessions.getRaw(scope)?.sessionId;
+  return goal && threadId ? { goal, threadId } : undefined;
+}
+
 /** `--budget <tokens>` for the subcommands that need a spend ceiling. */
 function parseGoalBudget(tokens: string[]): { budget?: number; error?: string } {
   if (tokens.length === 0) return {};
@@ -788,41 +838,141 @@ function parseGoalBudget(tokens: string[]): { budget?: number; error?: string } 
   return { budget: parsed };
 }
 
+/** `--max <n>` and the remaining prompt words, shared by `/loop` and bridge `/goal`. */
+function parseIterationArgs(
+  tokens: string[],
+  usage: string,
+): { max: number; text?: string; error?: string } {
+  let max = LOOP_DEFAULT_MAX;
+  const prompt: string[] = [];
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index]!;
+    if (token === '--max') {
+      const raw = tokens[index + 1];
+      const parsed = raw === undefined ? Number.NaN : Number.parseInt(raw.replace(/_/g, ''), 10);
+      if (!Number.isFinite(parsed) || parsed <= 0 || parsed > LOOP_MAX_CAP) {
+        return { max, error: `轮数需要是 1–${LOOP_MAX_CAP} 的整数，例如 \`--max 20\`。` };
+      }
+      max = parsed;
+      index += 1;
+      continue;
+    }
+    prompt.push(token);
+  }
+  const text = prompt.join(' ').trim();
+  if (!text) return { max, error: usage };
+  return { max, text };
+}
+
 /**
- * Codex carries one goal per thread, and a thread without a run does not exist
- * yet, so this refuses before the first message exactly like Codex does.
+ * `/goal` is one objective per scope. An engine that carries goals
+ * (`supportsGoal` + a live goal control + an existing thread) owns the
+ * objective itself; every other engine falls back to the bridge loop driver,
+ * which honestly reports that the same prompt is replayed each round. The two
+ * drivers are mutually exclusive per scope.
  */
 async function handleGoal(args: string, ctx: CommandContext): Promise<void> {
-  if (!capabilityFor(ctx.controls.profileConfig.agentKind, ctx.controls.profileConfig).supportsGoal) {
-    await reply(ctx, '当前 Agent 没有长期目标能力；`/goal` 目前仅由 Codex Runtime 提供。');
-    return;
-  }
-  const goal = ctx.controls.engineGoal;
-  if (!goal) {
-    await reply(ctx, '当前运行模式没有可用的引擎目标通道。');
-    return;
-  }
-
+  const objectives = ctx.controls.objectives;
+  const engineRef = engineObjectiveRef(ctx);
+  const engineCapable = capabilityFor(ctx.controls.profileConfig.agentKind, ctx.controls.profileConfig).supportsGoal;
   const tokens = args.trim().split(/\s+/).filter(Boolean);
   const sub = tokens[0] ?? '';
-  const mutating = sub === 'pause' || sub === 'resume' || sub === 'clear' || sub !== '';
+  const mutating = sub !== '' && sub !== 'status' && sub !== 'show';
   if (mutating && !canRunAdminCommand(ctx.controls.profileConfig, ctx.controls, ctx.msg.senderId).ok) {
     await reply(ctx, '❌ `/goal` 的修改操作仅管理员可用。');
     return;
   }
 
-  const threadId = ctx.sessions.getRaw(ctx.scope)?.sessionId;
-  if (!threadId) {
-    await reply(ctx, '这个会话还没有 Codex 线程，先发一条消息，再设置目标。');
+  if (engineCapable) {
+    if (!ctx.controls.engineGoal) {
+      await reply(ctx, '当前运行模式没有可用的引擎目标通道。');
+      return;
+    }
+    // A goal is thread-bound and a thread without a run does not exist yet,
+    // so every subcommand refuses before the first message — same as Codex.
+    if (!engineRef) {
+      await reply(ctx, '这个会话还没有引擎线程，先发一条消息，再设置目标。');
+      return;
+    }
+    await handleEngineGoal(sub, tokens.slice(1), engineRef, ctx);
     return;
   }
 
-  if (sub === '' || sub === 'show') {
+  // Bridge fallback: no native goal, so the objective is replayed as loop
+  // iterations — the reply says so rather than pretending otherwise.
+  if (!objectives || !ctx.onLoopStart) {
+    await reply(ctx, '当前运行模式不支持 `/goal`。');
+    return;
+  }
+
+  if (sub === '' || sub === 'status' || sub === 'show') {
+    const snapshot = await objectives.status(ctx.scope);
+    await reply(
+      ctx,
+      snapshot ? objectiveLine(snapshot) : `当前会话还没有目标。设置：\`/goal <目标>\`（将按 loop 逐轮重放）。`,
+    );
+    return;
+  }
+  if (sub === 'clear' || sub === 'remove' || sub === 'stop') {
+    const stopped = objectives.stopLoop(ctx.scope);
+    await reply(
+      ctx,
+      stopped ? `✓ 已停止目标（loop 模式）。` : '当前会话还没有目标。',
+    );
+    return;
+  }
+  if (sub === 'pause') {
+    const paused = objectives.pauseLoop(ctx.scope);
+    await reply(
+      ctx,
+      paused ? '✓ 已暂停；进行中的本轮会跑完，不再排新轮。' : '当前会话还没有目标。',
+    );
+    return;
+  }
+  if (sub === 'resume' || sub === 'active') {
+    const resumed = objectives.resumeLoop(ctx.scope);
+    await reply(
+      ctx,
+      resumed
+        ? `✓ 已恢复，剩余 ${resumed.state.remaining} 轮` + (resumed.queued ? '，下一轮已排队。' : '；本轮结束后继续。')
+        : '当前会话没有可恢复的目标。',
+    );
+    return;
+  }
+  if (tokens.includes('--budget')) {
+    await reply(ctx, 'token 预算仅引擎目标可用；当前 Agent 按 loop 执行，用 `--max <n>` 限制轮数。');
+    return;
+  }
+  const parsed = parseIterationArgs(tokens, GOAL_USAGE);
+  if (parsed.error || !parsed.text) {
+    await reply(ctx, parsed.error ?? GOAL_USAGE);
+    return;
+  }
+  const replaced = objectives.stopLoop(ctx.scope);
+  ctx.onLoopStart(parsed.text, parsed.max);
+  await reply(
+    ctx,
+    `✓ 当前 Agent 没有引擎目标能力，已改用循环执行：同一任务将重复 ${parsed.max} 轮，` +
+      `\`/goal pause\` / \`/goal clear\` 控制（\`/loop\` 等价）。` +
+      (replaced ? `\n（替换了之前还剩 ${replaced.remaining} 轮的目标。）` : '') +
+      `\n任务：${parsed.text}`,
+  );
+}
+
+/** Engine-driver half of `/goal`: the objective lives on the native thread. */
+async function handleEngineGoal(
+  sub: string,
+  rest: string[],
+  ref: EngineObjectiveRef,
+  ctx: CommandContext,
+): Promise<void> {
+  const { goal, threadId } = ref;
+  if (sub === '' || sub === 'status' || sub === 'show') {
     const current = await goal.get(threadId);
     await reply(ctx, current ? goalLine(current) : '当前会话还没有目标。设置：`/goal <目标>`');
     return;
   }
-  if (sub === 'clear' || sub === 'remove') {
+  if (sub === 'clear' || sub === 'remove' || sub === 'stop') {
     await goal.clear(threadId);
     await reply(ctx, '✓ 已清除当前会话的目标。');
     return;
@@ -833,7 +983,7 @@ async function handleGoal(args: string, ctx: CommandContext): Promise<void> {
       await reply(ctx, '当前会话还没有目标。设置：`/goal <目标>`');
       return;
     }
-    const requested = parseGoalBudget(tokens.slice(1));
+    const requested = parseGoalBudget(rest);
     if (requested.error) {
       await reply(ctx, requested.error);
       return;
@@ -862,12 +1012,18 @@ async function handleGoal(args: string, ctx: CommandContext): Promise<void> {
     return;
   }
 
+  if (ctx.controls.objectives?.loopState(ctx.scope)) {
+    await reply(ctx, '当前会话有运行中的 loop；先 `/loop stop`，再设置目标。');
+    return;
+  }
+
   let budget: number | undefined;
   const objective: string[] = [];
-  for (let index = 0; index < tokens.length; index += 1) {
-    const token = tokens[index]!;
+  const words = [sub, ...rest];
+  for (let index = 0; index < words.length; index += 1) {
+    const token = words[index]!;
     if (token === '--budget') {
-      const raw = tokens[index + 1];
+      const raw = words[index + 1];
       const parsed = raw === undefined ? Number.NaN : Number.parseInt(raw.replace(/_/g, ''), 10);
       if (!Number.isFinite(parsed) || parsed <= 0) {
         await reply(ctx, '预算需要一个正整数，例如 `/goal --budget 50000 <目标>`。');
@@ -895,37 +1051,14 @@ async function handleGoal(args: string, ctx: CommandContext): Promise<void> {
   await reply(ctx, `✓ 已设置目标（已暂停，不会自动推进）。\n${goalLine(updated)}`);
 }
 
-// ─── /loop ────────────────────────────────────────────────────────────────
-
-const LOOP_USAGE = [
-  '**循环执行（引擎无关）**',
-  '- `/loop <任务>` — 把同一任务反复提交为新的 run（默认最多 10 轮）',
-  '- `/loop --max <n> <任务>` — 自定义轮数上限（最大 100）',
-  '- `/loop status` — 查看当前会话的 loop 状态',
-  '- `/loop stop` — 停止 loop；`/stop`、`/new`、`/reset` 也会停掉它',
-].join('\n');
-
-const LOOP_DEFAULT_MAX = 10;
-const LOOP_MAX_CAP = 100;
-
-function loopLine(state: import('../bot/loop-store').LoopState): string {
-  return [
-    `任务：${state.prompt}`,
-    `进度：第 ${state.total - state.remaining + 1} / ${state.total} 轮`,
-    `开始于：${new Date(state.startedAt).toISOString()}`,
-  ].join('\n');
-}
-
 /**
- * `/loop` drives iteration from the bridge, not the engine: the prompt is
- * re-queued as an ordinary run each time the previous one ends `done`, so it
- * works for every engine and each round keeps its own reply, progress stream,
- * and `/stop` boundary. Runs that end interrupted or in error stop the loop —
- * repeating a broken run would only burn the remaining budget.
+ * `/loop` always takes the bridge driver — it is the explicit "replay this
+ * exact prompt" semantic, available on every engine including ones with a
+ * native goal. It refuses while an engine goal owns the scope.
  */
 async function handleLoop(args: string, ctx: CommandContext): Promise<void> {
-  const loops = ctx.controls.loops;
-  if (!loops || !ctx.onLoopStart) {
+  const objectives = ctx.controls.objectives;
+  if (!objectives || !ctx.onLoopStart) {
     await reply(ctx, '当前运行模式不支持 `/loop`。');
     return;
   }
@@ -934,14 +1067,34 @@ async function handleLoop(args: string, ctx: CommandContext): Promise<void> {
   const sub = tokens[0] ?? '';
 
   if (sub === '' || sub === 'status') {
-    const current = loops.get(ctx.scope);
-    await reply(ctx, current ? `${loopLine(current)}\n\n\`/loop stop\` 停止。` : `当前会话没有运行中的 loop。\n\n${LOOP_USAGE}`);
+    const snapshot = await objectives.status(ctx.scope, engineObjectiveRef(ctx));
+    await reply(
+      ctx,
+      snapshot ? `${objectiveLine(snapshot)}\n\n\`/loop stop\` 停止。` : `当前会话没有运行中的 loop。\n\n${LOOP_USAGE}`,
+    );
     return;
   }
 
   if (sub === 'stop' || sub === 'clear' || sub === 'cancel') {
-    const stopped = loops.stop(ctx.scope);
-    await reply(ctx, stopped ? `✓ 已停止 loop。\n${loopLine(stopped)}` : '当前会话没有运行中的 loop。');
+    const stopped = objectives.stopLoop(ctx.scope);
+    await reply(ctx, stopped ? `✓ 已停止 loop。\n任务：${stopped.prompt}` : '当前会话没有运行中的 loop。');
+    return;
+  }
+
+  if (sub === 'pause') {
+    const paused = objectives.pauseLoop(ctx.scope);
+    await reply(ctx, paused ? '✓ 已暂停；进行中的本轮会跑完，不再排新轮。' : '当前会话没有运行中的 loop。');
+    return;
+  }
+
+  if (sub === 'resume') {
+    const resumed = objectives.resumeLoop(ctx.scope);
+    await reply(
+      ctx,
+      resumed
+        ? `✓ 已恢复，剩余 ${resumed.state.remaining} 轮` + (resumed.queued ? '，下一轮已排队。' : '；本轮结束后继续。')
+        : '当前会话没有运行中的 loop。',
+    );
     return;
   }
 
@@ -950,36 +1103,25 @@ async function handleLoop(args: string, ctx: CommandContext): Promise<void> {
     return;
   }
 
-  let max = LOOP_DEFAULT_MAX;
-  const prompt: string[] = [];
-  for (let index = 0; index < tokens.length; index += 1) {
-    const token = tokens[index]!;
-    if (token === '--max') {
-      const raw = tokens[index + 1];
-      const parsed = raw === undefined ? Number.NaN : Number.parseInt(raw.replace(/_/g, ''), 10);
-      if (!Number.isFinite(parsed) || parsed <= 0 || parsed > LOOP_MAX_CAP) {
-        await reply(ctx, `轮数需要是 1–${LOOP_MAX_CAP} 的整数，例如 \`/loop --max 20 <任务>\`。`);
-        return;
-      }
-      max = parsed;
-      index += 1;
-      continue;
-    }
-    prompt.push(token);
-  }
-  const text = prompt.join(' ').trim();
-  if (!text) {
-    await reply(ctx, LOOP_USAGE);
+  const existing = await objectives.status(ctx.scope, engineObjectiveRef(ctx));
+  if (existing?.driver === 'engine') {
+    await reply(ctx, `当前会话已有引擎目标（${existing.objective}）；\`/goal clear\` 后再起 loop。`);
     return;
   }
 
-  const replaced = loops.stop(ctx.scope);
-  ctx.onLoopStart(text, max);
+  const parsed = parseIterationArgs(tokens, LOOP_USAGE);
+  if (parsed.error || !parsed.text) {
+    await reply(ctx, parsed.error ?? LOOP_USAGE);
+    return;
+  }
+
+  const replaced = objectives.stopLoop(ctx.scope);
+  ctx.onLoopStart(parsed.text, parsed.max);
   await reply(
     ctx,
-    `✓ 已开始 loop，共 ${max} 轮；每轮结果会发到本会话，\`/loop stop\` 或 \`/stop\` 随时停。` +
+    `✓ 已开始 loop，共 ${parsed.max} 轮；每轮结果会发到本会话，\`/loop stop\` 或 \`/stop\` 随时停。` +
       (replaced ? `\n（替换了之前还剩 ${replaced.remaining} 轮的 loop。）` : '') +
-      `\n任务：${text}`,
+      `\n任务：${parsed.text}`,
   );
 }
 
@@ -2076,7 +2218,12 @@ async function handleStop(args: string, ctx: CommandContext): Promise<void> {
     return;
   }
   const scope = targetScope || ctx.scope;
-  ctx.controls.loops?.stop(scope);
+  try {
+    // A failed goal pause must never keep `/stop` from interrupting the run.
+    await ctx.controls.objectives?.stop(scope, engineObjectiveRef(ctx, scope));
+  } catch (err) {
+    log.warn('command', 'objective-stop-failed', { scope, err: String(err) });
+  }
   const ok = ctx.activeRuns.interrupt(scope);
   log.info('command', 'stop', {
     scope,
