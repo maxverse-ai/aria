@@ -1,3 +1,6 @@
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { runChannelPluginContract } from '../../../src/channel/plugin/contract-test-kit';
 import { ChannelPluginError } from '../../../src/channel/plugin/errors';
@@ -13,11 +16,13 @@ import {
   channelPluginPackage,
   createWeixinIlinkPlugin,
   FakeIlinkTransport,
+  FileIlinkCursorStore,
   InMemoryCredentialStore,
   InMemoryCursorStore,
   validateWeixinIlinkConfig,
   WEIXIN_ILINK_PACKAGE_NAME,
   WEIXIN_ILINK_PLUGIN_ID,
+  type IlinkCursorStore,
   type WeixinIlinkConfig,
   type WeixinIlinkRuntime,
 } from '../../../channel-plugins/weixin-ilink/src/index';
@@ -67,7 +72,7 @@ function startPlugin(
   transport: FakeIlinkTransport,
   ingress: (envelope: ChannelInboundEnvelope) => Promise<ChannelIngressAcceptance>,
   config = ilinkConfig(),
-  cursorStore = new InMemoryCursorStore(),
+  cursorStore: IlinkCursorStore = new InMemoryCursorStore(),
 ) {
   const plugin = createWeixinIlinkPlugin({
     transport: () => transport,
@@ -470,6 +475,220 @@ describe('weixin-ilink auth lifecycle (Stage 11C)', () => {
       // Cleared credentials leave no prior token; a second login from the
       // confirmed credential would send it — verify the call shape instead.
       expect(transport.lastLocalTokenList).toEqual([]);
+    } finally {
+      await runtime.close();
+    }
+  });
+});
+
+describe('weixin-ilink durable inbound path (Stage 11D)', () => {
+  it('persists the provider cursor atomically through FileIlinkCursorStore', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'ilink-cursor-'));
+    try {
+      const store = new FileIlinkCursorStore(join(dir, 'cursor.txt'));
+      expect(await store.read()).toBe('');
+      await store.write('cursor-7');
+      expect(await store.read()).toBe('cursor-7');
+      expect(await readFile(join(dir, 'cursor.txt'), 'utf8')).toBe('cursor-7');
+      // A second reader over the same file sees the durable cursor.
+      expect(await new FileIlinkCursorStore(join(dir, 'cursor.txt')).read()).toBe(
+        'cursor-7',
+      );
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('suppresses re-offered envelopes when a batch is redelivered mid-acceptance', async () => {
+    const transport = new FakeIlinkTransport();
+    const cursorStore = new InMemoryCursorStore();
+    const offered: string[] = [];
+    let failSecond = true;
+    const { plugin, context } = startPlugin(
+      transport,
+      async (envelope) => {
+        offered.push(envelope.sourceMessageId);
+        if (failSecond && envelope.sourceMessageId === 'ilink:2') {
+          failSecond = false;
+          throw new Error('durable sink down');
+        }
+        return { status: 'accepted', receiptId: 'r1' };
+      },
+      ilinkConfig(),
+      cursorStore,
+    );
+    transport.push([message({ message_id: 1 }), message({ message_id: 2 })]);
+    const runtime = (await plugin.start(context)) as WeixinIlinkRuntime;
+    try {
+      await waitFor(() => cursorStore.writes.length === 1);
+      // ilink:1 was offered once, suppressed on redelivery; ilink:2 retried.
+      expect(offered).toEqual(['ilink:1', 'ilink:2', 'ilink:2']);
+      expect(runtime.suppressedDuplicates).toBe(1);
+    } finally {
+      await runtime.close();
+    }
+  });
+
+  it('does not advance the in-memory cursor while the durable write fails', async () => {
+    const transport = new FakeIlinkTransport();
+    const cursorStore = new InMemoryCursorStore();
+    let failWrite = true;
+    const flaky = {
+      read: () => cursorStore.read(),
+      write: async (cursor: string) => {
+        if (failWrite) {
+          failWrite = false;
+          throw new Error('disk full');
+        }
+        return cursorStore.write(cursor);
+      },
+    };
+    const offered: string[] = [];
+    const { plugin, context } = startPlugin(
+      transport,
+      async (envelope) => {
+        offered.push(envelope.sourceMessageId);
+        return { status: 'accepted', receiptId: 'r1' };
+      },
+      ilinkConfig(),
+      flaky,
+    );
+    transport.push([message()]);
+    const runtime = (await plugin.start(context)) as WeixinIlinkRuntime;
+    try {
+      await waitFor(() => cursorStore.writes.length === 1);
+      // The failed write triggered a redelivery; the accepted-id set
+      // suppressed the duplicate and the retry persisted the cursor.
+      expect(offered).toEqual(['ilink:1001']);
+      expect(runtime.suppressedDuplicates).toBeGreaterThanOrEqual(1);
+      expect(await flaky.read()).toBe(cursorStore.writes[0]);
+    } finally {
+      await runtime.close();
+    }
+  });
+
+  it('resumes from the durable cursor after a restart without redelivery', async () => {
+    const transport = new FakeIlinkTransport();
+    const cursorStore = new InMemoryCursorStore();
+    const firstAccepted: string[] = [];
+    const first = startPlugin(
+      transport,
+      async (envelope) => {
+        firstAccepted.push(envelope.sourceMessageId);
+        return { status: 'accepted', receiptId: 'r1' };
+      },
+      ilinkConfig(),
+      cursorStore,
+    );
+    transport.push([message({ message_id: 1 })]);
+    const runtime1 = await first.plugin.start(first.context);
+    await waitFor(() => cursorStore.writes.length === 1);
+    await runtime1.close();
+
+    const secondAccepted: string[] = [];
+    const second = startPlugin(
+      transport,
+      async (envelope) => {
+        secondAccepted.push(envelope.sourceMessageId);
+        return { status: 'accepted', receiptId: 'r1' };
+      },
+      ilinkConfig(),
+      cursorStore,
+    );
+    const runtime2 = await second.plugin.start(second.context);
+    try {
+      transport.push([message({ message_id: 2 })]);
+      await waitFor(() => secondAccepted.length === 1);
+      expect(secondAccepted).toEqual(['ilink:2']);
+      expect(firstAccepted).toEqual(['ilink:1']);
+      expect(cursorStore.writes.length).toBeGreaterThanOrEqual(2);
+    } finally {
+      await runtime2.close();
+    }
+  });
+
+  it('normalizes a ref_msg quote into the text body', async () => {
+    const transport = new FakeIlinkTransport();
+    const accepted: ChannelInboundEnvelope[] = [];
+    const { plugin, context } = startPlugin(transport, async (envelope) => {
+      accepted.push(envelope);
+      return { status: 'accepted', receiptId: 'r1' };
+    });
+    transport.push([
+      message({
+        item_list: [
+          {
+            type: 4,
+            ref_msg: {
+              title: 'older message',
+              message_item: { type: 1, text_item: { text: 'quoted text' } },
+            },
+          },
+          { type: 1, text_item: { text: 'reply text' } },
+        ],
+      }),
+    ]);
+    const runtime = await plugin.start(context);
+    try {
+      await waitFor(() => accepted.length === 1);
+      expect(accepted[0]?.content).toEqual({
+        kind: 'text',
+        text: '> older message: quoted text\nreply text',
+      });
+    } finally {
+      await runtime.close();
+    }
+  });
+
+  it('shows typing after durable acceptance and cancels on delivery', async () => {
+    const transport = new FakeIlinkTransport();
+    const { plugin, context } = startPlugin(transport, async () => ({
+      status: 'accepted',
+      receiptId: 'r1',
+    }));
+    transport.push([message()]);
+    const runtime = await plugin.start(context);
+    try {
+      await waitFor(() => transport.typing.length === 1);
+      expect(transport.typing[0]).toMatchObject({
+        ilinkUserId: ALLOWED,
+        typingTicket: `fake-ticket-${ALLOWED}`,
+        status: 1,
+      });
+      expect(transport.configCalls).toHaveLength(1);
+
+      const inst = context.instance;
+      await runtime.deliver({
+        abiVersion: CHANNEL_PLUGIN_ABI_VERSION,
+        profileId: inst.profileId,
+        pluginId: inst.pluginId,
+        instanceId: inst.instanceId,
+        deliveryId: 'd-1',
+        sourceMessageId: 'ilink:1001',
+        scopeId: 'session-1',
+        content: { kind: 'text', text: 'hi' },
+        replyContext: { ilink: { contextToken: 'ctx-token-1', userId: ALLOWED } },
+      });
+      await waitFor(() => transport.typing.length === 2);
+      expect(transport.typing[1]?.status).toBe(2);
+      // The ticket was cached — no second getconfig round-trip.
+      expect(transport.configCalls).toHaveLength(1);
+    } finally {
+      await runtime.close();
+    }
+  });
+
+  it('honors the provider longpolling_timeout_ms hint on the next poll', async () => {
+    const transport = new FakeIlinkTransport();
+    transport.pollTimeoutHintMs = 1234;
+    const { plugin, context } = startPlugin(transport, async () => ({
+      status: 'accepted',
+      receiptId: 'r1',
+    }));
+    transport.push([message()]);
+    const runtime = await plugin.start(context);
+    try {
+      await waitFor(() => transport.lastPollTimeoutMs === 1234);
     } finally {
       await runtime.close();
     }

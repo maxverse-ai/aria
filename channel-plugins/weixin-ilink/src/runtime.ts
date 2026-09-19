@@ -26,6 +26,7 @@ import {
 import {
   isIlinkAuthError,
   type IlinkInboundMessage,
+  type IlinkMessageItem,
   type IlinkTransport,
 } from './transport';
 
@@ -75,6 +76,8 @@ export class WeixinIlinkRuntime implements ChannelRuntime {
   readonly instance;
   /** Deterministic drop counter for observability and tests. */
   droppedInbound = 0;
+  /** Envelopes suppressed because they were already accepted this epoch. */
+  suppressedDuplicates = 0;
 
   private state: ChannelRuntimeState = 'starting';
   private accepting = false;
@@ -86,6 +89,9 @@ export class WeixinIlinkRuntime implements ChannelRuntime {
   private loopDone: Promise<void> | undefined;
   private lastError: string | undefined;
   private transport: IlinkTransport | undefined;
+  private pollHintMs: number | undefined;
+  private readonly acceptedIds = new Set<string>();
+  private readonly typingTickets = new Map<string, string>();
   private loginStateValue: WeixinIlinkLoginState = { phase: 'idle' };
   private loginAbort: AbortController | undefined;
   private loginInFlight: Promise<ChannelAuthReceipt> | undefined;
@@ -223,6 +229,7 @@ export class WeixinIlinkRuntime implements ChannelRuntime {
         contextToken: reply.contextToken,
         text: intent.content.text,
       });
+      this.sendTypingBestEffort(reply.userId, reply.contextToken, 2);
       return {
         deliveryId: intent.deliveryId,
         status: 'sent',
@@ -367,7 +374,8 @@ export class WeixinIlinkRuntime implements ChannelRuntime {
       try {
         page = await this.transport.getUpdates({
           cursor: this.cursor,
-          timeoutMs: this.config.pollTimeoutMs ?? DEFAULT_POLL_TIMEOUT_MS,
+          timeoutMs:
+            this.pollHintMs ?? this.config.pollTimeoutMs ?? DEFAULT_POLL_TIMEOUT_MS,
         });
       } catch (error) {
         if (this.stopped) return;
@@ -383,6 +391,7 @@ export class WeixinIlinkRuntime implements ChannelRuntime {
         await this.sleep(this.backoffMs);
         continue;
       }
+      if (page.timeoutMs !== undefined) this.pollHintMs = page.timeoutMs;
       try {
         for (const message of page.messages) {
           await this.handleMessage(message);
@@ -390,14 +399,27 @@ export class WeixinIlinkRuntime implements ChannelRuntime {
       } catch {
         if (this.stopped) return;
         // Durable acceptance failed mid-batch: leave the cursor where it is
-        // so the provider redelivers; ingress dedupes by sourceMessageId.
+        // so the provider redelivers; the accepted-id set suppresses
+        // re-offering the envelopes already durably accepted.
         this.lastError = 'weixin-ilink-ingress';
         this.touch();
         await this.sleep(this.backoffMs);
         continue;
       }
+      try {
+        await this.cursorStore.write(page.cursor);
+      } catch {
+        if (this.stopped) return;
+        // Persist before advancing: on failure the provider redelivers the
+        // batch and the accepted-id set suppresses re-offers until the
+        // write succeeds.
+        this.lastError = 'weixin-ilink-cursor';
+        this.touch();
+        await this.sleep(this.backoffMs);
+        continue;
+      }
       this.cursor = page.cursor;
-      await this.cursorStore.write(page.cursor);
+      this.acceptedIds.clear();
     }
   }
 
@@ -412,6 +434,11 @@ export class WeixinIlinkRuntime implements ChannelRuntime {
       this.droppedInbound += 1;
       return;
     }
+    const sourceMessageId = this.sourceMessageId(message);
+    if (this.acceptedIds.has(sourceMessageId)) {
+      this.suppressedDuplicates += 1;
+      return;
+    }
     const text = this.textOf(message);
     if (text === undefined) {
       this.droppedInbound += 1;
@@ -422,7 +449,7 @@ export class WeixinIlinkRuntime implements ChannelRuntime {
       profileId: this.instance.profileId,
       pluginId: this.instance.pluginId,
       instanceId: this.instance.instanceId,
-      sourceMessageId: this.sourceMessageId(message),
+      sourceMessageId,
       scopeId: message.session_id || from,
       actorId: from,
       conversation: 'p2p',
@@ -438,7 +465,11 @@ export class WeixinIlinkRuntime implements ChannelRuntime {
     this.inFlightInbound += 1;
     this.touch();
     try {
-      await this.context.ingress.accept(envelope);
+      const acceptance = await this.context.ingress.accept(envelope);
+      this.acceptedIds.add(sourceMessageId);
+      if (acceptance.status === 'accepted') {
+        this.sendTypingBestEffort(from, message.context_token, 1);
+      }
     } finally {
       this.inFlightInbound -= 1;
       this.touch();
@@ -451,11 +482,59 @@ export class WeixinIlinkRuntime implements ChannelRuntime {
   }
 
   private textOf(message: IlinkInboundMessage): string | undefined {
+    const parts: string[] = [];
     for (const item of message.item_list ?? []) {
-      const text = item.text_item?.text;
-      if (typeof text === 'string' && text.length > 0) return text;
+      const quote = item.ref_msg;
+      if (quote) {
+        const line = [quote.title?.trim(), this.itemText(quote.message_item)]
+          .filter((part): part is string => Boolean(part && part.length > 0))
+          .join(': ');
+        if (line) parts.push(`> ${line}`);
+      }
+      const text = this.itemText(item);
+      if (text) parts.push(text);
     }
-    return undefined;
+    return parts.length > 0 ? parts.join('\n') : undefined;
+  }
+
+  private itemText(item: IlinkMessageItem | undefined): string | undefined {
+    const text = item?.text_item?.text;
+    return typeof text === 'string' && text.length > 0 ? text : undefined;
+  }
+
+  private sendTypingBestEffort(
+    userId: string,
+    contextToken: string | undefined,
+    status: 1 | 2,
+  ): void {
+    void this.sendTyping(userId, contextToken, status).catch(() => undefined);
+  }
+
+  /**
+   * Typing is best-effort observability: getconfig yields a typing_ticket,
+   * sendtyping toggles the indicator (status 1 = typing, 2 = cancel). A
+   * cancel with no cached ticket is skipped — nothing was ever started.
+   * Failures never block ingress acceptance or delivery.
+   */
+  private async sendTyping(
+    userId: string,
+    contextToken: string | undefined,
+    status: 1 | 2,
+  ): Promise<void> {
+    const transport = this.transport;
+    if (!transport) return;
+    let ticket = this.typingTickets.get(userId);
+    if (!ticket) {
+      if (status === 2) return;
+      const config = await transport.getConfig({
+        ilinkUserId: userId,
+        ...(contextToken ? { contextToken } : {}),
+      });
+      ticket = config.typingTicket;
+      if (!ticket) return;
+      this.typingTickets.set(userId, ticket);
+    }
+    await transport.sendTyping({ ilinkUserId: userId, typingTicket: ticket, status });
   }
 
   private sourceMessageId(message: IlinkInboundMessage): string {

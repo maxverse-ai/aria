@@ -1,4 +1,5 @@
 import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import {
   ChannelPluginError,
   type ChannelPlugin,
@@ -13,11 +14,16 @@ import {
   type WeixinIlinkConfig,
 } from './config';
 import {
+  FileIlinkCredentialStore,
   InMemoryCredentialStore,
   type IlinkCredential,
   type IlinkCredentialStore,
 } from './credentials';
-import { InMemoryCursorStore, type IlinkCursorStore } from './cursor-store';
+import {
+  FileIlinkCursorStore,
+  InMemoryCursorStore,
+  type IlinkCursorStore,
+} from './cursor-store';
 import {
   createHttpIlinkLoginService,
   type IlinkLoginService,
@@ -38,6 +44,12 @@ export interface WeixinIlinkPluginOptions {
   credentialStore?: (
     instance: ResolvedChannelInstance<WeixinIlinkConfig>,
   ) => IlinkCredentialStore;
+  /**
+   * Deployment state directory. When set without explicit stores, the
+   * credential and cursor boundaries become atomic file stores under
+   * `<stateDir>/<instanceId>/` so login and cursor position survive restarts.
+   */
+  stateDir?: string;
   /** QR login service seam; defaults to the HTTP login service. */
   loginService?: (instance: ResolvedChannelInstance<WeixinIlinkConfig>) => IlinkLoginService;
   /** Durable cursor boundary; defaults to a volatile in-memory store. */
@@ -89,8 +101,14 @@ export function createWeixinIlinkPlugin(
     manifest: weixinIlinkManifest,
     validateConfig: validateWeixinIlinkConfig,
     async start(context: ChannelPluginContext<WeixinIlinkConfig>): Promise<ChannelRuntime> {
+      const stateDir = options.stateDir
+        ? join(options.stateDir, context.instance.instanceId)
+        : undefined;
       const credentialStore =
-        options.credentialStore?.(context.instance) ?? new InMemoryCredentialStore();
+        options.credentialStore?.(context.instance) ??
+        (stateDir
+          ? new FileIlinkCredentialStore(join(stateDir, 'credential.json'))
+          : new InMemoryCredentialStore());
       const stored = await credentialStore.read();
 
       const httpTransportFor = (credential: IlinkCredential): IlinkTransport =>
@@ -141,7 +159,10 @@ export function createWeixinIlinkPlugin(
         });
 
       const cursorStore =
-        options.cursorStore?.(context.instance) ?? new InMemoryCursorStore();
+        options.cursorStore?.(context.instance) ??
+        (stateDir
+          ? new FileIlinkCursorStore(join(stateDir, 'cursor.txt'))
+          : new InMemoryCursorStore());
       const runtime = new WeixinIlinkRuntime(context, {
         ...(transport ? { transport } : {}),
         transportFor: (credential) => transportFor(credential, context.instance),

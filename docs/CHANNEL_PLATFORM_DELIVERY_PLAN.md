@@ -68,7 +68,7 @@ that separate plan.
 | 10D | Complete | Channel-grained runtime reconciliation behind `ChannelRuntimeAdmin` |
 | 10E | Complete | Thin `aria channel` CLI and `/api/channels` console adapters over read/command/admin contracts |
 | 10F | Complete | No-network fixture evidence across pin/trust/configure/login/activate/status/restart/drain/unload/rollback with fail-closed coverage |
-| 11 | In progress (11A–11C complete) | Disabled-by-default `weixin-ilink` text MVP |
+| 11 | In progress (11A–11D complete) | Disabled-by-default `weixin-ilink` text MVP |
 | 12 | Not started | Media, group, proactive-send, and multi-account capabilities |
 
 The ordinary CLI supplies no external composition input. No real external
@@ -289,12 +289,24 @@ enters config, plans, diagnostics, or logs; `ChannelAuthIntent`/
 coverage: `tests/unit/channel/weixin-ilink-plugin.test.ts`. Exec secret
 providers and durable cursor files stay deferred to 11D.
 
-### 11D. Durable inbound text path
+### 11D. Durable inbound text path — complete
 
-Implement long polling, cursor persistence, durable acceptance, duplicate
-suppression, text and quote normalization, opaque actor/scope ids, typing, and
-restart recovery. Advance the provider cursor only after ordered durable
-acceptance.
+The inbound path is now restart-safe. `FileIlinkCursorStore` persists the
+`get_updates_buf` cursor through atomic same-directory renames; a plugin
+`stateDir` option composes file-backed credential and cursor stores under
+`<stateDir>/<instanceId>/` so deployments get durability without extra
+wiring. The runtime keeps an accepted-id set for the current cursor
+epoch: a redelivered batch (mid-acceptance failure or failed cursor
+write) suppresses already-accepted envelopes instead of re-offering them,
+and the in-memory cursor only advances after the durable write succeeds.
+`ref_msg` quotes normalize into the text body (`> title: quoted`), the
+`longpolling_timeout_ms` hint drives the next poll, and typing is wired
+best-effort: `getconfig` yields a cached `typing_ticket`, `sendtyping`
+(status 1) fires after durable acceptance, and status 2 cancels on
+successful delivery — failures never block ingress or delivery. Focused
+coverage: `tests/unit/channel/weixin-ilink-plugin.test.ts` (restart
+recovery, redelivery suppression, failed cursor writes, quote folding,
+typing lifecycle, timeout hints).
 
 ### 11E. Durable reply and local controls
 
@@ -365,11 +377,10 @@ installation, and enabling a new account require separate explicit authority.
 
 ## Recommended next task
 
-Start with Stage 11D only. Make the `weixin-ilink` inbound path durable:
-a file-backed `IlinkCursorStore`, durable acceptance ordering, duplicate
-suppression across restart, text/quote normalization polish, typing
-indicator wiring (`getconfig` + `sendtyping`), and restart recovery. The
-provider cursor still advances only after ordered durable acceptance.
+Start with Stage 11E only. Make the `weixin-ilink` reply path durable and
+add provider-local controls: checkpoint the answer before delivery,
+return deterministic delivery receipts, recover partial sends, and
+implement `help`, `new`/`reset`, and `stop` inside the package boundary.
 Protocol contract: `docs/WEIXIN_ILINK_PROTOCOL.md`.
 
 ## Handoff checklist

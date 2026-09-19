@@ -5,8 +5,11 @@ import type {
   IlinkQrStatus,
 } from './login';
 import type {
+  IlinkAccountConfig,
+  IlinkGetConfigInput,
   IlinkInboundMessage,
   IlinkSendMessage,
+  IlinkSendTypingInput,
   IlinkTransport,
   IlinkUpdatesPage,
 } from './transport';
@@ -19,12 +22,17 @@ import type {
  */
 export class FakeIlinkTransport implements IlinkTransport, IlinkLoginService {
   readonly sent: IlinkSendMessage[] = [];
+  readonly typing: IlinkSendTypingInput[] = [];
+  readonly configCalls: IlinkGetConfigInput[] = [];
   notifyStartCount = 0;
   notifyStopCount = 0;
   pollCount = 0;
   qrSessionCount = 0;
   qrStatusCount = 0;
   lastLocalTokenList: string[] = [];
+  lastPollTimeoutMs = 0;
+  /** Hint echoed back as longpolling_timeout_ms on every page. */
+  pollTimeoutHintMs: number | undefined;
 
   private readonly queue: IlinkInboundMessage[][] = [];
   private readonly waiters: Array<() => void> = [];
@@ -53,6 +61,7 @@ export class FakeIlinkTransport implements IlinkTransport, IlinkLoginService {
 
   async getUpdates(input: { cursor: string; timeoutMs: number }): Promise<IlinkUpdatesPage> {
     this.pollCount += 1;
+    this.lastPollTimeoutMs = input.timeoutMs;
     if (this.failNext) {
       const error = this.failNext;
       this.failNext = undefined;
@@ -81,7 +90,13 @@ export class FakeIlinkTransport implements IlinkTransport, IlinkLoginService {
         nextCursor: `${input.cursor || 'c0'}>${messages.length}`,
       };
     }
-    return { messages: this.served.messages, cursor: this.served.nextCursor };
+    return {
+      messages: this.served.messages,
+      cursor: this.served.nextCursor,
+      ...(this.pollTimeoutHintMs !== undefined
+        ? { timeoutMs: this.pollTimeoutHintMs }
+        : {}),
+    };
   }
 
   private commitIfAdvanced(cursor: string): void {
@@ -109,6 +124,15 @@ export class FakeIlinkTransport implements IlinkTransport, IlinkLoginService {
 
   async sendMessage(message: IlinkSendMessage): Promise<void> {
     this.sent.push(message);
+  }
+
+  async getConfig(input: IlinkGetConfigInput): Promise<IlinkAccountConfig> {
+    this.configCalls.push(input);
+    return { typingTicket: `fake-ticket-${input.ilinkUserId}` };
+  }
+
+  async sendTyping(input: IlinkSendTypingInput): Promise<void> {
+    this.typing.push(input);
   }
 
   async notifyStart(): Promise<void> {

@@ -16,6 +16,7 @@ export {
   type IlinkCredentialStore,
 } from './credentials';
 export {
+  FileIlinkCursorStore,
   InMemoryCursorStore,
   type IlinkCursorStore,
 } from './cursor-store';
@@ -46,9 +47,12 @@ export {
   createHttpIlinkTransport,
   isIlinkAuthError,
   type HttpIlinkTransportOptions,
+  type IlinkAccountConfig,
+  type IlinkGetConfigInput,
   type IlinkInboundMessage,
   type IlinkMessageItem,
   type IlinkSendMessage,
+  type IlinkSendTypingInput,
   type IlinkTransport,
   type IlinkUpdatesPage,
 } from './transport';

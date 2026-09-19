@@ -40,10 +40,28 @@ export interface IlinkSendMessage {
   text: string;
 }
 
+export interface IlinkGetConfigInput {
+  ilinkUserId: string;
+  contextToken?: string;
+}
+
+export interface IlinkAccountConfig {
+  typingTicket?: string;
+}
+
+export interface IlinkSendTypingInput {
+  ilinkUserId: string;
+  typingTicket: string;
+  /** 1 = typing, 2 = cancel (docs/WEIXIN_ILINK_PROTOCOL.md). */
+  status: 1 | 2;
+}
+
 /** Provider-facing transport seam; the only network-capable object. */
 export interface IlinkTransport {
   getUpdates(input: { cursor: string; timeoutMs: number }): Promise<IlinkUpdatesPage>;
   sendMessage(message: IlinkSendMessage): Promise<void>;
+  getConfig(input: IlinkGetConfigInput): Promise<IlinkAccountConfig>;
+  sendTyping(input: IlinkSendTypingInput): Promise<void>;
   notifyStart(): Promise<void>;
   notifyStop(): Promise<void>;
 }
@@ -73,6 +91,7 @@ interface IlinkResponse {
   msgs?: IlinkInboundMessage[];
   get_updates_buf?: string;
   longpolling_timeout_ms?: number;
+  typing_ticket?: string;
 }
 
 function randomUin(now: () => number): string {
@@ -158,6 +177,24 @@ export function createHttpIlinkTransport(
           context_token: message.contextToken,
           item_list: [{ type: 1, text_item: { text: message.text } }],
         },
+      });
+    },
+    async getConfig(input) {
+      const payload = await post('/ilink/bot/getconfig', {
+        ilink_user_id: input.ilinkUserId,
+        ...(input.contextToken ? { context_token: input.contextToken } : {}),
+      });
+      return {
+        ...(typeof payload.typing_ticket === 'string'
+          ? { typingTicket: payload.typing_ticket }
+          : {}),
+      };
+    },
+    async sendTyping(input) {
+      await post('/ilink/bot/sendtyping', {
+        ilink_user_id: input.ilinkUserId,
+        typing_ticket: input.typingTicket,
+        status: input.status,
       });
     },
     async notifyStart() {
