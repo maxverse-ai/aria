@@ -64,7 +64,8 @@ that separate plan.
 | 9 | Complete | Fail-closed external loader with exact pins, deployment trust, atomic registration, unload protection, and fixture coverage |
 | 10A | Complete | Explicit Supervisor composition, transactional external runtime ownership, reconnect preservation, shutdown ordering, and a bounded read snapshot |
 | 10B | Complete | Canonical channel read model (`aria.channel.status.v1`) with redacted instance/plugin projections and diagnostics |
-| 10C–10F | Not complete | Unified mutation, reconciliation, adapters, and downstream opt-in evidence |
+| 10C | Complete | Named desired-state commands: package pin, instance configure/enable/disable, and provider-neutral login/logout intent |
+| 10D–10F | Not complete | Runtime reconciliation, adapters, and downstream opt-in evidence |
 | 11 | Not started | Disabled-by-default `weixin-ilink` text MVP |
 | 12 | Not started | Media, group, proactive-send, and multi-account capabilities |
 
@@ -83,6 +84,18 @@ are excluded, leaving stable codes and counters only. Reads accept resolved
 instances, declared pins, runtime snapshots, and pre-fetched health as inputs
 — they never load packages, start runtimes, or mutate desired/runtime state.
 Focused coverage: `tests/unit/application/channel-read-model.test.ts`.
+
+Stage 10C shipped the desired-state mutation side:
+`src/application/control/channel-commands.ts` registers six named commands
+(`channel.plugin.pin`, `channel.instance.configure/enable/disable`,
+`channel.instance.login/logout`) on the existing plan/confirm/commit kernel.
+Package pins and instance changes are separate commands; login/logout are
+recorded as a provider-neutral `auth` intent on the stored instance — no
+credentials or provider UI flow enter the command domain. Plan summaries stay
+redacted (config payload hashes collapse to `configVersion`/`secretRefCount`),
+the protected `lark-primary` binding and schema v2 profiles reject cleanly,
+and `auth` is normalized through schema v3 with exact rollback coverage.
+Focused coverage: `tests/unit/application/channel-commands.test.ts`.
 
 ## Remaining Stage 10: unified operations
 
@@ -266,11 +279,10 @@ installation, and enabling a new account require separate explicit authority.
 
 ## Recommended next task
 
-Start with Stage 10C only. Add the named, versioned desired-state commands
-for configuring an instance and for enabling or disabling it, plus the
-provider-neutral login/logout intent, on top of the Stage 10B read model. Do
-not combine it with runtime reconciliation, CLI/Web adapters, or
-`weixin-ilink` implementation.
+Start with Stage 10D only. Implement idempotent channel-grained start, stop,
+restart, reconnect, and login/logout reconciliation behind Runtime Admin,
+consuming the Stage 10C desired-state commands and `auth` intent. Do not
+combine it with CLI/Web adapters or `weixin-ilink` implementation.
 
 ## Handoff checklist
 

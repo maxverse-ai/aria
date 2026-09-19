@@ -123,6 +123,9 @@ export function projectProfileChannelInstances(
         configVersion: stored.configVersion,
         config: deepFreeze(structuredClone(stored.config)),
         secretRefs: deepFreeze(structuredClone(stored.secretRefs)),
+        ...(stored.auth
+          ? { auth: deepFreeze(structuredClone(stored.auth)) }
+          : {}),
       };
       assertResolvedChannelInstance(instance);
       return Object.freeze(instance);

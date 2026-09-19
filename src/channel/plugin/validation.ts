@@ -150,6 +150,14 @@ export function assertResolvedChannelInstance(
       );
     }
   }
+
+  if (instance.auth !== undefined) {
+    const auth = requireRecord(instance.auth, 'channel instance auth');
+    if (auth.intent !== 'login' && auth.intent !== 'logout') {
+      invalidContract('channel instance auth.intent must be login or logout');
+    }
+    requireNonEmptyString(auth.requestedAt, 'channel instance auth.requestedAt', 128);
+  }
 }
 
 export function assertChannelInboundEnvelope(

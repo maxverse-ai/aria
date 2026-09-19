@@ -232,12 +232,19 @@ export interface StoredChannelPluginPackage {
   version: string;
 }
 
+export interface StoredChannelInstanceAuth {
+  intent: 'login' | 'logout';
+  requestedAt: string;
+}
+
 export interface StoredChannelInstance {
   plugin: string;
   enabled: boolean;
   configVersion: number;
   config: ChannelConfig;
   secretRefs: Readonly<Record<string, SecretRef>>;
+  /** Provider-neutral auth intent consumed by runtime reconciliation. */
+  auth?: StoredChannelInstanceAuth;
 }
 
 export interface ProfileChannelsConfig {
@@ -495,7 +502,9 @@ function normalizeProfileChannels(input: unknown): ProfileChannelsConfig {
       configVersion?: unknown;
       config?: unknown;
       secretRefs?: unknown;
+      auth?: unknown;
     };
+    const auth = normalizeChannelInstanceAuth(item.auth, instanceId);
     const plugin = requireTrimmedString(item.plugin, `channel instance ${instanceId} plugin`);
     assertCanonicalChannelPluginId(plugin);
     assertChannelInstanceRef({ profileId: 'profile', pluginId: plugin, instanceId });
@@ -515,6 +524,7 @@ function normalizeProfileChannels(input: unknown): ProfileChannelsConfig {
       configVersion: candidate.configVersion,
       config: Object.freeze(structuredClone(candidate.config)),
       secretRefs: Object.freeze(structuredClone(candidate.secretRefs)),
+      ...(auth ? { auth: Object.freeze(auth) } : {}),
     });
   }
 
@@ -522,6 +532,27 @@ function normalizeProfileChannels(input: unknown): ProfileChannelsConfig {
     plugins: Object.freeze(packages),
     instances: Object.freeze(instances),
   });
+}
+
+function normalizeChannelInstanceAuth(
+  value: unknown,
+  instanceId: string,
+): StoredChannelInstanceAuth | undefined {
+  if (value === undefined) return undefined;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error(`channel instance ${instanceId} auth must be an object`);
+  }
+  const item = value as { intent?: unknown; requestedAt?: unknown };
+  if (item.intent !== 'login' && item.intent !== 'logout') {
+    throw new Error(`channel instance ${instanceId} auth.intent must be login or logout`);
+  }
+  return {
+    intent: item.intent,
+    requestedAt: requireTrimmedString(
+      item.requestedAt,
+      `channel instance ${instanceId} auth.requestedAt`,
+    ),
+  };
 }
 
 function requireTrimmedString(value: unknown, label: string): string {

@@ -232,6 +232,24 @@ export {
 export type { ProfileEngineUpdateInput } from './profile-engine-command';
 export { managementCommandRegistry, managementCommands } from './management-commands';
 export {
+  CHANNEL_INSTANCE_CONFIGURE_COMMAND,
+  CHANNEL_INSTANCE_DISABLE_COMMAND,
+  CHANNEL_INSTANCE_ENABLE_COMMAND,
+  CHANNEL_INSTANCE_LOGIN_COMMAND,
+  CHANNEL_INSTANCE_LOGOUT_COMMAND,
+  CHANNEL_PLUGIN_PIN_COMMAND,
+  channelAuthParameters,
+  channelInstanceConfigureCommand,
+  channelInstanceConfigureParameters,
+  channelInstanceDisableCommand,
+  channelInstanceEnableCommand,
+  channelInstanceIdParameters,
+  channelInstanceLoginCommand,
+  channelInstanceLogoutCommand,
+  channelPluginPinCommand,
+} from './channel-commands';
+export type { ChannelInstanceConfigureInput } from './channel-commands';
+export {
   PROFILE_ACTIVATE_COMMAND,
   PROFILE_ARCHIVE_COMMAND,
   PROFILE_CREATE_COMMAND,

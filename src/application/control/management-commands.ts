@@ -19,9 +19,23 @@ import {
   profileCreateCommand,
   profilePurgeCommand,
 } from './profile-lifecycle-command';
+import {
+  channelInstanceConfigureCommand,
+  channelInstanceDisableCommand,
+  channelInstanceEnableCommand,
+  channelInstanceLoginCommand,
+  channelInstanceLogoutCommand,
+  channelPluginPinCommand,
+} from './channel-commands';
 
 /** Full public command catalog shared by in-process management adapters. */
 export const managementCommands = [
+  channelPluginPinCommand,
+  channelInstanceConfigureCommand,
+  channelInstanceEnableCommand,
+  channelInstanceDisableCommand,
+  channelInstanceLoginCommand,
+  channelInstanceLogoutCommand,
   ...lowRiskConfigCommands,
   profilePreferencesUpdateCommand,
   profileSettingsUpdateCommand,

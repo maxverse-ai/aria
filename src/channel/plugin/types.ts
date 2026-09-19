@@ -40,12 +40,19 @@ export interface ChannelInstanceRef {
   instanceId: string;
 }
 
+/** Provider-neutral auth intent recorded in desired state. */
+export interface ChannelAuthIntent {
+  intent: 'login' | 'logout';
+  requestedAt: string;
+}
+
 export interface ResolvedChannelInstance<TConfig extends ChannelConfig = ChannelConfig>
   extends ChannelInstanceRef {
   enabled: boolean;
   configVersion: number;
   config: TConfig;
   secretRefs: Readonly<Record<string, SecretRef>>;
+  auth?: ChannelAuthIntent;
 }
 
 export interface ChannelAssetContent {
