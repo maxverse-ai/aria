@@ -1,6 +1,6 @@
 # Channel platform delivery plan
 
-> Status: in progress — active delivery handoff. Last reviewed on 2026-09-03 against the internal 0.2 line. The accepted architecture remains [Channel platform architecture](./CHANNEL_PLATFORM_ARCHITECTURE.md); this document records implementation status, dependency order, and the next independently reviewable increments.
+> Status: in progress — active delivery handoff. Last reviewed on 2026-09-19 against the internal 0.2 line. The accepted architecture remains [Channel platform architecture](./CHANNEL_PLATFORM_ARCHITECTURE.md); this document records implementation status, dependency order, and the next independently reviewable increments.
 
 ## Purpose
 
@@ -63,13 +63,26 @@ that separate plan.
 | 8 | Complete, rollout deferred | Explicit schema v2-to-v3 plan/apply/rollback; reads do not migrate and fresh profiles remain v2 |
 | 9 | Complete | Fail-closed external loader with exact pins, deployment trust, atomic registration, unload protection, and fixture coverage |
 | 10A | Complete | Explicit Supervisor composition, transactional external runtime ownership, reconnect preservation, shutdown ordering, and a bounded read snapshot |
-| 10B–10F | Not complete | Unified query, mutation, reconciliation, adapters, and downstream opt-in evidence |
+| 10B | Complete | Canonical channel read model (`aria.channel.status.v1`) with redacted instance/plugin projections and diagnostics |
+| 10C–10F | Not complete | Unified mutation, reconciliation, adapters, and downstream opt-in evidence |
 | 11 | Not started | Disabled-by-default `weixin-ilink` text MVP |
 | 12 | Not started | Media, group, proactive-send, and multi-account capabilities |
 
 The ordinary CLI supplies no external composition input. No real external
 provider package is installed or enabled by the completed Stage 10A work.
 Management mutations for external channels are intentionally absent.
+
+Stage 10B shipped the canonical read side:
+`src/application/control/channel-read-model.ts` exposes
+`listChannelInstances`, `getChannelStatus`, and `diagnoseChannels` over one
+versioned projection (`aria.channel.status.v1`). Built-in and external
+instances share the same state projection (`inactive`, `starting`, `ready`,
+`draining`, `stopped`, `failed`, `reauth-required`); config payloads, secret
+references, raw provider identities, reply context, paths, and exception text
+are excluded, leaving stable codes and counters only. Reads accept resolved
+instances, declared pins, runtime snapshots, and pre-fetched health as inputs
+— they never load packages, start runtimes, or mutate desired/runtime state.
+Focused coverage: `tests/unit/application/channel-read-model.test.ts`.
 
 ## Remaining Stage 10: unified operations
 
@@ -253,10 +266,11 @@ installation, and enabling a new account require separate explicit authority.
 
 ## Recommended next task
 
-Start with Stage 10B only. Define the provider-neutral query types and read
-operations, reuse the existing Supervisor snapshot, and prove redaction and
-read-only behavior. Do not combine it with configuration writes, runtime
-mutation, CLI/Web actions, or `weixin-ilink` implementation.
+Start with Stage 10C only. Add the named, versioned desired-state commands
+for configuring an instance and for enabling or disabling it, plus the
+provider-neutral login/logout intent, on top of the Stage 10B read model. Do
+not combine it with runtime reconciliation, CLI/Web adapters, or
+`weixin-ilink` implementation.
 
 ## Handoff checklist
 

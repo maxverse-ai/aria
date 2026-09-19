@@ -87,6 +87,27 @@ export { nativeReadOpaqueId } from './native-read-identifiers';
 export { NativeReadRepositoryError } from './native-read-repository';
 export { engineHistorySessionKey, SessionCatalogReadProjector } from './session-catalog-read-projector';
 export { ChannelIdentityReadProjector } from './channel-identity-read-projector';
+export {
+  BUILT_IN_CHANNEL_PLUGIN_IDS,
+  CHANNEL_DIAGNOSTIC_SEVERITIES,
+  CHANNEL_INSTANCE_PROJECTION_STATES,
+  CHANNEL_READ_API_VERSION,
+  diagnoseChannels,
+  getChannelStatus,
+  listChannelInstances,
+} from './channel-read-model';
+export type {
+  ChannelDiagnostic,
+  ChannelDiagnosticSeverity,
+  ChannelHealthReport,
+  ChannelInstanceOrigin,
+  ChannelInstanceProjection,
+  ChannelInstanceProjectionState,
+  ChannelPluginProjection,
+  ChannelQueryInput,
+  ChannelRuntimeReadSources,
+  ChannelStatusSnapshot,
+} from './channel-read-model';
 export { NativeAuditRecorder } from './native-audit-recorder';
 export type { NativeAuditRecorderOptions, NativeAuditRecordInput } from './native-audit-recorder';
 export { NativeRunAuditSink } from './native-run-audit-sink';
