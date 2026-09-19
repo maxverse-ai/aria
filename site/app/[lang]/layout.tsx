@@ -2,11 +2,15 @@ import { RootProvider } from 'fumadocs-ui/provider/next';
 import '../global.css';
 import { Inter, Noto_Sans_SC } from 'next/font/google';
 import { i18n } from '@/lib/i18n';
-import { siteUrl } from '@/lib/shared';
+import { appName, siteUrl } from '@/lib/shared';
 import type { Metadata } from 'next';
 
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
+  title: {
+    default: appName,
+    template: `%s | ${appName}`,
+  },
 };
 
 const inter = Inter({

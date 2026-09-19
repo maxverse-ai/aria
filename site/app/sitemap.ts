@@ -17,6 +17,12 @@ export default function sitemap(): MetadataRoute.Sitemap {
     entries.push({ url: `${siteUrl}${url}`, lastModified: modified });
   };
 
+  // Locale landing and section index pages; leaf pages are pushed below.
+  push('/');
+  push('/zh');
+  push('/changelog');
+  push('/zh/changelog');
+
   for (const { language, pages } of source.getLanguages()) {
     for (const page of pages) {
       const slug = page.slugs.join('/');

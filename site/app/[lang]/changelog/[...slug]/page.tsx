@@ -16,6 +16,7 @@ import type { Metadata } from 'next';
 import { createRelativeLink } from 'fumadocs-ui/mdx';
 import {
   getBlogMarkdownUrl,
+  getChangelogImageUrl,
   getLocalizedChangelogUrl,
   gitConfig,
 } from '@/lib/shared';
@@ -93,6 +94,9 @@ export async function generateMetadata(
         zh: getLocalizedChangelogUrl(page.slugs, 'zh'),
         'x-default': getLocalizedChangelogUrl(page.slugs, 'en'),
       },
+    },
+    openGraph: {
+      images: getChangelogImageUrl(page).url,
     },
   };
 }

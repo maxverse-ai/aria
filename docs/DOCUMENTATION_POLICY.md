@@ -58,6 +58,19 @@ When a document must state one of these, state it as a reference — for example
 "the runtime pinned in `.node-version`" — or name the version and note that the
 file is authoritative.
 
+## Localization
+
+`NAME.md` is the English source; `NAME.zh.md` is its Chinese translation, and
+the pair is linked by the header pointer lines (`> 中文版:` /
+`> 本文是 … 的中文版` / `> English version:`), which the site strips from
+rendered output.
+
+User-facing documents — the Getting started, Guides, and Reference sections
+of the site, plus every release note under `docs/releases/**` — carry a
+Chinese translation; the contract test fails on a release note that lacks
+one. Engineering specifications under Internals are English-only by policy:
+they address maintainers, and translating them costs more than it returns.
+
 ## Reachability
 
 Every document under `docs/`, except a release note, is reachable: linked from

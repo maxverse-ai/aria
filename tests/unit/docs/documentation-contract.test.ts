@@ -101,6 +101,20 @@ describe('documentation contract', () => {
     expect(broken).toEqual([]);
   });
 
+  it('pairs every release note with its Chinese translation', async () => {
+    const names = await readdir(join(docsDir, 'releases'));
+    const english = names.filter(
+      (name) => name.endsWith('.md') && !name.endsWith('.zh.md'),
+    );
+    const missingZh = english.filter(
+      (name) => !names.includes(name.replace(/\.md$/, '.zh.md')),
+    );
+    const orphanedZh = names
+      .filter((name) => name.endsWith('.zh.md'))
+      .filter((name) => !names.includes(name.replace(/\.zh\.md$/, '.md')));
+    expect([...missingZh, ...orphanedZh]).toEqual([]);
+  });
+
   it('keeps the two READMEs indexing the same documents', async () => {
     const index = async (name: string): Promise<string[]> => {
       const text = await readFile(join(repoRoot, name), 'utf8');

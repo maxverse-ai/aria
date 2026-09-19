@@ -49,6 +49,31 @@ jobs:
       - name: Build
         run: pnpm build
 
+  site:
+    name: Docs site
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          # sync-docs derives lastmod from git history.
+          fetch-depth: 0
+
+      - name: Enable pnpm
+        run: corepack enable
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: .node-version
+
+      - name: Build site
+        working-directory: site
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build
+
   package:
     name: Candidate package
     needs: test

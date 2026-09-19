@@ -60,11 +60,12 @@ container on the `***REMOVED***-net` docker network.
 Redeploy after `docs/` or site changes:
 
 ```bash
-pnpm install && pnpm build
-docker build -t aria-docs .
-docker rm -f aria-docs
-docker run -d --name aria-docs --network ***REMOVED***-net --restart unless-stopped aria-docs
+site/deploy/deploy.sh
 ```
+
+which runs the same steps inline: `pnpm install && pnpm build`,
+`docker build -t aria-docs .`, recreate the `aria-docs` container on
+`***REMOVED***-net`, then `install-nginx.sh` against the `chord` front door.
 
 The front-door nginx proxies the docs routes to `http://aria-docs:3000`
 (public paths mirror the app's own routes — no `basePath` is used). The full
