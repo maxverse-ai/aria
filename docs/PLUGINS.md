@@ -2,6 +2,8 @@
 
 > Status: current
 
+> 中文版：[PLUGINS.zh.md](PLUGINS.zh.md)
+
 Aria drives local coding-agent CLIs through a plugin registry. Eight engines ship
 in the current build:
 

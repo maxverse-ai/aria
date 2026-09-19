@@ -2,6 +2,8 @@
 
 > Status: current
 
+> 中文版：[WECHAT_KF_CHANNEL.zh.md](WECHAT_KF_CHANNEL.zh.md)
+
 ## Purpose
 
 Expose an Aria profile, such as the ***REMOVED*** PM bot, to ordinary WeChat users through

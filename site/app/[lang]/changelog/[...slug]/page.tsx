@@ -14,7 +14,11 @@ import { notFound } from 'next/navigation';
 import { getMDXComponents } from '@/components/mdx';
 import type { Metadata } from 'next';
 import { createRelativeLink } from 'fumadocs-ui/mdx';
-import { getBlogMarkdownUrl, gitConfig } from '@/lib/shared';
+import {
+  getBlogMarkdownUrl,
+  getLocalizedChangelogUrl,
+  gitConfig,
+} from '@/lib/shared';
 import sourceMap from '@/lib/generated/source-map.json';
 import lastmodMap from '@/lib/generated/lastmod.json';
 
@@ -82,5 +86,13 @@ export async function generateMetadata(
   return {
     title: page.data.title,
     description: page.data.description,
+    alternates: {
+      canonical: page.url,
+      languages: {
+        en: getLocalizedChangelogUrl(page.slugs, 'en'),
+        zh: getLocalizedChangelogUrl(page.slugs, 'zh'),
+        'x-default': getLocalizedChangelogUrl(page.slugs, 'en'),
+      },
+    },
   };
 }

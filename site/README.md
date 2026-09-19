@@ -66,14 +66,25 @@ docker rm -f aria-docs
 docker run -d --name aria-docs --network ***REMOVED***-net --restart unless-stopped aria-docs
 ```
 
-The front-door nginx must keep these proxy blocks pointing at
-`http://aria-docs:3000` (public paths mirror the app's own routes — no
-`basePath` is used): `=/docs`, `/docs/`, `/_next/`, `=/api/search`, `/og/`,
-`=/llms.txt`, `=/llms-full.txt`, `/llms.mdx/`. They live in
-`/etc/nginx/conf.d/default.conf` inside the `chord` container today; if that
-container is rebuilt from scratch, re-add the blocks (or bake them into its
-image config) or the docs go dark. `=/api/search` is an exact match so it
-does not shadow the app's own `/api/` proxy.
+The front-door nginx proxies the docs routes to `http://aria-docs:3000`
+(public paths mirror the app's own routes — no `basePath` is used). The full
+location set lives in `deploy/aria-docs.locations.conf` and is installed into
+`/etc/nginx/conf.d/default.conf` inside the `chord` container as a marked,
+managed block:
+
+```bash
+site/deploy/install-nginx.sh        # idempotent: replaces the marked block,
+                                    # validates with nginx -t, then reloads
+```
+
+If the `chord` container is rebuilt from scratch, rerun that one command —
+the script strips any stale docs locations, inserts the managed block before
+the SPA catch-all, and restores the previous config if `nginx -t` fails. The
+block covers `=/docs`, `/docs/`, `=/zh`, `/zh/`, `=/en`, `/en/`, `=/blog`,
+`/blog/` (308s to `/changelog`), `=/changelog`, `/changelog/`, `/_next/`,
+`=/api/search` (exact match so it does not shadow the app's own `/api/`
+proxy), `/og/`, `=/llms.txt`, `=/llms-full.txt`, `/llms.mdx/`,
+`=/sitemap.xml`, `=/robots.txt`, and `=/feed.xml`.
 
 Do not edit `content/docs/` or `lib/generated/` — both are generated and
 gitignored.

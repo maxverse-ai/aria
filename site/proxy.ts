@@ -44,7 +44,10 @@ function isNonLocalized(pathname: string) {
     pathname === '/api' ||
     pathname.startsWith('/api/') ||
     pathname === '/llms.txt' ||
-    pathname === '/llms-full.txt'
+    pathname === '/llms-full.txt' ||
+    pathname === '/sitemap.xml' ||
+    pathname === '/robots.txt' ||
+    pathname === '/feed.xml'
   );
 }
 

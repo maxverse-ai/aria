@@ -1,4 +1,5 @@
 import Link from 'fumadocs-core/link';
+import type { Metadata } from 'next';
 
 const copy: Record<
   string,
@@ -16,6 +17,18 @@ const copy: Record<
     blog: '更新日志',
   },
 };
+
+export async function generateMetadata(
+  props: PageProps<'/[lang]'>,
+): Promise<Metadata> {
+  const { lang } = await props.params;
+  return {
+    alternates: {
+      canonical: lang === 'zh' ? '/zh' : '/',
+      languages: { en: '/', zh: '/zh', 'x-default': '/' },
+    },
+  };
+}
 
 export default async function HomePage(props: PageProps<'/[lang]'>) {
   const { lang } = await props.params;

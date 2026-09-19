@@ -3,6 +3,7 @@ import { HomeLayout } from 'fumadocs-ui/layouts/home';
 import { baseOptions } from '@/lib/layout.shared';
 import Link from 'fumadocs-core/link';
 import blogIndex from '@/lib/generated/blog-index.json';
+import { getLocalizedChangelogUrl } from '@/lib/shared';
 import type { Metadata } from 'next';
 
 interface BlogIndexEntry {
@@ -78,5 +79,17 @@ export async function generateMetadata(
 ): Promise<Metadata> {
   const { lang } = await props.params;
   const t = titles[lang] ?? titles.en;
-  return { title: t.title, description: t.description };
+  return {
+    title: t.title,
+    description: t.description,
+    alternates: {
+      canonical: getLocalizedChangelogUrl([], lang),
+      languages: {
+        en: getLocalizedChangelogUrl([], 'en'),
+        zh: getLocalizedChangelogUrl([], 'zh'),
+        'x-default': getLocalizedChangelogUrl([], 'en'),
+      },
+      types: { 'application/rss+xml': '/feed.xml' },
+    },
+  };
 }

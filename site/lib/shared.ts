@@ -2,6 +2,7 @@ import { createGetUrl } from 'fumadocs-core/source';
 import { i18n } from './i18n';
 
 export const appName = 'Aria';
+export const siteUrl = 'https://ai.***REMOVED***dev.com';
 export const docsRoute = '/docs';
 export const blogRoute = '/changelog';
 export const docsImageRoute = '/og/docs';
@@ -36,4 +37,16 @@ export function getPageImageUrl(page: { slugs: string[]; locale?: string }) {
   const segments = [...page.slugs, 'image.png'];
 
   return { segments, url: getImageUrl(segments, page.locale) };
+}
+
+// Locale-aware page URLs for canonical/hreflang metadata and the sitemap.
+const getDocsPageUrl = createGetUrl(docsRoute, i18n);
+const getChangelogPageUrl = createGetUrl(blogRoute, i18n);
+
+export function getLocalizedDocsUrl(slugs: string[], locale: string) {
+  return getDocsPageUrl(slugs, locale);
+}
+
+export function getLocalizedChangelogUrl(slugs: string[], locale: string) {
+  return getChangelogPageUrl(slugs, locale);
 }

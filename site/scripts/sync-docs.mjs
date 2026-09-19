@@ -131,10 +131,41 @@ function statusRole(statusLine) {
 }
 
 function firstParagraph(body) {
-  const m = body.match(/^(?!#|>|\s*$)([^\n].+)$/m);
+  // Capture the whole paragraph, not just its first line: prose is
+  // hard-wrapped, so a single-line match would cut sentences in half.
+  const m = body.match(/^(?!#|>|\s*$)([^\n]+(?:\n(?!#|>|\s*$)[^\n]+)*)/m);
   if (!m) return null;
-  const text = m[1].replace(/\[([^\]]+)\]\([^)]+\)/g, '$1').replace(/[*_`]/g, '');
-  return text.length <= 160 ? text : text.slice(0, 160).replace(/\s\S*$/, '') + '…';
+  return m[1]
+    .replace(/\s*\n\s*/g, (match, offset, str) => {
+      // CJK prose wraps without word spaces; joining with a space would
+      // leave stray gaps inside Chinese text ("消息 寻址").
+      const prev = str[offset - 1] ?? '';
+      const next = str[offset + match.length] ?? '';
+      return /[　-鿿＀-￯]/.test(prev + next) ? '' : ' ';
+    })
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+    .replace(/[*_`]/g, '');
+}
+
+// Cut page descriptions at a sentence boundary when possible so the text
+// under the title, in search results, and in OG cards does not end
+// mid-phrase. CJK sentence punctuation always counts; ASCII punctuation
+// counts only when followed by whitespace or the end of the window.
+// Otherwise fall back to a word-boundary cut with an ellipsis.
+function truncateDescription(text, max = 140) {
+  if (!text || text.length <= max) return text;
+  const window = text.slice(0, max);
+  let best = -1;
+  for (const re of [/[。！？]/g, /[.!?](?=\s|$)/g]) {
+    let m;
+    while ((m = re.exec(window)) !== null) {
+      if (m.index > best) best = m.index;
+    }
+  }
+  if (best > max * 0.4) return text.slice(0, best + 1);
+  return (
+    window.replace(/\s\S*$/, '').replace(/[.,;:!?，、；：]+$/, '') + '…'
+  );
 }
 
 // Fence languages that the bundled Shiki config cannot highlight.
@@ -271,10 +302,7 @@ function renderFile(srcAbs, srcLocale, selfSlug, collection, warnings) {
   const statusDetail =
     statusLine?.split(/\s+[—–-]\s+/).slice(1).join(' — ').trim() || null;
   const rawDescription = statusDetail ?? firstParagraph(transformed);
-  const description =
-    rawDescription && rawDescription.length > 140
-      ? rawDescription.slice(0, 140).replace(/\s\S*$/, '') + '…'
-      : rawDescription;
+  const description = truncateDescription(rawDescription, 140);
 
   const frontmatter =
     [

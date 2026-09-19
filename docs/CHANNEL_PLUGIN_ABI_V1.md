@@ -2,6 +2,8 @@
 
 > Status: current
 
+> 中文版：[CHANNEL_PLUGIN_ABI_V1.zh.md](CHANNEL_PLUGIN_ABI_V1.zh.md)
+
 Channel Plugin ABI v1 is Aria's serializable boundary between channel-specific
 protocol code and core-owned ingress, lifecycle, and delivery orchestration. It
 is available from the package root; plugins do not import Supervisor, agent, or
