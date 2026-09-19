@@ -2,6 +2,11 @@ import { RootProvider } from 'fumadocs-ui/provider/next';
 import '../global.css';
 import { Inter } from 'next/font/google';
 import { i18n } from '@/lib/i18n';
+import type { Metadata } from 'next';
+
+export const metadata: Metadata = {
+  metadataBase: new URL('https://ai.***REMOVED***dev.com'),
+};
 
 const inter = Inter({
   subsets: ['latin'],

@@ -5,6 +5,7 @@ import {
   DocsPage,
   DocsTitle,
   MarkdownCopyButton,
+  PageLastUpdate,
   ViewOptionsPopover,
 } from 'fumadocs-ui/layouts/docs/page';
 import { notFound } from 'next/navigation';
@@ -13,6 +14,7 @@ import type { Metadata } from 'next';
 import { createRelativeLink } from 'fumadocs-ui/mdx';
 import { getPageImageUrl, getPageMarkdownUrl, gitConfig } from '@/lib/shared';
 import sourceMap from '@/lib/generated/source-map.json';
+import lastmodMap from '@/lib/generated/lastmod.json';
 
 export default async function Page(
   props: PageProps<'/[lang]/docs/[[...slug]]'>,
@@ -27,9 +29,16 @@ export default async function Page(
     (sourceMap as Record<string, string>)[`${page.locale}:${page.slugs.join('/')}`] ??
     (sourceMap as Record<string, string>)[page.slugs.join('/')] ??
     'docs';
+  const lastmod =
+    (lastmodMap as Record<string, string>)[`${page.locale}:${page.slugs.join('/')}`] ??
+    (lastmodMap as Record<string, string>)[page.slugs.join('/')];
 
   return (
-    <DocsPage toc={page.data.toc} full={page.data.full}>
+    <DocsPage
+      toc={page.data.toc}
+      full={page.data.full}
+      tableOfContent={{ style: 'clerk' }}
+    >
       <DocsTitle>{page.data.title}</DocsTitle>
       <DocsDescription className="mb-0">{page.data.description}</DocsDescription>
       <div className="flex flex-row gap-2 items-center border-b pb-6">
@@ -47,6 +56,7 @@ export default async function Page(
           })}
         />
       </DocsBody>
+      {lastmod && <PageLastUpdate date={new Date(lastmod)} />}
     </DocsPage>
   );
 }

@@ -9,6 +9,7 @@
 //   - `NAME.<locale>.md` is the localized variant of `NAME.md`
 //     (e.g. STEERING.zh.md -> steering.zh.mdx).
 //   - docs/releases/** and docs/blog/** become the /blog collection.
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -336,7 +337,27 @@ for (const e of docEntries) {
 fs.rmSync(outDocsDir, { recursive: true, force: true });
 fs.rmSync(outBlogDir, { recursive: true, force: true });
 
+// Last-commit time of the source Markdown, for the "Last updated" footer.
+// The generated .mdx files are untracked, so fumadocs-mdx's own git
+// lastModified cannot see the real history; resolve it from docs/ instead.
+// When git is unavailable (release tarball builds) the map stays empty and
+// the footer is simply not rendered.
+function gitLastModified(rel) {
+  try {
+    return (
+      execFileSync('git', ['log', '-1', '--format=%cI', '--', rel], {
+        cwd: repoRoot,
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+      }).trim() || null
+    );
+  } catch {
+    return null;
+  }
+}
+
 const sourceMap = {}; // "<locale>:<slug>" or "<slug>" -> repo-relative source path
+const lastmodMap = {}; // same keys as sourceMap -> ISO commit date
 const publishedPages = []; // docEntries where publish
 
 for (const e of docEntries) {
@@ -355,7 +376,12 @@ for (const e of docEntries) {
   publishedPages.push({ ...e, title });
   const key = e.locale ? `${e.locale}:${e.slug}` : e.slug;
   sourceMap[key] = `docs/${e.rel}`;
-  if (e.locale && !sourceMap[e.slug]) sourceMap[e.slug] = `docs/${e.rel}`;
+  const lm = gitLastModified(`docs/${e.rel}`);
+  if (lm) lastmodMap[key] = lm;
+  if (e.locale && !sourceMap[e.slug]) {
+    sourceMap[e.slug] = `docs/${e.rel}`;
+    if (lm && !lastmodMap[e.slug]) lastmodMap[e.slug] = lm;
+  }
 }
 
 // Landing pages for /docs (per locale).
@@ -459,8 +485,14 @@ for (const e of blogEntries) {
   const slugPathArr = e.slug.split('/');
   const entry = { slug: slugPathArr, title, date, key, locale: e.locale ?? DEFAULT_LOCALE };
   blogIndex.push(entry);
-  sourceMap[`blog:${e.locale ?? DEFAULT_LOCALE}:${e.slug}`] = `docs/${e.rel}`;
-  if (!e.locale) sourceMap[`blog:${e.slug}`] = `docs/${e.rel}`;
+  const blogKey = `blog:${e.locale ?? DEFAULT_LOCALE}:${e.slug}`;
+  sourceMap[blogKey] = `docs/${e.rel}`;
+  const lm = gitLastModified(`docs/${e.rel}`);
+  if (lm) lastmodMap[blogKey] = lm;
+  if (!e.locale) {
+    sourceMap[`blog:${e.slug}`] = `docs/${e.rel}`;
+    if (lm) lastmodMap[`blog:${e.slug}`] = lm;
+  }
 }
 
 blogIndex.sort((a, b) => b.key - a.key || a.title.localeCompare(b.title));
@@ -498,6 +530,10 @@ fs.mkdirSync(generatedDir, { recursive: true });
 fs.writeFileSync(
   path.join(generatedDir, 'source-map.json'),
   JSON.stringify(sourceMap, null, 2) + '\n',
+);
+fs.writeFileSync(
+  path.join(generatedDir, 'lastmod.json'),
+  JSON.stringify(lastmodMap, null, 2) + '\n',
 );
 fs.writeFileSync(
   path.join(generatedDir, 'blog-index.json'),

@@ -42,7 +42,7 @@ export default async function BlogIndexPage(
     .filter((e) => e !== null);
 
   return (
-    <HomeLayout {...baseOptions()}>
+    <HomeLayout {...baseOptions(lang)}>
       <main className="flex flex-1 flex-col px-6 py-12 mx-auto w-full max-w-3xl">
       <h1 className="text-3xl font-bold mb-2">{t.title}</h1>
       <p className="text-fd-muted-foreground mb-10">{t.description}</p>

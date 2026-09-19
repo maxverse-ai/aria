@@ -7,6 +7,8 @@ import {
   DocsPage,
   DocsTitle,
   MarkdownCopyButton,
+  PageLastUpdate,
+  EditOnGitHub,
 } from 'fumadocs-ui/layouts/docs/page';
 import { notFound } from 'next/navigation';
 import { getMDXComponents } from '@/components/mdx';
@@ -14,6 +16,7 @@ import type { Metadata } from 'next';
 import { createRelativeLink } from 'fumadocs-ui/mdx';
 import { getBlogMarkdownUrl, gitConfig } from '@/lib/shared';
 import sourceMap from '@/lib/generated/source-map.json';
+import lastmodMap from '@/lib/generated/lastmod.json';
 
 export default async function Page(
   props: PageProps<'/[lang]/blog/[...slug]'>,
@@ -30,24 +33,27 @@ export default async function Page(
     ] ??
     (sourceMap as Record<string, string>)[`blog:${page.slugs.join('/')}`] ??
     'docs';
+  const lastmod =
+    (lastmodMap as Record<string, string>)[
+      `blog:${page.locale}:${page.slugs.join('/')}`
+    ] ?? (lastmodMap as Record<string, string>)[`blog:${page.slugs.join('/')}`];
 
   return (
-    <DocsLayout tree={blog.getPageTree(params.lang)} {...baseOptions()}>
-      <DocsPage toc={page.data.toc} full={page.data.full}>
+    <DocsLayout tree={blog.getPageTree(params.lang)} {...baseOptions(params.lang)}>
+      <DocsPage
+        toc={page.data.toc}
+        full={page.data.full}
+        tableOfContent={{ style: 'clerk' }}
+      >
           <DocsTitle>{page.data.title}</DocsTitle>
           <DocsDescription className="mb-0">
             {page.data.description}
           </DocsDescription>
           <div className="flex flex-row gap-2 items-center border-b pb-6">
             <MarkdownCopyButton markdownUrl={markdownUrl} />
-            <a
-              href={`https://github.com/${gitConfig.user}/${gitConfig.repo}/blob/${gitConfig.branch}/${repoPath}`}
-              target="_blank"
-              rel="noreferrer"
-              className="text-sm text-fd-muted-foreground hover:underline"
-            >
-              GitHub
-            </a>
+            <EditOnGitHub
+              href={`https://github.com/${gitConfig.user}/${gitConfig.repo}/edit/${gitConfig.branch}/${repoPath}`}
+            />
           </div>
         <DocsBody>
           <MDX
@@ -56,6 +62,7 @@ export default async function Page(
             })}
           />
         </DocsBody>
+        {lastmod && <PageLastUpdate date={new Date(lastmod)} />}
       </DocsPage>
     </DocsLayout>
   );
