@@ -1,6 +1,6 @@
 import { blog } from '@/lib/source';
-import { DocsLayout } from 'fumadocs-ui/layouts/notebook';
-import { docsOptions } from '@/lib/layout.shared';
+import { DocsLayout } from 'fumadocs-ui/layouts/docs';
+import { baseOptions } from '@/lib/layout.shared';
 import {
   DocsBody,
   DocsDescription,
@@ -9,7 +9,7 @@ import {
   MarkdownCopyButton,
   PageLastUpdate,
   EditOnGitHub,
-} from 'fumadocs-ui/layouts/notebook/page';
+} from 'fumadocs-ui/layouts/docs/page';
 import { notFound } from 'next/navigation';
 import { getMDXComponents } from '@/components/mdx';
 import type { Metadata } from 'next';
@@ -44,7 +44,7 @@ export default async function Page(
     ] ?? (lastmodMap as Record<string, string>)[`blog:${page.slugs.join('/')}`];
 
   return (
-    <DocsLayout tree={blog.getPageTree(params.lang)} {...docsOptions(params.lang)}>
+    <DocsLayout tree={blog.getPageTree(params.lang)} {...baseOptions(params.lang)}>
       <DocsPage
         toc={page.data.toc}
         full={page.data.full}

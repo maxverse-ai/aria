@@ -8,7 +8,7 @@ import {
   MarkdownCopyButton,
   PageLastUpdate,
   ViewOptionsPopover,
-} from 'fumadocs-ui/layouts/notebook/page';
+} from 'fumadocs-ui/layouts/docs/page';
 import { notFound } from 'next/navigation';
 import { getMDXComponents } from '@/components/mdx';
 import type { Metadata } from 'next';
