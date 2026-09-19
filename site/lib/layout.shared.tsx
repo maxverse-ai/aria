@@ -31,3 +31,14 @@ export function baseOptions(lang = 'en'): BaseLayoutProps {
     themeSwitch: { mode: 'light-dark' },
   };
 }
+
+// The notebook layout reads `nav.mode`; 'top' renders the same full-width
+// navbar on docs pages that HomeLayout shows on landing/changelog pages,
+// instead of hiding the nav links inside the sidebar on desktop.
+export function docsOptions(lang = 'en') {
+  const opts = baseOptions(lang);
+  return {
+    ...opts,
+    nav: { ...opts.nav, mode: 'top' as const },
+  };
+}
