@@ -1,10 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import {
+  authorizeAdapterCommands,
   ConfigChangeService,
   MANAGEMENT_API_VERSION,
   ManagementApi,
   configSettingsSnapshot,
-  lowRiskConfigCommandRegistry,
+  managementCommandRegistry,
+  PROFILE_ACCESS_UPDATE_COMMAND,
   operationIdForSetting,
   parseSettingValue,
   type ControlActorContext,
@@ -117,11 +119,19 @@ export function formatApplyResult(result: ControlChangeApplyResult): string {
   ].join('\n');
 }
 
+/**
+ * The local CLI plans low-risk settings itself (`config plan` only maps
+ * LOW_RISK_CONFIG_SETTINGS), but `chat mention` emits a sensitive
+ * `profile.access.update` plan on the same plan store — confirm/apply must
+ * see the full registry plus a narrow local-cli authorization for that one
+ * command so those plans can finish through `config confirm`/`config apply`.
+ */
 function managementApi(opts: Pick<ConfigChangeCliOptions, 'rootDir'>): ManagementApi {
   return new ManagementApi(
     new ConfigChangeService({
       rootDir: opts.rootDir ?? paths.rootDir,
-      registry: lowRiskConfigCommandRegistry,
+      registry: managementCommandRegistry,
+      authorizeCommand: authorizeAdapterCommands('local-cli', [PROFILE_ACCESS_UPDATE_COMMAND]),
     }),
   );
 }

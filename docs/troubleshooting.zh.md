@@ -80,5 +80,5 @@ aria --version
 
 ## 还没解决
 
-上报前收集 `aria inspect --json`、daemon 日志末尾和 `/doctor` 输出——它们
-不含凭证。
+上报前收集 `aria doctor --json`、`aria inspect --json`、daemon 日志末尾
+（`aria logs --lines 200`）和 `/doctor` 输出——它们不含凭证。

@@ -99,6 +99,58 @@ Open the local web console (config, profiles, online bots) in your browser
 
 List running bridge processes on this machine
 
+## `aria chat`
+
+Inspect chats the bot belongs to and per-chat mention overrides
+
+### `aria chat list`
+
+List chats the bot is a member of, with mention-override state
+
+| Option | Description |
+| --- | --- |
+| `--profile <name>` | profile name (defaults to active profile) |
+| `--json` | print machine-readable JSON |
+
+### `aria chat mention <chat_id> <value>`
+
+Plan a per-chat mention override (on|off); confirm+apply via `aria config`
+
+| Option | Description |
+| --- | --- |
+| `--profile <name>` | profile name (defaults to active profile) |
+| `--json` | print machine-readable JSON |
+
+## `aria engines`
+
+List registered engine plugin ids accepted by --agent (read-only)
+
+| Option | Description |
+| --- | --- |
+| `--json` | print stable machine-readable JSON |
+
+## `aria doctor`
+
+Aggregate health check: config, service, lark-cli, engine, keystore, locks
+
+| Option | Description |
+| --- | --- |
+| `--profile <name>` | profile name (defaults to active profile) |
+| `--web-ui` | check the supervisor service instead of a per-profile one |
+| `--json` | print machine-readable JSON |
+
+## `aria logs`
+
+Tail the daemon stderr log (the path `status` prints)
+
+| Option | Description |
+| --- | --- |
+| `--profile <name>` | profile name (defaults to active profile) |
+| `--web-ui` | read the supervisor service logs instead of a per-profile one |
+| `--stdout` | tail the daemon stdout log instead of stderr |
+| `--lines <n>` | number of trailing lines to print (default: `100`) |
+| `--follow` | keep printing appended log data |
+
 ## `aria inspect`
 
 Summarize profile-local lifecycle and concurrency events (read-only)

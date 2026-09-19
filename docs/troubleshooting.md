@@ -90,5 +90,6 @@ summarizes the run logs without opening them.
 
 ## Still stuck
 
-Collect `aria inspect --json`, the daemon log tail, and `/doctor` output
-before reporting — they carry no credentials.
+Collect `aria doctor --json`, `aria inspect --json`, the daemon log tail
+(`aria logs --lines 200`), and `/doctor` output before reporting — they carry
+no credentials.

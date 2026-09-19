@@ -29,7 +29,9 @@ Platform mapping for the daemon:
 | Linux | systemd user unit `aria.bot.<profile>.service` |
 | Windows | Task Scheduler task `LarkChannelBridge.Bot.<profile>` via a `.cmd` wrapper |
 
-Daemon logs live under `~/.aria/profiles/<profile>/logs/daemon/`.
+Daemon logs live under `~/.aria/profiles/<profile>/logs/daemon/`. Tail them
+with `aria logs [--profile <name>] [--lines <n>] [--follow]` (`--stdout` for
+the stdout log, `--web-ui` for the Supervisor's).
 
 ## Service lifecycle
 
@@ -105,9 +107,13 @@ aria inspect [--profile <name>] [--hours 24]   # lifecycle/concurrency summary f
 aria runtime status [--profile <name>]         # profile lock + registered processes
 aria config show [--profile <name>]            # redacted effective configuration
 aria control capabilities                      # supported control-plane operations
+aria chat list [--profile <name>]              # chats the bot is in + mention overrides
+aria engines                                   # engine ids accepted by --agent
+aria doctor [--profile <name>]                 # aggregated health check (non-zero on failure)
 ```
 
-All accept `--json` for automation.
+All accept `--json` for automation (`aria doctor` exits non-zero when any
+check fails).
 
 ## Changing configuration safely
 
@@ -127,11 +133,15 @@ and the `aria update` lifecycle. Plans are redacted, expire, and are verified
 again at apply time; the underlying `ManagementApi` contract is specified in
 the [management control plane](CONTROL_PLANE.md) internals doc.
 
-For profile fields the protocol does not cover — `workspaces.default`,
-`permissions.defaultAccess` / `permissions.maxAccess`, `access.*` — edit the
-matching profile's field in `~/.aria/config.json` (never replace the whole
-file) and restart the bridge or send `/reconnect` in chat. The
-[README](../README.md#working-directories) documents those fields.
+Per-chat mention overrides go through the same protocol — `aria chat mention
+<chat_id> on|off` emits a sensitive-risk `profile.access.update` plan; finish
+it with `aria config confirm <plan-id>` and `aria config apply <plan-id>`.
+
+For other profile fields the protocol does not cover — `workspaces.default`,
+`permissions.defaultAccess` / `permissions.maxAccess`, the rest of
+`access.*` — edit the matching profile's field in `~/.aria/config.json`
+(never replace the whole file) and restart the bridge or send `/reconnect` in
+chat. The [README](../README.md#working-directories) documents those fields.
 
 ## Troubleshooting
 

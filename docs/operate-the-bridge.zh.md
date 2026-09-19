@@ -26,7 +26,9 @@ daemon 的平台映射：
 | Linux | systemd 用户单元 `aria.bot.<profile>.service` |
 | Windows | 任务计划程序任务 `LarkChannelBridge.Bot.<profile>`，经 `.cmd` 包装启动 |
 
-daemon 日志在 `~/.aria/profiles/<profile>/logs/daemon/` 下。
+daemon 日志在 `~/.aria/profiles/<profile>/logs/daemon/` 下。用
+`aria logs [--profile <name>] [--lines <n>] [--follow]` 查看末尾（`--stdout`
+查看 stdout 日志，`--web-ui` 查看 Supervisor 的）。
 
 ## 服务生命周期
 
@@ -99,9 +101,12 @@ aria inspect [--profile <name>] [--hours 24]   # 从 profile 日志汇总生命�
 aria runtime status [--profile <name>]         # profile 锁 + 已注册进程
 aria config show [--profile <name>]            # 脱敏的生效配置
 aria control capabilities                      # 支持的控制平面操作
+aria chat list [--profile <name>]              # bot 所在的群 + mention 覆盖状态
+aria engines                                   # --agent 接受的引擎 id
+aria doctor [--profile <name>]                 # 聚合健康检查（失败时退出码非零）
 ```
 
-都接受 `--json` 以便自动化。
+都接受 `--json` 以便自动化（`aria doctor` 在任何检查失败时退出码非零）。
 
 ## 安全地修改配置
 
@@ -120,10 +125,14 @@ aria config apply <plan-id>
 校验；底层 `ManagementApi` 契约规定在
 [管理控制平面](CONTROL_PLANE.zh.md)内部文档中。
 
-协议未覆盖的 profile 字段——`workspaces.default`、
-`permissions.defaultAccess` / `permissions.maxAccess`、`access.*`——编辑
-`~/.aria/config.json` 中对应 profile 的字段（不要整体替换文件），然后重启
-bridge 或在聊天中发送 `/reconnect`。这些字段记录在
+每个群的 mention 覆盖也走同一协议——`aria chat mention <chat_id> on|off`
+生成一个敏感级的 `profile.access.update` 计划，用
+`aria config confirm <plan-id>` 和 `aria config apply <plan-id>` 完成。
+
+协议未覆盖的其他 profile 字段——`workspaces.default`、
+`permissions.defaultAccess` / `permissions.maxAccess`、`access.*` 的其余
+字段——编辑 `~/.aria/config.json` 中对应 profile 的字段（不要整体替换
+文件），然后重启 bridge 或在聊天中发送 `/reconnect`。这些字段记录在
 [README](../README.zh.md#working-directories) 中。
 
 ## 故障排查

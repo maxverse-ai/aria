@@ -68,6 +68,10 @@ import {
 import { runWorker } from './commands/worker';
 import { runSpaceCommand, type SpaceCliOptions } from './commands/space';
 import { runInboxCheck, runInboxPull, type InboxCliOptions } from './commands/inbox';
+import { runChatList, runChatMention } from './commands/chat';
+import { runDoctor } from './commands/doctor';
+import { runEngines } from './commands/engines';
+import { runLogs } from './commands/logs';
 
 // Announce an unsupported-but-not-yet-removed runtime before any command runs.
 const nodeVersionWarning = runtimeNotice();
@@ -204,6 +208,58 @@ program
   .description('List running bridge processes on this machine')
   .action(() => {
     runPs();
+  });
+
+const chat = program
+  .command('chat')
+  .description('Inspect chats the bot belongs to and per-chat mention overrides');
+
+chat
+  .command('list')
+  .description('List chats the bot is a member of, with mention-override state')
+  .option('--profile <name>', 'profile name (defaults to active profile)')
+  .option('--json', 'print machine-readable JSON')
+  .action(async (opts: { profile?: string; json?: boolean }) => {
+    await runChatList(opts);
+  });
+
+chat
+  .command('mention <chat_id> <value>')
+  .description('Plan a per-chat mention override (on|off); confirm+apply via `aria config`')
+  .option('--profile <name>', 'profile name (defaults to active profile)')
+  .option('--json', 'print machine-readable JSON')
+  .action(async (chatId: string, value: string, opts: { profile?: string; json?: boolean }) => {
+    await runChatMention(chatId, value, opts);
+  });
+
+program
+  .command('engines')
+  .description('List registered engine plugin ids accepted by --agent (read-only)')
+  .option('--json', 'print stable machine-readable JSON')
+  .action(async (opts: { json?: boolean }) => {
+    await runEngines(opts);
+  });
+
+program
+  .command('doctor')
+  .description('Aggregate health check: config, service, lark-cli, engine, keystore, locks')
+  .option('--profile <name>', 'profile name (defaults to active profile)')
+  .option('--web-ui', 'check the supervisor service instead of a per-profile one')
+  .option('--json', 'print machine-readable JSON')
+  .action(async (opts: { profile?: string; webUi?: boolean; json?: boolean }) => {
+    process.exitCode = await runDoctor(opts);
+  });
+
+program
+  .command('logs')
+  .description('Tail the daemon stderr log (the path `status` prints)')
+  .option('--profile <name>', 'profile name (defaults to active profile)')
+  .option('--web-ui', 'read the supervisor service logs instead of a per-profile one')
+  .option('--stdout', 'tail the daemon stdout log instead of stderr')
+  .option('--lines <n>', 'number of trailing lines to print', '100')
+  .option('--follow', 'keep printing appended log data')
+  .action(async (opts: { profile?: string; webUi?: boolean; stdout?: boolean; lines?: string; follow?: boolean }) => {
+    await runLogs(opts);
   });
 
 program
