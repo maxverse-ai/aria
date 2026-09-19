@@ -68,7 +68,7 @@ that separate plan.
 | 10D | Complete | Channel-grained runtime reconciliation behind `ChannelRuntimeAdmin` |
 | 10E | Complete | Thin `aria channel` CLI and `/api/channels` console adapters over read/command/admin contracts |
 | 10F | Complete | No-network fixture evidence across pin/trust/configure/login/activate/status/restart/drain/unload/rollback with fail-closed coverage |
-| 11 | In progress (11A–11D complete) | Disabled-by-default `weixin-ilink` text MVP |
+| 11 | In progress (11A–11E complete) | Disabled-by-default `weixin-ilink` text MVP |
 | 12 | Not started | Media, group, proactive-send, and multi-account capabilities |
 
 The ordinary CLI supplies no external composition input. No real external
@@ -308,11 +308,27 @@ coverage: `tests/unit/channel/weixin-ilink-plugin.test.ts` (restart
 recovery, redelivery suppression, failed cursor writes, quote folding,
 typing lifecycle, timeout hints).
 
-### 11E. Durable reply and local controls
+### 11E. Durable reply and local controls — complete
 
-Checkpoint answers before delivery, persist deterministic delivery receipts,
-and recover partial sends. Implement provider-local help, new/reset, and stop
-controls through core-owned conversation and interruption contracts.
+Answer checkpointing, deterministic receipts, and partial-send recovery
+live in the core reliability coordinator; the package now closes its side
+of the contract. iLink `sendmessage` has no provider idempotency key, so
+`WeixinIlinkRuntime.deliver` dedupes the checkpointed `deliveryId` through
+an `IlinkDeliveryLedger` — `InMemoryDeliveryLedger` by default, or the
+per-delivery-file `FileIlinkDeliveryLedger` composed under
+`stateDir/<instanceId>/deliveries/` — so a coordinator retry after a
+crash returns the recorded receipt instead of double-sending. A ledger
+write failure after a successful send is tolerated: the core ledger still
+records the returned receipt.
+
+`src/commands.ts` adds the provider-local control surface: `/help`
+(`help`, `帮助`) and unknown `/`-commands are answered directly through
+the transport and never enter durable ingress; `/new` (`/reset`) and
+`/stop` (`/cancel`) normalize into `event` envelopes named
+`weixin-ilink.command` (`data.command`) so the core-owned processor can
+apply its conversation-reset and interruption contracts. Command
+envelopes keep `replyContext` so core can answer in scope. Focused
+coverage: `tests/unit/channel/weixin-ilink-plugin.test.ts`.
 
 ### 11F. Single-account grey rollout
 
@@ -377,11 +393,12 @@ installation, and enabling a new account require separate explicit authority.
 
 ## Recommended next task
 
-Start with Stage 11E only. Make the `weixin-ilink` reply path durable and
-add provider-local controls: checkpoint the answer before delivery,
-return deterministic delivery receipts, recover partial sends, and
-implement `help`, `new`/`reset`, and `stop` inside the package boundary.
-Protocol contract: `docs/WEIXIN_ILINK_PROTOCOL.md`.
+Start with Stage 11F only. Produce the single-account grey-rollout
+evidence for `weixin-ilink`: login recovery, process restart, host
+restart, duplicate input, partial delivery, rate limits, reauthentication,
+bounded drain, and hard rollback — all against the no-network fake
+transport with exactly one explicitly opted-in account. A successful
+canary does not change global defaults.
 
 ## Handoff checklist
 

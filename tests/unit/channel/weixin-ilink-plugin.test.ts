@@ -17,8 +17,12 @@ import {
   createWeixinIlinkPlugin,
   FakeIlinkTransport,
   FileIlinkCursorStore,
+  FileIlinkDeliveryLedger,
   InMemoryCredentialStore,
   InMemoryCursorStore,
+  InMemoryDeliveryLedger,
+  ILINK_COMMAND_EVENT,
+  ILINK_HELP_TEXT,
   validateWeixinIlinkConfig,
   WEIXIN_ILINK_PACKAGE_NAME,
   WEIXIN_ILINK_PLUGIN_ID,
@@ -691,6 +695,198 @@ describe('weixin-ilink durable inbound path (Stage 11D)', () => {
       await waitFor(() => transport.lastPollTimeoutMs === 1234);
     } finally {
       await runtime.close();
+    }
+  });
+});
+
+describe('weixin-ilink durable replies and local controls (Stage 11E)', () => {
+  function intentFor(
+    inst: ResolvedChannelInstance<WeixinIlinkConfig>,
+    deliveryId: string,
+  ) {
+    return {
+      abiVersion: CHANNEL_PLUGIN_ABI_VERSION,
+      profileId: inst.profileId,
+      pluginId: inst.pluginId,
+      instanceId: inst.instanceId,
+      deliveryId,
+      sourceMessageId: 'ilink:1001',
+      scopeId: 'session-1',
+      content: { kind: 'text' as const, text: 'reply' },
+      replyContext: { ilink: { contextToken: 'ctx-token-1', userId: ALLOWED } },
+    };
+  }
+
+  it('answers /help locally without touching durable ingress', async () => {
+    const transport = new FakeIlinkTransport();
+    const accepted: ChannelInboundEnvelope[] = [];
+    const { plugin, context } = startPlugin(transport, async (envelope) => {
+      accepted.push(envelope);
+      return { status: 'accepted', receiptId: 'r1' };
+    });
+    transport.push([
+      message({ item_list: [{ type: 1, text_item: { text: '/help' } }] }),
+    ]);
+    const runtime = (await plugin.start(context)) as WeixinIlinkRuntime;
+    try {
+      await waitFor(() => transport.sent.length === 1);
+      expect(transport.sent[0]).toEqual({
+        toUserId: ALLOWED,
+        contextToken: 'ctx-token-1',
+        text: ILINK_HELP_TEXT,
+      });
+      expect(accepted).toHaveLength(0);
+      expect(runtime.handledLocally).toBe(1);
+    } finally {
+      await runtime.close();
+    }
+  });
+
+  it('answers unknown slash commands locally with a hint', async () => {
+    const transport = new FakeIlinkTransport();
+    const { plugin, context } = startPlugin(transport, async () => ({
+      status: 'accepted',
+      receiptId: 'r1',
+    }));
+    transport.push([
+      message({ item_list: [{ type: 1, text_item: { text: '/bogus' } }] }),
+    ]);
+    const runtime = (await plugin.start(context)) as WeixinIlinkRuntime;
+    try {
+      await waitFor(() => transport.sent.length === 1);
+      expect(transport.sent[0]?.text).toContain('/bogus');
+      expect(transport.sent[0]?.text).toContain('/help');
+      expect(runtime.handledLocally).toBe(1);
+    } finally {
+      await runtime.close();
+    }
+  });
+
+  it('emits new/stop commands as event envelopes for core contracts', async () => {
+    const transport = new FakeIlinkTransport();
+    const accepted: ChannelInboundEnvelope[] = [];
+    const { plugin, context } = startPlugin(transport, async (envelope) => {
+      accepted.push(envelope);
+      return { status: 'accepted', receiptId: 'r1' };
+    });
+    transport.push([
+      message({
+        message_id: 10,
+        item_list: [{ type: 1, text_item: { text: '/new' } }],
+      }),
+      message({
+        message_id: 11,
+        item_list: [{ type: 1, text_item: { text: '/reset' } }],
+      }),
+      message({
+        message_id: 12,
+        item_list: [{ type: 1, text_item: { text: '/stop' } }],
+      }),
+      message({
+        message_id: 13,
+        item_list: [{ type: 1, text_item: { text: '/cancel' } }],
+      }),
+    ]);
+    const runtime = (await plugin.start(context)) as WeixinIlinkRuntime;
+    try {
+      await waitFor(() => accepted.length === 4);
+      expect(accepted.map((envelope) => envelope.content)).toEqual([
+        { kind: 'event', name: ILINK_COMMAND_EVENT, data: { command: 'new' } },
+        { kind: 'event', name: ILINK_COMMAND_EVENT, data: { command: 'new' } },
+        { kind: 'event', name: ILINK_COMMAND_EVENT, data: { command: 'stop' } },
+        { kind: 'event', name: ILINK_COMMAND_EVENT, data: { command: 'stop' } },
+      ]);
+      // Command envelopes keep the reply context so core can answer.
+      expect(accepted[0]?.replyContext).toEqual({
+        ilink: { contextToken: 'ctx-token-1', userId: ALLOWED },
+      });
+      expect(transport.sent).toHaveLength(0);
+      expect(runtime.handledLocally).toBe(0);
+    } finally {
+      await runtime.close();
+    }
+  });
+
+  it('dedupes coordinator retries by checkpointed deliveryId', async () => {
+    const transport = new FakeIlinkTransport();
+    const ledger = new InMemoryDeliveryLedger();
+    const plugin = createWeixinIlinkPlugin({
+      transport: () => transport,
+      deliveryLedger: () => ledger,
+      backoffMs: 0,
+    });
+    const context: ChannelPluginContext<WeixinIlinkConfig> = {
+      instance: instance(),
+      ingress: { accept: async () => ({ status: 'accepted', receiptId: 'r1' }) },
+      signal: new AbortController().signal,
+    };
+    const runtime = await plugin.start(context);
+    try {
+      const intent = intentFor(context.instance, 'delivery-7');
+      const first = await runtime.deliver(intent);
+      const second = await runtime.deliver(intent);
+      expect(second).toEqual(first);
+      expect(transport.sent).toHaveLength(1);
+    } finally {
+      await runtime.close();
+    }
+  });
+
+  it('persists delivery receipts through FileIlinkDeliveryLedger', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'ilink-deliveries-'));
+    try {
+      const ledger = new FileIlinkDeliveryLedger(dir);
+      const receipt = {
+        deliveryId: 'd/with:special-chars',
+        status: 'sent' as const,
+        providerMessageId: 'ilink:d/with:special-chars',
+        deliveredAt: 7,
+      };
+      await ledger.record(receipt.deliveryId, receipt);
+      expect(await new FileIlinkDeliveryLedger(dir).get(receipt.deliveryId)).toEqual(
+        receipt,
+      );
+      expect(await ledger.get('missing')).toBeUndefined();
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('dedupes deliveries across a restart through the shared file ledger', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'ilink-state-'));
+    try {
+      const transport = new FakeIlinkTransport();
+      const makePlugin = () =>
+        createWeixinIlinkPlugin({
+          transport: () => transport,
+          stateDir: dir,
+          backoffMs: 0,
+        });
+      const makeContext = (): ChannelPluginContext<WeixinIlinkConfig> => ({
+        instance: instance(),
+        ingress: {
+          accept: async () => ({ status: 'accepted', receiptId: 'r1' }),
+        },
+        signal: new AbortController().signal,
+      });
+      const runtime1 = await makePlugin().start(makeContext());
+      const receipt1 = await runtime1.deliver(
+        intentFor(instance(), 'delivery-9'),
+      );
+      await runtime1.close();
+
+      const runtime2 = await makePlugin().start(makeContext());
+      try {
+        const receipt2 = await runtime2.deliver(
+          intentFor(instance(), 'delivery-9'),
+        );
+        expect(receipt2).toEqual(receipt1);
+        expect(transport.sent).toHaveLength(1);
+      } finally {
+        await runtime2.close();
+      }
+    } finally {
+      await rm(dir, { recursive: true, force: true });
     }
   });
 });

@@ -25,6 +25,10 @@ import {
   type IlinkCursorStore,
 } from './cursor-store';
 import {
+  FileIlinkDeliveryLedger,
+  type IlinkDeliveryLedger,
+} from './delivery-ledger';
+import {
   createHttpIlinkLoginService,
   type IlinkLoginService,
 } from './login';
@@ -54,6 +58,10 @@ export interface WeixinIlinkPluginOptions {
   loginService?: (instance: ResolvedChannelInstance<WeixinIlinkConfig>) => IlinkLoginService;
   /** Durable cursor boundary; defaults to a volatile in-memory store. */
   cursorStore?: (instance: ResolvedChannelInstance<WeixinIlinkConfig>) => IlinkCursorStore;
+  /** Delivery dedupe boundary; defaults to a volatile in-memory ledger. */
+  deliveryLedger?: (
+    instance: ResolvedChannelInstance<WeixinIlinkConfig>,
+  ) => IlinkDeliveryLedger;
   /** Operator surface for the QR content produced by a login attempt. */
   onLoginQr?: (qrContent: string) => void;
   loginTimeoutMs?: number;
@@ -163,11 +171,17 @@ export function createWeixinIlinkPlugin(
         (stateDir
           ? new FileIlinkCursorStore(join(stateDir, 'cursor.txt'))
           : new InMemoryCursorStore());
+      const deliveryLedger =
+        options.deliveryLedger?.(context.instance) ??
+        (stateDir
+          ? new FileIlinkDeliveryLedger(join(stateDir, 'deliveries'))
+          : undefined);
       const runtime = new WeixinIlinkRuntime(context, {
         ...(transport ? { transport } : {}),
         transportFor: (credential) => transportFor(credential, context.instance),
         cursorStore,
         credentialStore,
+        ...(deliveryLedger ? { deliveryLedger } : {}),
         loginService,
         ...(options.onLoginQr ? { onLoginQr: options.onLoginQr } : {}),
         ...(options.loginTimeoutMs !== undefined

@@ -16,10 +16,24 @@ export {
   type IlinkCredentialStore,
 } from './credentials';
 export {
+  ILINK_COMMAND_EVENT,
+  ILINK_COMMANDS,
+  ILINK_HELP_TEXT,
+  parseIlinkCommand,
+  renderIlinkUnknownCommand,
+  type IlinkCommand,
+  type IlinkCommandKind,
+} from './commands';
+export {
   FileIlinkCursorStore,
   InMemoryCursorStore,
   type IlinkCursorStore,
 } from './cursor-store';
+export {
+  FileIlinkDeliveryLedger,
+  InMemoryDeliveryLedger,
+  type IlinkDeliveryLedger,
+} from './delivery-ledger';
 export { FakeIlinkTransport } from './fake-transport';
 export {
   createHttpIlinkLoginService,

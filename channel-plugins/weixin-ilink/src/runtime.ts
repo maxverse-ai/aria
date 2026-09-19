@@ -14,10 +14,20 @@ import {
   type ChannelRuntimeSnapshot,
   type ChannelRuntimeState,
 } from '@maxverse-ai/aria';
+import {
+  ILINK_COMMAND_EVENT,
+  ILINK_HELP_TEXT,
+  parseIlinkCommand,
+  renderIlinkUnknownCommand,
+} from './commands';
 import type { WeixinIlinkConfig } from './config';
 import { DEFAULT_POLL_TIMEOUT_MS } from './config';
 import type { IlinkCredential, IlinkCredentialStore } from './credentials';
 import type { IlinkCursorStore } from './cursor-store';
+import {
+  InMemoryDeliveryLedger,
+  type IlinkDeliveryLedger,
+} from './delivery-ledger';
 import {
   DEFAULT_LOGIN_POLL_MS,
   DEFAULT_LOGIN_TIMEOUT_MS,
@@ -37,6 +47,8 @@ export interface WeixinIlinkRuntimeDeps {
   transportFor?: (credential: IlinkCredential) => IlinkTransport;
   cursorStore: IlinkCursorStore;
   credentialStore?: IlinkCredentialStore;
+  /** Dedupe boundary for coordinator retries; defaults to volatile memory. */
+  deliveryLedger?: IlinkDeliveryLedger;
   loginService?: IlinkLoginService;
   onLoginQr?: (qrContent: string) => void;
   loginTimeoutMs?: number;
@@ -78,6 +90,8 @@ export class WeixinIlinkRuntime implements ChannelRuntime {
   droppedInbound = 0;
   /** Envelopes suppressed because they were already accepted this epoch. */
   suppressedDuplicates = 0;
+  /** Commands answered locally without entering durable ingress. */
+  handledLocally = 0;
 
   private state: ChannelRuntimeState = 'starting';
   private accepting = false;
@@ -99,6 +113,7 @@ export class WeixinIlinkRuntime implements ChannelRuntime {
   private readonly transportFor: ((credential: IlinkCredential) => IlinkTransport) | undefined;
   private readonly cursorStore: IlinkCursorStore;
   private readonly credentialStore: IlinkCredentialStore | undefined;
+  private readonly deliveryLedger: IlinkDeliveryLedger;
   private readonly loginService: IlinkLoginService | undefined;
   private readonly onLoginQr: ((qrContent: string) => void) | undefined;
   private readonly loginTimeoutMs: number;
@@ -119,6 +134,7 @@ export class WeixinIlinkRuntime implements ChannelRuntime {
     this.transportFor = deps.transportFor;
     this.cursorStore = deps.cursorStore;
     this.credentialStore = deps.credentialStore;
+    this.deliveryLedger = deps.deliveryLedger ?? new InMemoryDeliveryLedger();
     this.loginService = deps.loginService;
     this.onLoginQr = deps.onLoginQr;
     this.loginTimeoutMs = deps.loginTimeoutMs ?? DEFAULT_LOGIN_TIMEOUT_MS;
@@ -221,6 +237,11 @@ export class WeixinIlinkRuntime implements ChannelRuntime {
       });
     }
     const reply = this.replyContext(intent.replyContext);
+    // iLink has no provider idempotency key: the checkpointed deliveryId is
+    // deduped against the package ledger so a coordinator retry after a
+    // crash does not double-send.
+    const recorded = await this.deliveryLedger.get(intent.deliveryId);
+    if (recorded) return recorded;
     this.inFlightOutbound += 1;
     this.touch();
     try {
@@ -230,12 +251,21 @@ export class WeixinIlinkRuntime implements ChannelRuntime {
         text: intent.content.text,
       });
       this.sendTypingBestEffort(reply.userId, reply.contextToken, 2);
-      return {
+      const receipt: ChannelDeliveryReceipt = {
         deliveryId: intent.deliveryId,
         status: 'sent',
         providerMessageId: `ilink:${intent.deliveryId}`,
         deliveredAt: this.now(),
       };
+      try {
+        await this.deliveryLedger.record(intent.deliveryId, receipt);
+      } catch {
+        // The core delivery ledger still records this receipt; failing the
+        // package-side write only widens the retry window, never drops it.
+        this.lastError = 'weixin-ilink-delivery-ledger';
+        this.touch();
+      }
+      return receipt;
     } finally {
       this.inFlightOutbound -= 1;
       this.touch();
@@ -444,6 +474,26 @@ export class WeixinIlinkRuntime implements ChannelRuntime {
       this.droppedInbound += 1;
       return;
     }
+    const command = parseIlinkCommand(text);
+    if (command?.kind === 'help' || command?.kind === 'unknown') {
+      // Provider-local reply: answered through the transport, never through
+      // durable ingress. A send failure propagates so the batch redelivers.
+      if (!this.transport) {
+        this.droppedInbound += 1;
+        return;
+      }
+      await this.transport.sendMessage({
+        toUserId: from,
+        contextToken: message.context_token ?? '',
+        text:
+          command.kind === 'help'
+            ? ILINK_HELP_TEXT
+            : renderIlinkUnknownCommand(command.input),
+      });
+      this.acceptedIds.add(sourceMessageId);
+      this.handledLocally += 1;
+      return;
+    }
     const envelope: ChannelInboundEnvelope = {
       abiVersion: CHANNEL_PLUGIN_ABI_VERSION,
       profileId: this.instance.profileId,
@@ -454,7 +504,13 @@ export class WeixinIlinkRuntime implements ChannelRuntime {
       actorId: from,
       conversation: 'p2p',
       occurredAt: message.create_time_ms ?? this.now(),
-      content: { kind: 'text', text },
+      content: command
+        ? {
+            kind: 'event',
+            name: ILINK_COMMAND_EVENT,
+            data: { command: command.kind },
+          }
+        : { kind: 'text', text },
       replyContext: {
         ilink: {
           contextToken: message.context_token ?? '',
@@ -467,7 +523,7 @@ export class WeixinIlinkRuntime implements ChannelRuntime {
     try {
       const acceptance = await this.context.ingress.accept(envelope);
       this.acceptedIds.add(sourceMessageId);
-      if (acceptance.status === 'accepted') {
+      if (acceptance.status === 'accepted' && !command) {
         this.sendTypingBestEffort(from, message.context_token, 1);
       }
     } finally {
