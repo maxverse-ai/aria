@@ -1,3 +1,4 @@
+import { fileURLToPath } from "node:url";
 import { configDefaults, defineConfig } from "vitest/config";
 
 // Execution spaces provision POSIX process, path and socket state and are
@@ -17,6 +18,16 @@ const spaceSuites = [
 // vitest too. Without this, vite's import-analysis tries to parse the built
 // console HTML as JS and fails.
 export default defineConfig({
+  resolve: {
+    // External channel packages import the published package name; in-repo
+    // development resolves it to the working source tree.
+    alias: [
+      {
+        find: /^@maxverse-ai\/aria$/,
+        replacement: fileURLToPath(new URL("./src/index.ts", import.meta.url)),
+      },
+    ],
+  },
   test: {
     // The suite runs real filesystem and subprocess work under a parallel CI
     // matrix; vitest's five-second default reads a loaded runner as a broken

@@ -68,7 +68,7 @@ that separate plan.
 | 10D | Complete | Channel-grained runtime reconciliation behind `ChannelRuntimeAdmin` |
 | 10E | Complete | Thin `aria channel` CLI and `/api/channels` console adapters over read/command/admin contracts |
 | 10F | Complete | No-network fixture evidence across pin/trust/configure/login/activate/status/restart/drain/unload/rollback with fail-closed coverage |
-| 11 | In progress (11A complete) | Disabled-by-default `weixin-ilink` text MVP |
+| 11 | In progress (11A–11B complete) | Disabled-by-default `weixin-ilink` text MVP |
 | 12 | Not started | Media, group, proactive-send, and multi-account capabilities |
 
 The ordinary CLI supplies no external composition input. No real external
@@ -241,18 +241,32 @@ disabled by default and keep it outside Aria core.
 
 ### 11A. Protocol and license evidence — complete
 
-Recorded in `docs/WEIXIN_ILINK_PROTOCOL.md`: the official iLink transport and
+Recorded in [WEIXIN_ILINK_PROTOCOL.md](WEIXIN_ILINK_PROTOCOL.md): the official iLink transport and
 endpoint inventory, the QR authentication lifecycle and terminal states, the
 `get_updates_buf` cursor contract, the `context_token` reply requirement,
 provider limits, the MIT reference-implementation license, and community
 operational lessons converted into requirements R1–R7. No code shipped; no
 dependency on other implementations' architecture was taken.
 
-### 11B. Package skeleton and contract fixture
+### 11B. Package skeleton and contract fixture — complete
 
-Create the external package manifest, canonical `weixin-ilink` id, config
-schema, capability declaration, typed errors, and deterministic fake transport.
-Pass the reusable ABI contract kit without network or credentials.
+`channel-plugins/weixin-ilink/` holds the external package
+(`@maxverse-ai/aria-channel-weixin-ilink`, private, peer-dep on
+`@maxverse-ai/aria`; the root tsconfig path alias and a vitest resolve alias
+map that specifier to `src/index.ts` during in-repo development). It ships the
+canonical `weixin-ilink` manifest (poll ingress, p2p text only), fail-closed
+config validation around a required `allowedUserIds` allowlist, the
+`IlinkTransport` seam with an HTTP implementation against the account
+`baseurl`, a deterministic `FakeIlinkTransport` that mirrors
+`get_updates_buf` redelivery semantics, and a poll-loop runtime that advances
+the provider cursor only after ordered durable acceptance and projects
+`reauth-required` on auth failures. Non-allowlisted, group, and non-text
+messages drop deterministically; replies require the `context_token` +
+user-id reply context. `SecretRef`/`JsonValue` are now exported from the
+package root for external plugin authors. The skeleton passes the reusable
+contract kit; focused coverage:
+`tests/unit/channel/weixin-ilink-plugin.test.ts`. QR login, exec secret
+providers, durable cursor files, and typing stay deferred to 11C/11D.
 
 ### 11C. QR login and reauthentication
 
@@ -336,12 +350,12 @@ installation, and enabling a new account require separate explicit authority.
 
 ## Recommended next task
 
-Start with Stage 11B only. Create the external `weixin-ilink` package
-skeleton — manifest with canonical `weixin-ilink` id, config schema,
-capability declaration, typed errors, and a deterministic fake transport —
-and pass the reusable ABI contract kit without network or credentials. The
-protocol contract to implement is recorded in
-`docs/WEIXIN_ILINK_PROTOCOL.md`.
+Start with Stage 11C only. Add QR/Bearer authentication to the
+`weixin-ilink` package behind secret references: bounded QR polling with
+expiry and verification states, a pre-provisioned token path, `login`/`logout`
+runtime hooks producing ABI auth receipts, and `reauth-required` recovery.
+The bearer stays inside secret boundaries — never config, plans, or logs.
+Protocol contract: `docs/WEIXIN_ILINK_PROTOCOL.md`.
 
 ## Handoff checklist
 

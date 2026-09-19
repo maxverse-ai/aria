@@ -27,9 +27,10 @@
 
     "baseUrl": ".",
     "paths": {
-      "@/*": ["src/*"]
+      "@/*": ["src/*"],
+      "@maxverse-ai/aria": ["./src/index.ts"]
     }
   },
-  "include": ["src/**/*.ts", "tests/**/*.ts", "tsup.config.ts"],
+  "include": ["src/**/*.ts", "tests/**/*.ts", "channel-plugins/**/*.ts", "tsup.config.ts"],
   "exclude": ["node_modules", "dist"]
 }

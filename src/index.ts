@@ -503,6 +503,8 @@ export type {
   ChannelPluginContractOptions,
   ChannelPluginContractResult,
 } from './channel/plugin/contract-test-kit';
+export type { SecretRef } from './config/schema';
+export type { JsonValue } from './session/jcs';
 export type {
   ChannelManagerDrainFailure,
   ChannelManagerDrainResult,
