@@ -115,6 +115,14 @@ and `tool_call_start_item`/`tool_call_result_item`. `text_item` and
 are implemented in Stage 12A; `voice_item`, `video_item`, and tool items
 remain unsupported.
 
+`group_id` is populated on inbound messages from groups, but the
+reference plugin treats every conversation as direct (`isGroup: false`)
+and `sendmessage` carries no group field: replies to group messages
+route only through the `context_token` echo. There is no structured
+mention field either — mention detection is a text-token match (Stage
+12B gates groups behind `groupEnabled` + `allowedGroupIds` +
+`groupMentionTokens`).
+
 ## Outbound path
 
 `sendmessage` takes `msg.to_user_id`, `msg.context_token`, and an

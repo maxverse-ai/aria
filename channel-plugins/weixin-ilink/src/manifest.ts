@@ -8,10 +8,11 @@ export const WEIXIN_ILINK_PACKAGE_VERSION = '0.1.0';
 export const WEIXIN_ILINK_PLUGIN_ID = 'weixin-ilink';
 
 /**
- * Capability declaration: long-poll ingress, p2p text plus the Stage 12A
- * image/file CDN pipeline. Media stays off per instance until config
- * `mediaEnabled` opts in; group, proactive, and multi-account capabilities
- * are declared individually in later Stage 12 increments.
+ * Capability declaration: long-poll ingress, p2p/group text plus the
+ * Stage 12A image/file CDN pipeline. Media stays off per instance until
+ * config `mediaEnabled` opts in and group traffic stays off until
+ * `groupEnabled` + `allowedGroupIds` admit it; proactive and multi-account
+ * capabilities are declared individually in later Stage 12 increments.
  */
 export const weixinIlinkManifest: ChannelPluginManifest = {
   abiVersion: CHANNEL_PLUGIN_ABI_VERSION,
@@ -38,6 +39,18 @@ export const weixinIlinkManifest: ChannelPluginManifest = {
       routeTag: { type: 'string', minLength: 1 },
       mediaEnabled: { type: 'boolean' },
       mediaMaxBytes: { type: 'integer', minimum: 1, maximum: 52428800 },
+      groupEnabled: { type: 'boolean' },
+      allowedGroupIds: {
+        type: 'array',
+        items: { type: 'string', minLength: 1 },
+        maxItems: 1024,
+      },
+      groupRequireMention: { type: 'boolean' },
+      groupMentionTokens: {
+        type: 'array',
+        items: { type: 'string', minLength: 1 },
+        maxItems: 64,
+      },
     },
     additionalProperties: false,
   },
@@ -46,7 +59,7 @@ export const weixinIlinkManifest: ChannelPluginManifest = {
     inbound: ['text', 'image', 'file'],
     outbound: ['text', 'image', 'file'],
     streaming: 'none',
-    conversations: ['p2p'],
+    conversations: ['p2p', 'group'],
     proactiveMessages: false,
     humanHandoff: false,
   },

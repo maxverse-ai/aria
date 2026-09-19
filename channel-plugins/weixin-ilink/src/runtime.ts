@@ -112,6 +112,8 @@ export class WeixinIlinkRuntime implements ChannelRuntime {
   suppressedDuplicates = 0;
   /** Commands answered locally without entering durable ingress. */
   handledLocally = 0;
+  /** Group messages rejected by the Stage 12B admission gates. */
+  droppedGroupInbound = 0;
 
   private state: ChannelRuntimeState = 'starting';
   private accepting = false;
@@ -498,9 +500,17 @@ export class WeixinIlinkRuntime implements ChannelRuntime {
       this.droppedInbound += 1;
       return;
     }
-    if (message.group_id) {
-      // Group conversations are a Stage 12 capability; drop deterministically.
+    const analysis = this.analyzeItems(message);
+    if (analysis.unsupported) {
       this.droppedInbound += 1;
+      return;
+    }
+    const groupId = message.group_id;
+    const groupGate = groupId
+      ? this.admitGroupMessage(groupId, analysis.text)
+      : { admit: true as const, text: analysis.text };
+    if (!groupGate.admit) {
+      this.droppedGroupInbound += 1;
       return;
     }
     const sourceMessageId = this.sourceMessageId(message);
@@ -508,12 +518,7 @@ export class WeixinIlinkRuntime implements ChannelRuntime {
       this.suppressedDuplicates += 1;
       return;
     }
-    const analysis = this.analyzeItems(message);
-    if (analysis.unsupported) {
-      this.droppedInbound += 1;
-      return;
-    }
-    const text = analysis.text;
+    const text = groupGate.text;
     const command = text !== undefined ? parseIlinkCommand(text) : undefined;
     if (command?.kind === 'help' || command?.kind === 'unknown') {
       // Provider-local reply: answered through the transport, never through
@@ -579,9 +584,9 @@ export class WeixinIlinkRuntime implements ChannelRuntime {
       pluginId: this.instance.pluginId,
       instanceId: this.instance.instanceId,
       sourceMessageId,
-      scopeId: message.session_id || from,
+      scopeId: groupId ? `group:${groupId}` : message.session_id || from,
       actorId: from,
-      conversation: 'p2p',
+      conversation: groupId ? 'group' : 'p2p',
       occurredAt: message.create_time_ms ?? this.now(),
       content: command
         ? {
@@ -618,6 +623,46 @@ export class WeixinIlinkRuntime implements ChannelRuntime {
   private isAllowed(userId: string): boolean {
     const allowlist = this.config.allowedUserIds;
     return allowlist.length > 0 && allowlist.includes(userId);
+  }
+
+  /**
+   * Stage 12B group admission, fail-closed on every axis: the capability
+   * must be enabled, the group must be allowlisted, and — unless
+   * `groupRequireMention` is explicitly disabled — the text must carry a
+   * configured mention token. iLink has no structured mention field, so a
+   * matched token is also stripped from the normalized text. Replies to
+   * admitted group messages still route through the demonstrated
+   * `context_token` echo contract (sendmessage has no group field).
+   */
+  private admitGroupMessage(
+    groupId: string,
+    text: string | undefined,
+  ): { admit: boolean; text: string | undefined } {
+    if (this.config.groupEnabled !== true) {
+      return { admit: false, text };
+    }
+    const allowedGroups = this.config.allowedGroupIds ?? [];
+    if (!allowedGroups.includes(groupId)) {
+      return { admit: false, text };
+    }
+    if (this.config.groupRequireMention === false) {
+      return { admit: true, text };
+    }
+    const tokens = this.config.groupMentionTokens ?? [];
+    if (text === undefined || !tokens.some((token) => text.includes(token))) {
+      return { admit: false, text };
+    }
+    const stripped = text
+      .split('\n')
+      .map((line) => {
+        let result = line;
+        for (const token of tokens) result = result.split(token).join('');
+        return result.trim();
+      })
+      .filter((line) => line.length > 0)
+      .join('\n')
+      .trim();
+    return { admit: true, text: stripped.length > 0 ? stripped : undefined };
   }
 
   /**

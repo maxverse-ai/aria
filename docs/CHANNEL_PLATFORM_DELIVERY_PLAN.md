@@ -400,6 +400,29 @@ receipt. Focused coverage:
 round-trip, media-disabled drops, retry/drop bounds, size limits,
 foreign refs, CDN failure injection, file asset store persistence).
 
+### 12B. Group admission and mention gating — complete
+
+The manifest now declares `group` conversations; an instance admits group
+traffic only when config `groupEnabled` is true AND the message's
+`group_id` is in the fail-closed `allowedGroupIds` list AND — unless
+`groupRequireMention` is explicitly false — the normalized text carries
+one of the configured `groupMentionTokens`. iLink exposes no structured
+mention field (the reference plugin treats every conversation as direct),
+so mention detection is an honest text-token match: a matched token is
+stripped from the envelope text, and a mention-only message drops once
+empty. The sender still has to pass `allowedUserIds` inside a group.
+
+Admitted group envelopes set `conversation: 'group'`, `scopeId:
+group:<group_id>`, and `actorId: <sender>`, which isolates group scopes
+from the same user's p2p scope. Replies route through the demonstrated
+`context_token` echo — `sendmessage` carries no group field, so no group
+routing is emulated. Group drops count separately on
+`droppedGroupInbound` for observability. Defaults are unchanged: without
+`groupEnabled` every group message drops exactly as in the text MVP.
+Focused coverage: `tests/unit/channel/weixin-ilink-group.test.ts`
+(admission gates, mention strip, scope isolation, sender allowlist,
+mention-only drop, disabled-by-default).
+
 ## Validation and merge gate
 
 Every increment starts from current `origin/main` in its own `agent/*`

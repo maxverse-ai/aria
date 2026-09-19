@@ -196,11 +196,15 @@ describe('weixin-ilink package skeleton (Stage 11B)', () => {
     ]);
     const runtime = (await plugin.start(context)) as unknown as {
       droppedInbound: number;
+      droppedGroupInbound: number;
       close(): Promise<void>;
     };
     try {
       await waitFor(() => accepted.length === 1);
-      await waitFor(() => runtime.droppedInbound === 3);
+      // Group drops land on the Stage 12B group gate counter.
+      await waitFor(
+        () => runtime.droppedInbound === 2 && runtime.droppedGroupInbound === 1,
+      );
       expect(accepted[0]?.sourceMessageId).toBe('ilink:2003');
     } finally {
       await runtime.close();

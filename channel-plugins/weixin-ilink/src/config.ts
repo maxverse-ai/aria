@@ -21,6 +21,18 @@ export type WeixinIlinkConfig = ChannelConfig & {
   mediaEnabled?: boolean;
   /** Per-asset plaintext byte cap applied to downloads and uploads. */
   mediaMaxBytes?: number;
+  /** Stage 12B group admission gate; absent or false drops group traffic. */
+  groupEnabled?: boolean;
+  /** Fail-closed group allowlist; empty means no group is admitted. */
+  allowedGroupIds?: readonly string[];
+  /**
+   * When true (the default), a group message is admitted only if its text
+   * contains one of `groupMentionTokens`. iLink has no structured mention
+   * field, so mention detection is a text-token match.
+   */
+  groupRequireMention?: boolean;
+  /** Text tokens that count as a mention of this account inside a group. */
+  groupMentionTokens?: readonly string[];
 };
 
 export const DEFAULT_POLL_TIMEOUT_MS = 35_000;
@@ -94,6 +106,37 @@ export function validateWeixinIlinkConfig(config: unknown): WeixinIlinkConfig {
       `weixin-ilink mediaMaxBytes must be an integer between 1 and ${MAX_MEDIA_MAX_BYTES}`,
     );
   }
+  if (record.groupEnabled !== undefined && typeof record.groupEnabled !== 'boolean') {
+    throw configError('weixin-ilink groupEnabled must be a boolean');
+  }
+  if (record.allowedGroupIds !== undefined) {
+    if (!Array.isArray(record.allowedGroupIds)) {
+      throw configError('weixin-ilink allowedGroupIds must be an array');
+    }
+    for (const id of record.allowedGroupIds) {
+      if (typeof id !== 'string' || !id.trim() || id.length > 256) {
+        throw configError('weixin-ilink allowedGroupIds entries must be non-empty strings');
+      }
+    }
+  }
+  if (
+    record.groupRequireMention !== undefined &&
+    typeof record.groupRequireMention !== 'boolean'
+  ) {
+    throw configError('weixin-ilink groupRequireMention must be a boolean');
+  }
+  if (record.groupMentionTokens !== undefined) {
+    if (!Array.isArray(record.groupMentionTokens)) {
+      throw configError('weixin-ilink groupMentionTokens must be an array');
+    }
+    for (const token of record.groupMentionTokens) {
+      if (typeof token !== 'string' || !token.trim() || token.length > 128) {
+        throw configError(
+          'weixin-ilink groupMentionTokens entries must be non-empty strings',
+        );
+      }
+    }
+  }
   return Object.freeze({
     allowedUserIds: Object.freeze(
       (allowedUserIds as readonly string[]).map((id) => id.trim()),
@@ -112,6 +155,28 @@ export function validateWeixinIlinkConfig(config: unknown): WeixinIlinkConfig {
       : {}),
     ...(record.mediaMaxBytes !== undefined
       ? { mediaMaxBytes: record.mediaMaxBytes as number }
+      : {}),
+    ...(record.groupEnabled !== undefined
+      ? { groupEnabled: record.groupEnabled as boolean }
+      : {}),
+    ...(record.allowedGroupIds !== undefined
+      ? {
+          allowedGroupIds: Object.freeze(
+            (record.allowedGroupIds as readonly string[]).map((id) => id.trim()),
+          ),
+        }
+      : {}),
+    ...(record.groupRequireMention !== undefined
+      ? { groupRequireMention: record.groupRequireMention as boolean }
+      : {}),
+    ...(record.groupMentionTokens !== undefined
+      ? {
+          groupMentionTokens: Object.freeze(
+            (record.groupMentionTokens as readonly string[]).map((token) =>
+              token.trim(),
+            ),
+          ),
+        }
       : {}),
   }) as WeixinIlinkConfig;
 }
