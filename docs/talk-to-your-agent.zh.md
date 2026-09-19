@@ -72,7 +72,8 @@ steering 目前仅支持文本。Aria 只有在引擎确认后才把消息移出
   token 预算内让引擎自动推进。其他引擎降级为 bridge 循环：同一 prompt
   逐轮重放（`--max` 限轮数）。`/goal pause`、`/goal resume`、
   `/goal clear` 对两种驱动通用。一个会话 loop 与 goal 互斥；`/stop`
-  会停掉 loop、暂停进行中的引擎目标。
+  会停掉 loop、暂停进行中的引擎目标。契约、两种驱动与投递路径见
+  [Objectives](OBJECTIVES.md)。
 - **`/remind at <ISO时间> <任务>`** 创建锚定到当前会话的提醒；`list`、
   `snooze`、`update`、`cancel`、`history` 用于管理。其背后的确定性触发
   平台见[定时动作](scheduled-actions.zh.md)。

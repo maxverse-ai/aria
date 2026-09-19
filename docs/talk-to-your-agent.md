@@ -81,7 +81,8 @@ terminal-reply freshness check live in
   prompt each round (`--max` bounds it). `/goal pause`, `/goal resume`,
   `/goal clear` control whichever driver owns the scope. A scope runs either
   a loop or a goal, never both; `/stop` drops a loop and pauses an active
-  engine goal.
+  engine goal. The contract, both drivers, and the delivery paths are defined
+  in [Objectives](OBJECTIVES.md).
 - **`/remind at <ISO time> <task>`** creates a session-anchored reminder;
   `list`, `snooze`, `update`, `cancel`, `history` manage it. For the
   deterministic trigger platform behind scheduled work, see
