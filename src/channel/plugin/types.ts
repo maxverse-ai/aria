@@ -133,6 +133,12 @@ export interface ChannelHealthSnapshot {
   code?: string;
 }
 
+/** Result of a provider auth operation. Bearer material never crosses this boundary. */
+export interface ChannelAuthReceipt {
+  status: 'authenticated' | 'reauth-required' | 'logged-out';
+  code?: string;
+}
+
 export interface ChannelDrainOptions {
   deadlineAt: number;
 }
@@ -156,6 +162,13 @@ export interface ChannelRuntime {
   health(): Promise<ChannelHealthSnapshot>;
   deliver(intent: ChannelOutboundIntent): Promise<ChannelDeliveryReceipt>;
   drain(options: ChannelDrainOptions): Promise<ChannelDrainResult>;
+  /**
+   * Optional provider auth operations driven by a stored auth intent.
+   * Plugins without an interactive auth flow simply omit them; the runtime
+   * admin reports 'channel-auth-unsupported' instead of guessing.
+   */
+  login?(intent: ChannelAuthIntent): Promise<ChannelAuthReceipt>;
+  logout?(intent: ChannelAuthIntent): Promise<ChannelAuthReceipt>;
   close(): Promise<void>;
 }
 

@@ -8,6 +8,8 @@ import type {
 } from './types';
 import {
   assertCapabilityAllowsInbound,
+  assertChannelAuthIntent,
+  assertChannelAuthReceipt,
   assertCapabilityAllowsOutbound,
   assertChannelDeliveryReceipt,
   assertChannelDrainOptions,
@@ -143,6 +145,26 @@ export class ChannelPluginRegistry {
     let closePromise: Promise<void> | undefined;
     const managed: ChannelRuntime = {
       instance: runtime.instance,
+      ...(runtime.login
+        ? {
+            login: async (intent) => {
+              assertChannelAuthIntent(intent);
+              const receipt = await runtime.login!(intent);
+              assertChannelAuthReceipt(receipt);
+              return receipt;
+            },
+          }
+        : {}),
+      ...(runtime.logout
+        ? {
+            logout: async (intent) => {
+              assertChannelAuthIntent(intent);
+              const receipt = await runtime.logout!(intent);
+              assertChannelAuthReceipt(receipt);
+              return receipt;
+            },
+          }
+        : {}),
       snapshot: () => {
         const snapshot = runtime.snapshot();
         assertChannelRuntimeSnapshot(snapshot, instance);

@@ -408,6 +408,15 @@ export type {
   ProfileExternalChannelRuntimeSnapshot,
   StartProfileExternalChannelRuntimeOptions,
 } from './runtime/external-channel-runtime';
+export { ChannelRuntimeAdmin } from './runtime/channel-runtime-admin';
+export type {
+  ChannelAdminOperation,
+  ChannelReconcileInput,
+  ChannelReconcileOutcome,
+  ChannelReconcileReport,
+  ChannelRuntimeAdminOptions,
+  ChannelRuntimeAdminSnapshot,
+} from './runtime/channel-runtime-admin';
 export {
   CHANNEL_MANAGER_SNAPSHOT_VERSION,
   ChannelManager,

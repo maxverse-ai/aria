@@ -137,6 +137,16 @@ export class ExternalChannelPluginLoader {
     );
   }
 
+  /** Deployment trust for one plugin id, independent of desired state. */
+  trustFor(pluginId: string): TrustedExternalChannelPlugin | undefined {
+    return this.trustByPluginId.get(pluginId);
+  }
+
+  /** Whether a package is already loaded through this loader. */
+  isLoaded(packageName: string): boolean {
+    return this.loadedByPackage.has(packageName);
+  }
+
   /**
    * Resolve, verify, import, validate and register one batch atomically.
    * Matching stored instances are config-validated before registry mutation.

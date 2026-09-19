@@ -65,7 +65,8 @@ that separate plan.
 | 10A | Complete | Explicit Supervisor composition, transactional external runtime ownership, reconnect preservation, shutdown ordering, and a bounded read snapshot |
 | 10B | Complete | Canonical channel read model (`aria.channel.status.v1`) with redacted instance/plugin projections and diagnostics |
 | 10C | Complete | Named desired-state commands: package pin, instance configure/enable/disable, and provider-neutral login/logout intent |
-| 10D–10F | Not complete | Runtime reconciliation, adapters, and downstream opt-in evidence |
+| 10D | Complete | Channel-grained runtime reconciliation behind `ChannelRuntimeAdmin` |
+| 10E–10F | Not complete | CLI/Web adapters and downstream opt-in evidence |
 | 11 | Not started | Disabled-by-default `weixin-ilink` text MVP |
 | 12 | Not started | Media, group, proactive-send, and multi-account capabilities |
 
@@ -96,6 +97,25 @@ redacted (config payload hashes collapse to `configVersion`/`secretRefCount`),
 the protected `lark-primary` binding and schema v2 profiles reject cleanly,
 and `auth` is normalized through schema v3 with exact rollback coverage.
 Focused coverage: `tests/unit/application/channel-commands.test.ts`.
+
+Stage 10D shipped channel-grained runtime reconciliation:
+`src/runtime/channel-runtime-admin.ts` converges the external channel
+runtime toward committed desired state — trusted+declared packages load,
+enabled instances start, disabled or removed instances drain and stop,
+drifted instances restart, and unused packages unload. `ChannelManager`
+gained transactional per-instance `addInstance`/`removeInstance`/
+`replaceInstance`; a failed start removes its half-registered plan and a
+failed replacement restarts the previous plan, so rollback restores the
+previously runnable owner. Stops and restarts fail fast with
+`channel-activity-in-flight` while work is in flight; `reconnectInstance`
+preserves the live runtime when desired state is unchanged and fails with
+`channel-desired-drift` before any disconnect. Stored `auth` intents are
+consumed once per intent value through optional provider `login`/`logout`
+hooks (added to `ChannelRuntime`, validated by `assertChannelAuthReceipt`,
+and forwarded through the registry's managed runtime wrapper); plugins
+without auth support report `channel-auth-unsupported`. The admin never
+writes desired state, installs packages, or resolves secrets. Focused
+coverage: `tests/unit/runtime/channel-runtime-admin.test.ts`.
 
 ## Remaining Stage 10: unified operations
 
@@ -279,10 +299,10 @@ installation, and enabling a new account require separate explicit authority.
 
 ## Recommended next task
 
-Start with Stage 10D only. Implement idempotent channel-grained start, stop,
-restart, reconnect, and login/logout reconciliation behind Runtime Admin,
-consuming the Stage 10C desired-state commands and `auth` intent. Do not
-combine it with CLI/Web adapters or `weixin-ilink` implementation.
+Start with Stage 10E only. Add thin CLI and Web adapters over the Stage 10B
+read model, the Stage 10C management commands, and the Stage 10D
+`ChannelRuntimeAdmin` contract. Do not create adapter-specific writers or
+lifecycle owners, and do not combine it with the `weixin-ilink` provider.
 
 ## Handoff checklist
 

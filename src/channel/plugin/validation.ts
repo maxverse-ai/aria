@@ -2,6 +2,8 @@ import { isSecretRef } from '../../config/schema';
 import { ChannelPluginError } from './errors';
 import {
   CHANNEL_PLUGIN_ABI_VERSION,
+  type ChannelAuthIntent,
+  type ChannelAuthReceipt,
   type ChannelCapabilities,
   type ChannelContent,
   type ChannelDeliveryReceipt,
@@ -152,11 +154,33 @@ export function assertResolvedChannelInstance(
   }
 
   if (instance.auth !== undefined) {
-    const auth = requireRecord(instance.auth, 'channel instance auth');
-    if (auth.intent !== 'login' && auth.intent !== 'logout') {
-      invalidContract('channel instance auth.intent must be login or logout');
-    }
-    requireNonEmptyString(auth.requestedAt, 'channel instance auth.requestedAt', 128);
+    assertChannelAuthIntent(instance.auth);
+  }
+}
+
+export function assertChannelAuthIntent(
+  value: unknown,
+): asserts value is ChannelAuthIntent {
+  const auth = requireRecord(value, 'channel auth intent');
+  if (auth.intent !== 'login' && auth.intent !== 'logout') {
+    invalidContract('channel auth.intent must be login or logout');
+  }
+  requireNonEmptyString(auth.requestedAt, 'channel auth.requestedAt', 128);
+}
+
+export function assertChannelAuthReceipt(
+  value: unknown,
+): asserts value is ChannelAuthReceipt {
+  const receipt = requireRecord(value, 'channel auth receipt');
+  if (
+    receipt.status !== 'authenticated' &&
+    receipt.status !== 'reauth-required' &&
+    receipt.status !== 'logged-out'
+  ) {
+    invalidContract(`invalid channel auth receipt status: ${String(receipt.status)}`);
+  }
+  if (receipt.code !== undefined) {
+    requireNonEmptyString(receipt.code, 'channel auth receipt code', 128);
   }
 }
 

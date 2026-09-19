@@ -3,6 +3,7 @@ import { ChannelPluginRegistry } from './plugin/registry';
 import type {
   ChannelConfig,
   ChannelDrainOptions,
+  ChannelDrainResult,
   ChannelIngressPort,
   ChannelInstanceRef,
   ChannelDeliveryReceipt,
@@ -164,6 +165,128 @@ export class ChannelManager {
       });
     }
     return entry.runtime.deliver(intent);
+  }
+
+  /**
+   * Start one additional instance against the ready manager. The registry
+   * start is transactional: a failed start leaves the plan unregistered.
+   */
+  async addInstance(
+    plan: ChannelManagerStartPlan,
+  ): Promise<ManagedChannelInstanceSnapshot> {
+    this.assertReady();
+    const entry = this.newEntry(plan);
+    if (this.entries.some((existing) => channelRuntimeKey(existing) === channelRuntimeKey(entry))) {
+      throw managerError('duplicate channel instance in manager start plan', {
+        kind: 'configuration',
+        code: 'duplicate-channel-instance',
+      });
+    }
+    entry.order = this.entries.length;
+    this.entries.push(entry);
+    try {
+      entry.runtime = await this.startEntryRuntime(entry);
+      const runtimeSnapshot = entry.runtime.snapshot();
+      this.updateEntry(entry, 'ready', {
+        acceptingInbound: true,
+        inFlightInbound: runtimeSnapshot.inFlightInbound,
+        inFlightOutbound: runtimeSnapshot.inFlightOutbound,
+      });
+      return this.snapshotEntry(entry);
+    } catch (error) {
+      this.entries = this.entries.filter((candidate) => candidate !== entry);
+      this.touch();
+      throw error;
+    }
+  }
+
+  /**
+   * Drain and close one instance in place. The entry is removed only after
+   * its runtime closed; a drain timeout or close failure keeps it listed so
+   * the operation stays retryable.
+   */
+  async removeInstance(
+    ref: ChannelInstanceRef,
+    options: ChannelDrainOptions,
+  ): Promise<ChannelDrainResult> {
+    assertChannelDrainOptions(options);
+    const entry = this.entries.find(
+      (candidate) => channelRuntimeKey(candidate) === channelRuntimeKey(ref),
+    );
+    if (!entry || !entry.runtime) {
+      if (entry) {
+        this.entries = this.entries.filter((candidate) => candidate !== entry);
+        this.touch();
+      }
+      return { drained: true, remainingInbound: 0, remainingOutbound: 0 };
+    }
+    this.updateEntry(entry, 'draining', { acceptingInbound: false });
+    const result = await entry.runtime.drain(options);
+    if (!result.drained) {
+      entry.inFlightInbound = result.remainingInbound;
+      entry.inFlightOutbound = result.remainingOutbound;
+      entry.updatedAt = this.touch();
+      throw managerError('channel runtime did not drain before its deadline', {
+        kind: 'transient',
+        code: 'channel-drain-incomplete',
+      });
+    }
+    await entry.runtime.close();
+    this.entries = this.entries.filter((candidate) => candidate !== entry);
+    this.touch();
+    return result;
+  }
+
+  /**
+   * Replace one running instance: the old owner is drained and closed before
+   * the replacement starts (instance keys are unique in the registry). If the
+   * replacement fails to start, the previous plan is restarted so rollback
+   * restores the previously runnable owner without state conversion.
+   */
+  async replaceInstance(
+    plan: ChannelManagerStartPlan,
+    options: ChannelDrainOptions,
+  ): Promise<ManagedChannelInstanceSnapshot> {
+    this.assertReady();
+    const replacement = this.newEntry(plan);
+    const key = channelRuntimeKey(replacement);
+    const existing = this.entries.find((candidate) => channelRuntimeKey(candidate) === key);
+    if (!existing) {
+      return this.addInstance(plan);
+    }
+    const previousPlan = existing.plan;
+    const order = existing.order;
+    await this.removeInstance(existing, options);
+    try {
+      replacement.order = order;
+      replacement.runtime = await this.startEntryRuntime(replacement);
+      this.entries.push(replacement);
+      this.entries.sort((a, b) => a.order - b.order);
+      const runtimeSnapshot = replacement.runtime.snapshot();
+      this.updateEntry(replacement, 'ready', {
+        acceptingInbound: true,
+        inFlightInbound: runtimeSnapshot.inFlightInbound,
+        inFlightOutbound: runtimeSnapshot.inFlightOutbound,
+      });
+      return this.snapshotEntry(replacement);
+    } catch (error) {
+      await this.addInstance(previousPlan).catch(() => undefined);
+      throw error;
+    }
+  }
+
+  /** Resolved desired record captured when the instance was started. */
+  instanceFor(ref: ChannelInstanceRef): ResolvedChannelInstance | undefined {
+    return this.entries.find(
+      (candidate) => channelRuntimeKey(candidate) === channelRuntimeKey(ref),
+    )?.plan.instance;
+  }
+
+  /** Live runtime for one instance; internal only — never leaks to snapshots. */
+  runtimeFor(ref: ChannelInstanceRef): ChannelRuntime | undefined {
+    return this.entries.find(
+      (candidate) => channelRuntimeKey(candidate) === channelRuntimeKey(ref),
+    )?.runtime;
   }
 
   drain(options: ChannelDrainOptions): Promise<ChannelManagerDrainResult> {
@@ -391,6 +514,45 @@ export class ChannelManager {
       updatedAt: entry.updatedAt,
       ...(entry.errorCode ? { errorCode: entry.errorCode } : {}),
     };
+  }
+
+  private assertReady(): void {
+    if (this.state !== 'ready') {
+      throw managerError('channel manager cannot mutate instances outside ready state', {
+        kind: 'configuration',
+        code: 'invalid-channel-manager-state',
+      });
+    }
+  }
+
+  private newEntry(plan: ChannelManagerStartPlan): ManagedEntry {
+    const entry = validatePlans(this.profileId, [plan], this.now()).at(0);
+    if (!entry) {
+      throw managerError('channel manager start plan produced no entry', {
+        kind: 'configuration',
+        code: 'invalid-channel-start-plan',
+      });
+    }
+    return entry;
+  }
+
+  /** Registry start + readiness check shared by add/replace and initial start. */
+  private async startEntryRuntime(entry: ManagedEntry): Promise<ChannelRuntime> {
+    this.updateEntry(entry, 'starting');
+    const runtime = await this.registry.start(entry.pluginId, {
+      instance: entry.plan.instance,
+      ingress: entry.plan.ingress,
+      signal: this.controller.signal,
+    });
+    const runtimeSnapshot = runtime.snapshot();
+    if (runtimeSnapshot.state !== 'ready' || !runtimeSnapshot.acceptingInbound) {
+      await runtime.close().catch(() => undefined);
+      throw managerError('channel runtime did not become ready during start', {
+        kind: 'permanent',
+        code: 'channel-runtime-not-ready',
+      });
+    }
+    return runtime;
   }
 
   private transition(state: ChannelManagerState): void {
