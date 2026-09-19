@@ -150,7 +150,7 @@ describe('weixin-ilink media capability (Stage 12A)', () => {
     expect(weixinIlinkManifest.capabilities.outbound).toContain('image');
     expect(weixinIlinkManifest.capabilities.outbound).toContain('file');
     expect(weixinIlinkManifest.capabilities.conversations).toEqual(['p2p', 'group']);
-    expect(weixinIlinkManifest.capabilities.proactiveMessages).toBe(false);
+    expect(weixinIlinkManifest.capabilities.proactiveMessages).toBe(true);
 
     expect(() => ilinkConfig()).not.toThrow();
     for (const bad of [

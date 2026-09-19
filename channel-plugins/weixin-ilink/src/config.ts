@@ -33,6 +33,20 @@ export type WeixinIlinkConfig = ChannelConfig & {
   groupRequireMention?: boolean;
   /** Text tokens that count as a mention of this account inside a group. */
   groupMentionTokens?: readonly string[];
+  /**
+   * Stage 12C proactive-send gate; absent or false rejects every outbound
+   * intent that carries no replyContext. iLink sendmessage still requires
+   * a context_token, so even an enabled instance can only send proactively
+   * to a scope that already produced inbound traffic.
+   */
+  proactiveEnabled?: boolean;
+  /**
+   * Fail-closed scope authorization for proactive sends; empty means no
+   * scope is authorized even when proactiveEnabled is true. Scope ids are
+   * the envelope scopeId values (`session_id`/sender for p2p,
+   * `group:<id>` for admitted groups).
+   */
+  proactiveAllowedScopeIds?: readonly string[];
 };
 
 export const DEFAULT_POLL_TIMEOUT_MS = 35_000;
@@ -137,6 +151,21 @@ export function validateWeixinIlinkConfig(config: unknown): WeixinIlinkConfig {
       }
     }
   }
+  if (record.proactiveEnabled !== undefined && typeof record.proactiveEnabled !== 'boolean') {
+    throw configError('weixin-ilink proactiveEnabled must be a boolean');
+  }
+  if (record.proactiveAllowedScopeIds !== undefined) {
+    if (!Array.isArray(record.proactiveAllowedScopeIds)) {
+      throw configError('weixin-ilink proactiveAllowedScopeIds must be an array');
+    }
+    for (const id of record.proactiveAllowedScopeIds) {
+      if (typeof id !== 'string' || !id.trim() || id.length > 512) {
+        throw configError(
+          'weixin-ilink proactiveAllowedScopeIds entries must be non-empty strings',
+        );
+      }
+    }
+  }
   return Object.freeze({
     allowedUserIds: Object.freeze(
       (allowedUserIds as readonly string[]).map((id) => id.trim()),
@@ -174,6 +203,18 @@ export function validateWeixinIlinkConfig(config: unknown): WeixinIlinkConfig {
           groupMentionTokens: Object.freeze(
             (record.groupMentionTokens as readonly string[]).map((token) =>
               token.trim(),
+            ),
+          ),
+        }
+      : {}),
+    ...(record.proactiveEnabled !== undefined
+      ? { proactiveEnabled: record.proactiveEnabled as boolean }
+      : {}),
+    ...(record.proactiveAllowedScopeIds !== undefined
+      ? {
+          proactiveAllowedScopeIds: Object.freeze(
+            (record.proactiveAllowedScopeIds as readonly string[]).map((id) =>
+              id.trim(),
             ),
           ),
         }

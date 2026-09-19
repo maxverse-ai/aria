@@ -11,8 +11,10 @@ export const WEIXIN_ILINK_PLUGIN_ID = 'weixin-ilink';
  * Capability declaration: long-poll ingress, p2p/group text plus the
  * Stage 12A image/file CDN pipeline. Media stays off per instance until
  * config `mediaEnabled` opts in and group traffic stays off until
- * `groupEnabled` + `allowedGroupIds` admit it; proactive and multi-account
- * capabilities are declared individually in later Stage 12 increments.
+ * `groupEnabled` + `allowedGroupIds` admit it. Proactive sends are
+ * declared because iLink can reuse a captured context_token, but every
+ * send is still gated by `proactiveEnabled` + `proactiveAllowedScopeIds`
+ * and a captured token — there is no addressable-send endpoint.
  */
 export const weixinIlinkManifest: ChannelPluginManifest = {
   abiVersion: CHANNEL_PLUGIN_ABI_VERSION,
@@ -51,6 +53,12 @@ export const weixinIlinkManifest: ChannelPluginManifest = {
         items: { type: 'string', minLength: 1 },
         maxItems: 64,
       },
+      proactiveEnabled: { type: 'boolean' },
+      proactiveAllowedScopeIds: {
+        type: 'array',
+        items: { type: 'string', minLength: 1 },
+        maxItems: 1024,
+      },
     },
     additionalProperties: false,
   },
@@ -60,7 +68,7 @@ export const weixinIlinkManifest: ChannelPluginManifest = {
     outbound: ['text', 'image', 'file'],
     streaming: 'none',
     conversations: ['p2p', 'group'],
-    proactiveMessages: false,
+    proactiveMessages: true,
     humanHandoff: false,
   },
 };

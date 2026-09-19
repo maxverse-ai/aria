@@ -44,6 +44,12 @@ export {
   InMemoryDeliveryLedger,
   type IlinkDeliveryLedger,
 } from './delivery-ledger';
+export {
+  FileIlinkScopeTargetStore,
+  InMemoryScopeTargetStore,
+  type IlinkScopeTarget,
+  type IlinkScopeTargetStore,
+} from './scope-target-store';
 export { FakeIlinkTransport } from './fake-transport';
 export {
   decryptIlinkMedia,

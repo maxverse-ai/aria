@@ -130,6 +130,15 @@ mention field either — mention detection is a text-token match (Stage
 Response is `{ ret, errmsg }`. Aria requires a checkpoint before delivery
 and a deterministic receipt derived from `deliveryId`.
 
+There is no addressable-send endpoint: `context_token` is required for
+every send, so a proactive message can only reuse the token captured from
+a scope's inbound traffic. Aria treats that as the demonstrated contract —
+a proactive send reuses the most recent durably accepted inbound
+`context_token` for the scope, gated by `proactiveEnabled` +
+`proactiveAllowedScopeIds` (Stage 12C); a scope that never produced
+inbound traffic is unreachable and fails permanently rather than
+fabricating a token.
+
 ## Media pipeline (Stage 12A implemented)
 
 All media moves through the CDN (`novac2c.cdn.weixin.qq.com/c2c`) under

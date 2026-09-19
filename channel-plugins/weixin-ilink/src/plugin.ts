@@ -34,6 +34,11 @@ import {
   type IlinkDeliveryLedger,
 } from './delivery-ledger';
 import {
+  FileIlinkScopeTargetStore,
+  InMemoryScopeTargetStore,
+  type IlinkScopeTargetStore,
+} from './scope-target-store';
+import {
   createHttpIlinkLoginService,
   type IlinkLoginService,
 } from './login';
@@ -69,6 +74,10 @@ export interface WeixinIlinkPluginOptions {
   deliveryLedger?: (
     instance: ResolvedChannelInstance<WeixinIlinkConfig>,
   ) => IlinkDeliveryLedger;
+  /** Proactive-target boundary; defaults to a file store under stateDir. */
+  scopeTargetStore?: (
+    instance: ResolvedChannelInstance<WeixinIlinkConfig>,
+  ) => IlinkScopeTargetStore;
   /** Operator surface for the QR content produced by a login attempt. */
   onLoginQr?: (qrContent: string) => void;
   loginTimeoutMs?: number;
@@ -188,6 +197,11 @@ export function createWeixinIlinkPlugin(
         (stateDir
           ? new FileIlinkAssetStore(join(stateDir, 'assets'))
           : new InMemoryAssetStore());
+      const scopeTargetStore =
+        options.scopeTargetStore?.(context.instance) ??
+        (stateDir
+          ? new FileIlinkScopeTargetStore(join(stateDir, 'scope-targets.json'))
+          : new InMemoryScopeTargetStore());
       const runtime = new WeixinIlinkRuntime(context, {
         ...(transport ? { transport } : {}),
         transportFor: (credential) => transportFor(credential, context.instance),
@@ -195,6 +209,7 @@ export function createWeixinIlinkPlugin(
         credentialStore,
         ...(deliveryLedger ? { deliveryLedger } : {}),
         assetStore,
+        scopeTargetStore,
         loginService,
         ...(options.onLoginQr ? { onLoginQr: options.onLoginQr } : {}),
         ...(options.loginTimeoutMs !== undefined

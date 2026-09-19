@@ -31,6 +31,10 @@ import {
   type IlinkDeliveryLedger,
 } from './delivery-ledger';
 import {
+  InMemoryScopeTargetStore,
+  type IlinkScopeTargetStore,
+} from './scope-target-store';
+import {
   DEFAULT_LOGIN_POLL_MS,
   DEFAULT_LOGIN_TIMEOUT_MS,
   type IlinkLoginService,
@@ -66,6 +70,12 @@ export interface WeixinIlinkRuntimeDeps {
    * no store is composed.
    */
   assetStore?: IlinkAssetStore;
+  /**
+   * Stage 12C proactive-target boundary. Captured context tokens per
+   * scope; file-backed under stateDir so an authorized proactive send
+   * survives a restart. Defaults to volatile memory.
+   */
+  scopeTargetStore?: IlinkScopeTargetStore;
   loginService?: IlinkLoginService;
   onLoginQr?: (qrContent: string) => void;
   loginTimeoutMs?: number;
@@ -138,6 +148,7 @@ export class WeixinIlinkRuntime implements ChannelRuntime {
   private readonly credentialStore: IlinkCredentialStore | undefined;
   private readonly deliveryLedger: IlinkDeliveryLedger;
   private readonly assetStore: IlinkAssetStore | undefined;
+  private readonly scopeTargetStore: IlinkScopeTargetStore;
   private readonly loginService: IlinkLoginService | undefined;
   private readonly onLoginQr: ((qrContent: string) => void) | undefined;
   private readonly loginTimeoutMs: number;
@@ -160,6 +171,7 @@ export class WeixinIlinkRuntime implements ChannelRuntime {
     this.credentialStore = deps.credentialStore;
     this.deliveryLedger = deps.deliveryLedger ?? new InMemoryDeliveryLedger();
     this.assetStore = deps.assetStore;
+    this.scopeTargetStore = deps.scopeTargetStore ?? new InMemoryScopeTargetStore();
     this.loginService = deps.loginService;
     this.onLoginQr = deps.onLoginQr;
     this.loginTimeoutMs = deps.loginTimeoutMs ?? DEFAULT_LOGIN_TIMEOUT_MS;
@@ -268,7 +280,10 @@ export class WeixinIlinkRuntime implements ChannelRuntime {
         code: 'weixin-ilink-auth',
       });
     }
-    const reply = this.replyContext(intent.replyContext);
+    const reply =
+      intent.replyContext !== undefined
+        ? this.replyContext(intent.replyContext)
+        : await this.proactiveTarget(intent);
     // iLink has no provider idempotency key: the checkpointed deliveryId is
     // deduped against the package ledger so a coordinator retry after a
     // crash does not double-send.
@@ -611,6 +626,22 @@ export class WeixinIlinkRuntime implements ChannelRuntime {
       const acceptance = await this.context.ingress.accept(envelope);
       this.acceptedIds.add(sourceMessageId);
       this.mediaAttempts.delete(sourceMessageId);
+      // Capture the demonstrated reply target only after durable
+      // acceptance: proactive sends (12C) reuse this scope's context_token.
+      if (message.context_token) {
+        try {
+          await this.scopeTargetStore.write(envelope.scopeId, {
+            userId: from,
+            contextToken: message.context_token,
+            updatedAt: this.now(),
+          });
+        } catch {
+          // A target-store write failure must not lose the accepted
+          // message; it only narrows proactive reachability.
+          this.lastError = 'weixin-ilink-scope-target';
+          this.touch();
+        }
+      }
       if (acceptance.status === 'accepted' && !command) {
         this.sendTypingBestEffort(from, message.context_token, 1);
       }
@@ -946,6 +977,43 @@ export class WeixinIlinkRuntime implements ChannelRuntime {
       });
     }
     return { contextToken, userId };
+  }
+
+  /**
+   * Stage 12C proactive routing. iLink has no addressable-send endpoint —
+   * `sendmessage` still needs a `context_token`, so a proactive intent can
+   * only reuse the token captured from the scope's most recent durably
+   * accepted inbound message. Three fail-closed gates apply in order:
+   * the capability must be enabled, the scope must be explicitly
+   * authorized, and a captured token must exist.
+   */
+  private async proactiveTarget(
+    intent: ChannelOutboundIntent,
+  ): Promise<IlinkReplyContext> {
+    if (this.config.proactiveEnabled !== true) {
+      throw new ChannelPluginError('weixin-ilink proactive sends are not enabled', {
+        kind: 'unsupported-capability',
+        code: 'weixin-ilink-proactive-disabled',
+      });
+    }
+    const allowed = this.config.proactiveAllowedScopeIds ?? [];
+    if (!allowed.includes(intent.scopeId)) {
+      throw new ChannelPluginError('weixin-ilink proactive scope is not authorized', {
+        kind: 'configuration',
+        code: 'weixin-ilink-proactive-scope',
+      });
+    }
+    const target = await this.scopeTargetStore.read(intent.scopeId);
+    if (!target || !target.contextToken || !target.userId) {
+      throw new ChannelPluginError(
+        'weixin-ilink proactive send has no captured context token for the scope',
+        {
+          kind: 'permanent',
+          code: 'weixin-ilink-proactive-no-context',
+        },
+      );
+    }
+    return { contextToken: target.contextToken, userId: target.userId };
   }
 
   private sleep(ms: number, signal?: AbortSignal): Promise<void> {

@@ -69,7 +69,7 @@ that separate plan.
 | 10E | Complete | Thin `aria channel` CLI and `/api/channels` console adapters over read/command/admin contracts |
 | 10F | Complete | No-network fixture evidence across pin/trust/configure/login/activate/status/restart/drain/unload/rollback with fail-closed coverage |
 | 11 | Complete | Disabled-by-default `weixin-ilink` text MVP |
-| 12 | Not started | Media, group, proactive-send, and multi-account capabilities |
+| 12 | In progress | Media, group, proactive-send, and multi-account capabilities |
 
 The ordinary CLI supplies no external composition input. No real external
 provider package is installed or enabled by the completed Stage 10A work.
@@ -422,6 +422,33 @@ routing is emulated. Group drops count separately on
 Focused coverage: `tests/unit/channel/weixin-ilink-group.test.ts`
 (admission gates, mention strip, scope isolation, sender allowlist,
 mention-only drop, disabled-by-default).
+
+### 12C. Explicitly authorized proactive sends — complete
+
+The manifest now declares `proactiveMessages`, which unblocks core's
+outbound validation for intents that carry no `sourceMessageId`. iLink
+has no addressable-send endpoint — `sendmessage` still requires a
+`context_token` — so a proactive intent can only reuse the token captured
+from a scope's inbound traffic. Every admitted inbound message writes
+`scopeId → { userId, contextToken }` into the `IlinkScopeTargetStore`
+boundary (volatile memory by default, `FileIlinkScopeTargetStore` under
+`stateDir/<instanceId>/scope-targets.json` when a state directory is
+composed), and it does so only after durable ingress acceptance.
+
+`deliver` keeps the reply path whenever `replyContext` is present; an
+intent without it takes the proactive path through three fail-closed
+gates in order: `proactiveEnabled !== true` fails
+`unsupported-capability` (`weixin-ilink-proactive-disabled`), a scope
+outside `proactiveAllowedScopeIds` fails `configuration`
+(`weixin-ilink-proactive-scope`), and a missing captured token fails
+`permanent` (`weixin-ilink-proactive-no-context`) — no token is ever
+fabricated. Group scopes are reachable the same way (`group:<id>`
+captures the last admitted group message's token). Proactive deliveries
+flow through the same delivery ledger dedupe as replies. Focused
+coverage: `tests/unit/channel/weixin-ilink-proactive.test.ts` (capability
+declaration, disabled default, scope authorization, missing-token
+rejection, captured-token sends, reply-path preservation, ledger dedupe,
+group scope reachability, file-store restart persistence).
 
 ## Validation and merge gate
 

@@ -277,6 +277,7 @@ describe('weixin-ilink package skeleton (Stage 11B)', () => {
           sourceMessageId: 'ilink:1001',
           scopeId: 'session-1',
           content: { kind: 'text', text: 'hi' },
+          replyContext: {},
         }),
       ).rejects.toMatchObject({ code: 'weixin-ilink-reply-context' });
     } finally {
