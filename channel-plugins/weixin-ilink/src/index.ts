@@ -10,16 +10,38 @@ export {
   type WeixinIlinkConfig,
 } from './config';
 export {
+  FileIlinkCredentialStore,
+  InMemoryCredentialStore,
+  type IlinkCredential,
+  type IlinkCredentialStore,
+} from './credentials';
+export {
   InMemoryCursorStore,
   type IlinkCursorStore,
 } from './cursor-store';
 export { FakeIlinkTransport } from './fake-transport';
 export {
+  createHttpIlinkLoginService,
+  DEFAULT_LOGIN_POLL_MS,
+  DEFAULT_LOGIN_TIMEOUT_MS,
+  ILINK_BOT_TYPE,
+  ILINK_LOGIN_SERVICE_URL,
+  type HttpIlinkLoginServiceOptions,
+  type IlinkLoginService,
+  type IlinkQrSession,
+  type IlinkQrStatus,
+  type IlinkQrStatusName,
+} from './login';
+export {
   channelPluginPackage,
   createWeixinIlinkPlugin,
   type WeixinIlinkPluginOptions,
 } from './plugin';
-export { WeixinIlinkRuntime, type WeixinIlinkRuntimeDeps } from './runtime';
+export {
+  WeixinIlinkRuntime,
+  type WeixinIlinkLoginState,
+  type WeixinIlinkRuntimeDeps,
+} from './runtime';
 export {
   createHttpIlinkTransport,
   isIlinkAuthError,

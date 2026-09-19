@@ -470,6 +470,8 @@ export {
 } from './channel/plugin/validation';
 export type {
   ChannelAssetContent,
+  ChannelAuthIntent,
+  ChannelAuthReceipt,
   ChannelCapabilities,
   ChannelConfig,
   ChannelContent,

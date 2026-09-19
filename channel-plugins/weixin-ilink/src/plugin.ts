@@ -12,16 +12,40 @@ import {
   validateWeixinIlinkConfig,
   type WeixinIlinkConfig,
 } from './config';
+import {
+  InMemoryCredentialStore,
+  type IlinkCredential,
+  type IlinkCredentialStore,
+} from './credentials';
 import { InMemoryCursorStore, type IlinkCursorStore } from './cursor-store';
+import {
+  createHttpIlinkLoginService,
+  type IlinkLoginService,
+} from './login';
 import { weixinIlinkManifest } from './manifest';
 import { WeixinIlinkRuntime } from './runtime';
 import { createHttpIlinkTransport, type IlinkTransport } from './transport';
 
 export interface WeixinIlinkPluginOptions {
-  /** Transport seam — required for any real account; tests inject a fake. */
+  /** Transport seam for an already-authenticated instance (tests inject a fake). */
   transport?: (instance: ResolvedChannelInstance<WeixinIlinkConfig>) => IlinkTransport;
+  /** Builds a transport from a login-produced credential. */
+  transportFor?: (
+    credential: IlinkCredential,
+    instance: ResolvedChannelInstance<WeixinIlinkConfig>,
+  ) => IlinkTransport;
+  /** Durable credential boundary; defaults to a volatile in-memory store. */
+  credentialStore?: (
+    instance: ResolvedChannelInstance<WeixinIlinkConfig>,
+  ) => IlinkCredentialStore;
+  /** QR login service seam; defaults to the HTTP login service. */
+  loginService?: (instance: ResolvedChannelInstance<WeixinIlinkConfig>) => IlinkLoginService;
   /** Durable cursor boundary; defaults to a volatile in-memory store. */
   cursorStore?: (instance: ResolvedChannelInstance<WeixinIlinkConfig>) => IlinkCursorStore;
+  /** Operator surface for the QR content produced by a login attempt. */
+  onLoginQr?: (qrContent: string) => void;
+  loginTimeoutMs?: number;
+  loginPollMs?: number;
   now?: () => number;
   backoffMs?: number;
 }
@@ -34,9 +58,9 @@ function authError(message: string): ChannelPluginError {
 }
 
 /**
- * Minimal secret-ref resolution for the bot bearer: env and file sources
- * only; exec providers are deferred to Stage 11C login work. The resolved
- * value never leaves the transport boundary.
+ * Minimal secret-ref resolution for a pre-provisioned bearer: env and file
+ * sources only; exec providers stay deferred. The resolved value never
+ * leaves the transport boundary.
  */
 async function resolveBotToken(secretRef: SecretRef | undefined): Promise<string> {
   if (!secretRef) {
@@ -65,15 +89,14 @@ export function createWeixinIlinkPlugin(
     manifest: weixinIlinkManifest,
     validateConfig: validateWeixinIlinkConfig,
     async start(context: ChannelPluginContext<WeixinIlinkConfig>): Promise<ChannelRuntime> {
-      const transport =
-        options.transport?.(context.instance) ??
+      const credentialStore =
+        options.credentialStore?.(context.instance) ?? new InMemoryCredentialStore();
+      const stored = await credentialStore.read();
+
+      const httpTransportFor = (credential: IlinkCredential): IlinkTransport =>
         createHttpIlinkTransport({
-          baseurl:
-            context.instance.config.baseurl ??
-            (() => {
-              throw authError('weixin-ilink requires config.baseurl or an injected transport');
-            })(),
-          botToken: await resolveBotToken(context.instance.secretRefs.botToken),
+          baseurl: credential.baseurl,
+          botToken: credential.botToken,
           ...(context.instance.config.appId !== undefined
             ? { appId: context.instance.config.appId }
             : {}),
@@ -85,11 +108,51 @@ export function createWeixinIlinkPlugin(
             : {}),
           ...(options.now ? { now: options.now } : {}),
         });
+      const transportFor = options.transportFor ?? httpTransportFor;
+
+      let transport = options.transport?.(context.instance);
+      if (!transport) {
+        // Precedence: stored credential, then pre-provisioned bearer via
+        // secretRefs + config.baseurl, then unauthenticated start.
+        const credential =
+          stored ??
+          (context.instance.config.baseurl && context.instance.secretRefs.botToken
+            ? {
+                botToken: await resolveBotToken(context.instance.secretRefs.botToken),
+                ilinkBotId: '',
+                baseurl: context.instance.config.baseurl,
+              }
+            : undefined);
+        if (credential) transport = transportFor(credential, context.instance);
+      }
+
+      const loginService =
+        options.loginService?.(context.instance) ??
+        createHttpIlinkLoginService({
+          ...(context.instance.config.appId !== undefined
+            ? { appId: context.instance.config.appId }
+            : {}),
+          ...(context.instance.config.clientVersion !== undefined
+            ? { clientVersion: context.instance.config.clientVersion }
+            : {}),
+          ...(context.instance.config.routeTag !== undefined
+            ? { routeTag: context.instance.config.routeTag }
+            : {}),
+        });
+
       const cursorStore =
         options.cursorStore?.(context.instance) ?? new InMemoryCursorStore();
       const runtime = new WeixinIlinkRuntime(context, {
-        transport,
+        ...(transport ? { transport } : {}),
+        transportFor: (credential) => transportFor(credential, context.instance),
         cursorStore,
+        credentialStore,
+        loginService,
+        ...(options.onLoginQr ? { onLoginQr: options.onLoginQr } : {}),
+        ...(options.loginTimeoutMs !== undefined
+          ? { loginTimeoutMs: options.loginTimeoutMs }
+          : {}),
+        ...(options.loginPollMs !== undefined ? { loginPollMs: options.loginPollMs } : {}),
         ...(options.now ? { now: options.now } : {}),
         ...(options.backoffMs !== undefined ? { backoffMs: options.backoffMs } : {}),
       });

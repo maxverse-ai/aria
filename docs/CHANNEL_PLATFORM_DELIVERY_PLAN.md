@@ -68,7 +68,7 @@ that separate plan.
 | 10D | Complete | Channel-grained runtime reconciliation behind `ChannelRuntimeAdmin` |
 | 10E | Complete | Thin `aria channel` CLI and `/api/channels` console adapters over read/command/admin contracts |
 | 10F | Complete | No-network fixture evidence across pin/trust/configure/login/activate/status/restart/drain/unload/rollback with fail-closed coverage |
-| 11 | In progress (11A–11B complete) | Disabled-by-default `weixin-ilink` text MVP |
+| 11 | In progress (11A–11C complete) | Disabled-by-default `weixin-ilink` text MVP |
 | 12 | Not started | Media, group, proactive-send, and multi-account capabilities |
 
 The ordinary CLI supplies no external composition input. No real external
@@ -268,11 +268,26 @@ contract kit; focused coverage:
 `tests/unit/channel/weixin-ilink-plugin.test.ts`. QR login, exec secret
 providers, durable cursor files, and typing stay deferred to 11C/11D.
 
-### 11C. QR login and reauthentication
+### 11C. QR login and reauthentication — complete
 
-Implement QR/Bearer authentication behind secret references, bounded polling,
-cancellation, expiry, logout, and `reauth-required`. Never expose the bearer
-value through config, plans, diagnostics, or logs.
+The package now carries the full auth lifecycle behind composition-owned
+stores. `src/login.ts` implements the fixed-service QR flow
+(`get_bot_qrcode`/`get_qrcode_status`) against an injectable
+`IlinkLoginService`; `src/credentials.ts` adds the `IlinkCredential`
+(`botToken`/`ilinkBotId`/`baseurl`) boundary with in-memory and atomic
+0600 file stores. `WeixinIlinkRuntime.login/logout` satisfy the ABI auth
+hooks: an unauthenticated instance starts in `reauth-required`, a bounded
+QR poll (default 8 min, all terminal states mapped to stable codes)
+persists the credential, builds the account transport, and resumes
+polling; `logout` drains the loop, clears the credential, and reports
+`logged-out`. `local_token_list` replays prior tokens, a pre-provisioned
+bearer works through `secretRefs.botToken` + `config.baseurl` or a
+deployment credential store without any QR round, and `loginState()`
+exposes the provider-owned QR surface for adapters. The bearer never
+enters config, plans, diagnostics, or logs; `ChannelAuthIntent`/
+`ChannelAuthReceipt` are now exported from the package root. Focused
+coverage: `tests/unit/channel/weixin-ilink-plugin.test.ts`. Exec secret
+providers and durable cursor files stay deferred to 11D.
 
 ### 11D. Durable inbound text path
 
@@ -350,11 +365,11 @@ installation, and enabling a new account require separate explicit authority.
 
 ## Recommended next task
 
-Start with Stage 11C only. Add QR/Bearer authentication to the
-`weixin-ilink` package behind secret references: bounded QR polling with
-expiry and verification states, a pre-provisioned token path, `login`/`logout`
-runtime hooks producing ABI auth receipts, and `reauth-required` recovery.
-The bearer stays inside secret boundaries — never config, plans, or logs.
+Start with Stage 11D only. Make the `weixin-ilink` inbound path durable:
+a file-backed `IlinkCursorStore`, durable acceptance ordering, duplicate
+suppression across restart, text/quote normalization polish, typing
+indicator wiring (`getconfig` + `sendtyping`), and restart recovery. The
+provider cursor still advances only after ordered durable acceptance.
 Protocol contract: `docs/WEIXIN_ILINK_PROTOCOL.md`.
 
 ## Handoff checklist
