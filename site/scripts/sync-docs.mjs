@@ -143,6 +143,37 @@ const UNSUPPORTED_FENCE_LANGS = new Set(['caddyfile']);
 let publishedEn = new Set();
 let publishedZh = new Set();
 
+// Header metadata from DOCUMENTATION_POLICY.md: the `> Status:` blockquote
+// (including its continuation lines) and the locale pointer lines
+// (`> 中文版：…`, `> 本文是 … 的中文版`, `> English version: …`). These drive
+// publishing and language switching, so they must not render as page content.
+const STATUS_LINE = /^>\s*Status:/;
+const LOCALE_POINTER = /^>\s*(中文版[:：]|本文是|English version[:：])/;
+const QUOTE_LINE = /^>/;
+
+function stripHeaderMeta(body) {
+  const parts = body.split(/(^```[\s\S]*?^```\s*$)/m);
+  return parts
+    .map((part, i) => {
+      if (i % 2 === 1) return part; // fenced code: untouched
+      const out = [];
+      let inStatusBlock = false;
+      for (const line of part.split('\n')) {
+        if (STATUS_LINE.test(line)) {
+          inStatusBlock = true;
+          continue;
+        }
+        if (inStatusBlock && QUOTE_LINE.test(line)) continue;
+        inStatusBlock = false;
+        if (LOCALE_POINTER.test(line)) continue;
+        out.push(line);
+      }
+      return out.join('\n').replace(/\n{3,}/g, '\n\n');
+    })
+    .join('')
+    .replace(/^\n+/, '');
+}
+
 function rewriteLinks(body, srcAbs, srcLocale, selfSlug, collection, warnings) {
   // Transform only outside fenced code blocks.
   const parts = body.split(/(^```[\s\S]*?^```\s*$)/m);
@@ -220,8 +251,10 @@ function renderFile(srcAbs, srcLocale, selfSlug, collection, warnings) {
   const statusLine = firstMatch(raw, /^>\s*Status:\s*(.+)$/m);
   const role = statusRole(statusLine);
 
-  // Drop the first H1 — DocsTitle renders the frontmatter title instead.
-  const body = raw.replace(/^#\s+.+\n+/, '');
+  // Drop the first H1 — DocsTitle renders the frontmatter title instead —
+  // and the policy header metadata (status, locale pointers), which is
+  // build input, not page content.
+  const body = stripHeaderMeta(raw.replace(/^#\s+.+\n+/, ''));
   const transformed = rewriteLinks(
     body,
     srcAbs,
@@ -231,19 +264,22 @@ function renderFile(srcAbs, srcLocale, selfSlug, collection, warnings) {
     warnings,
   );
 
-  const description = statusLine
-    ? statusLine.length <= 140
-      ? statusLine
-      : statusLine.slice(0, 140).replace(/\s\S*$/, '') + '…'
-    : firstParagraph(transformed);
+  // Prefer the status detail ("current — <detail>") as the page description;
+  // a bare "current" carries no information, so fall back to the lead
+  // paragraph.
+  const statusDetail =
+    statusLine?.split(/\s+[—–-]\s+/).slice(1).join(' — ').trim() || null;
+  const rawDescription = statusDetail ?? firstParagraph(transformed);
+  const description =
+    rawDescription && rawDescription.length > 140
+      ? rawDescription.slice(0, 140).replace(/\s\S*$/, '') + '…'
+      : rawDescription;
 
   const frontmatter =
     [
       '---',
       `title: ${JSON.stringify(title)}`,
-      description
-        ? `description: ${JSON.stringify(statusLine ? `Status: ${description}` : description)}`
-        : null,
+      description ? `description: ${JSON.stringify(description)}` : null,
       '---',
     ]
       .filter(Boolean)
