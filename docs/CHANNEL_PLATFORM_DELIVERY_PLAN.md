@@ -68,7 +68,7 @@ that separate plan.
 | 10D | Complete | Channel-grained runtime reconciliation behind `ChannelRuntimeAdmin` |
 | 10E | Complete | Thin `aria channel` CLI and `/api/channels` console adapters over read/command/admin contracts |
 | 10F | Complete | No-network fixture evidence across pin/trust/configure/login/activate/status/restart/drain/unload/rollback with fail-closed coverage |
-| 11 | Not started | Disabled-by-default `weixin-ilink` text MVP |
+| 11 | In progress (11A complete) | Disabled-by-default `weixin-ilink` text MVP |
 | 12 | Not started | Media, group, proactive-send, and multi-account capabilities |
 
 The ordinary CLI supplies no external composition input. No real external
@@ -239,12 +239,14 @@ Acceptance:
 Do not begin implementation until Stage 10F is complete. Deliver the package
 disabled by default and keep it outside Aria core.
 
-### 11A. Protocol and license evidence
+### 11A. Protocol and license evidence — complete
 
-Record the official protocol flow, authentication lifecycle, cursor and reply
-semantics, provider limits, and license obligations. Convert useful operational
-failure lessons from other implementations into tests or requirements rather
-than dependencies on their architecture.
+Recorded in `docs/WEIXIN_ILINK_PROTOCOL.md`: the official iLink transport and
+endpoint inventory, the QR authentication lifecycle and terminal states, the
+`get_updates_buf` cursor contract, the `context_token` reply requirement,
+provider limits, the MIT reference-implementation license, and community
+operational lessons converted into requirements R1–R7. No code shipped; no
+dependency on other implementations' architecture was taken.
 
 ### 11B. Package skeleton and contract fixture
 
@@ -334,11 +336,12 @@ installation, and enabling a new account require separate explicit authority.
 
 ## Recommended next task
 
-Start with Stage 11A only. Record the `weixin-ilink` protocol and license
-evidence (official protocol flow, authentication lifecycle, cursor and reply
-semantics, provider limits, license obligations) before writing any package
-code; the provider stays outside core, disabled by default, and gated by the
-Stage 9/10 trust and composition boundaries already proven by Stage 10F.
+Start with Stage 11B only. Create the external `weixin-ilink` package
+skeleton — manifest with canonical `weixin-ilink` id, config schema,
+capability declaration, typed errors, and a deterministic fake transport —
+and pass the reusable ABI contract kit without network or credentials. The
+protocol contract to implement is recorded in
+`docs/WEIXIN_ILINK_PROTOCOL.md`.
 
 ## Handoff checklist
 
