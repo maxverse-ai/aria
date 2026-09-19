@@ -69,7 +69,7 @@ that separate plan.
 | 10E | Complete | Thin `aria channel` CLI and `/api/channels` console adapters over read/command/admin contracts |
 | 10F | Complete | No-network fixture evidence across pin/trust/configure/login/activate/status/restart/drain/unload/rollback with fail-closed coverage |
 | 11 | Complete | Disabled-by-default `weixin-ilink` text MVP |
-| 12 | In progress | Media, group, proactive-send, and multi-account capabilities |
+| 12 | Complete | Media, group, proactive-send, and multi-account capabilities |
 
 The ordinary CLI supplies no external composition input. No real external
 provider package is installed or enabled by the completed Stage 10A work.
@@ -449,6 +449,22 @@ coverage: `tests/unit/channel/weixin-ilink-proactive.test.ts` (capability
 declaration, disabled default, scope authorization, missing-token
 rejection, captured-token sends, reply-path preservation, ledger dedupe,
 group scope reachability, file-store restart persistence).
+
+### 12D. Multiple independently isolated accounts — complete
+
+Multi-account support needs no new capability surface: each
+`channels.instances` entry already starts its own runtime through the
+same plugin definition, and every state boundary is partitioned per
+`instanceId` — credential, cursor, delivery ledger, asset store, and the
+12C scope-target table all live under `stateDir/<instanceId>/` (volatile
+per-runtime stores otherwise). The evidence proves isolation end to end:
+two accounts route inbound to their own instance identity and cursor
+lineage, per-account `allowedUserIds` drop foreign senders, delivery
+ledger dedupe does not leak across a shared `deliveryId`, proactive
+scope targets captured on one account are unreachable from the other,
+and one account degrading into `reauth-required` leaves the other
+serving traffic. Focused coverage:
+`tests/integration/channel/weixin-ilink-multi-account.test.ts`.
 
 ## Validation and merge gate
 
