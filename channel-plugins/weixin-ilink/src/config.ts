@@ -17,9 +17,15 @@ export type WeixinIlinkConfig = ChannelConfig & {
   appId?: string;
   clientVersion?: number;
   routeTag?: string;
+  /** Stage 12A media capability gate; absent or false means text-only. */
+  mediaEnabled?: boolean;
+  /** Per-asset plaintext byte cap applied to downloads and uploads. */
+  mediaMaxBytes?: number;
 };
 
 export const DEFAULT_POLL_TIMEOUT_MS = 35_000;
+export const DEFAULT_MEDIA_MAX_BYTES = 10 * 1024 * 1024;
+export const MAX_MEDIA_MAX_BYTES = 50 * 1024 * 1024;
 
 function configError(message: string): ChannelPluginError {
   return new ChannelPluginError(message, {
@@ -75,6 +81,19 @@ export function validateWeixinIlinkConfig(config: unknown): WeixinIlinkConfig {
   ) {
     throw configError('weixin-ilink clientVersion must be a non-negative integer');
   }
+  if (record.mediaEnabled !== undefined && typeof record.mediaEnabled !== 'boolean') {
+    throw configError('weixin-ilink mediaEnabled must be a boolean');
+  }
+  if (
+    record.mediaMaxBytes !== undefined &&
+    (!Number.isSafeInteger(record.mediaMaxBytes) ||
+      (record.mediaMaxBytes as number) < 1 ||
+      (record.mediaMaxBytes as number) > MAX_MEDIA_MAX_BYTES)
+  ) {
+    throw configError(
+      `weixin-ilink mediaMaxBytes must be an integer between 1 and ${MAX_MEDIA_MAX_BYTES}`,
+    );
+  }
   return Object.freeze({
     allowedUserIds: Object.freeze(
       (allowedUserIds as readonly string[]).map((id) => id.trim()),
@@ -88,5 +107,11 @@ export function validateWeixinIlinkConfig(config: unknown): WeixinIlinkConfig {
       ? { clientVersion: record.clientVersion as number }
       : {}),
     ...(record.routeTag !== undefined ? { routeTag: (record.routeTag as string).trim() } : {}),
+    ...(record.mediaEnabled !== undefined
+      ? { mediaEnabled: record.mediaEnabled as boolean }
+      : {}),
+    ...(record.mediaMaxBytes !== undefined
+      ? { mediaMaxBytes: record.mediaMaxBytes as number }
+      : {}),
   }) as WeixinIlinkConfig;
 }

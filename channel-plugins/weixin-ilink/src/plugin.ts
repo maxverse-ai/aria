@@ -10,6 +10,11 @@ import {
   type SecretRef,
 } from '@maxverse-ai/aria';
 import {
+  FileIlinkAssetStore,
+  InMemoryAssetStore,
+  type IlinkAssetStore,
+} from './asset-store';
+import {
   validateWeixinIlinkConfig,
   type WeixinIlinkConfig,
 } from './config';
@@ -58,6 +63,8 @@ export interface WeixinIlinkPluginOptions {
   loginService?: (instance: ResolvedChannelInstance<WeixinIlinkConfig>) => IlinkLoginService;
   /** Durable cursor boundary; defaults to a volatile in-memory store. */
   cursorStore?: (instance: ResolvedChannelInstance<WeixinIlinkConfig>) => IlinkCursorStore;
+  /** Media asset boundary; defaults to a file store under stateDir. */
+  assetStore?: (instance: ResolvedChannelInstance<WeixinIlinkConfig>) => IlinkAssetStore;
   /** Delivery dedupe boundary; defaults to a volatile in-memory ledger. */
   deliveryLedger?: (
     instance: ResolvedChannelInstance<WeixinIlinkConfig>,
@@ -176,12 +183,18 @@ export function createWeixinIlinkPlugin(
         (stateDir
           ? new FileIlinkDeliveryLedger(join(stateDir, 'deliveries'))
           : undefined);
+      const assetStore =
+        options.assetStore?.(context.instance) ??
+        (stateDir
+          ? new FileIlinkAssetStore(join(stateDir, 'assets'))
+          : new InMemoryAssetStore());
       const runtime = new WeixinIlinkRuntime(context, {
         ...(transport ? { transport } : {}),
         transportFor: (credential) => transportFor(credential, context.instance),
         cursorStore,
         credentialStore,
         ...(deliveryLedger ? { deliveryLedger } : {}),
+        assetStore,
         loginService,
         ...(options.onLoginQr ? { onLoginQr: options.onLoginQr } : {}),
         ...(options.loginTimeoutMs !== undefined

@@ -367,6 +367,39 @@ classification, metrics, and rollback:
 Do not silently emulate an unsupported capability or combine these into the
 text MVP rollout.
 
+### 12A. Images and files through the encrypted CDN pipeline — complete
+
+The manifest now declares `image`/`file` inbound and outbound; each
+instance still opts in through config `mediaEnabled` (default off) with a
+per-asset `mediaMaxBytes` plaintext cap (default 10 MiB, max 50 MiB), so a
+deployment keeps the text-only surface until it flips the capability.
+`src/media.ts` owns AES-128-ECB encrypt/decrypt plus the outbound
+`CDNMedia`/`item_list` mapping; `src/asset-store.ts` adds the
+`IlinkAssetStore` boundary — `InMemoryAssetStore` by default or
+`FileIlinkAssetStore` under `stateDir/<instanceId>/assets/` — issuing
+content-addressed `ilink-asset:<sha256>` refs that core treats as opaque.
+
+Inbound `image_item`/`file_item` download `CDNMedia.full_url`, decrypt
+with `CDNMedia.aes_key`, and persist through the asset store before
+ingress: a media-only message carries the first asset as `content` and
+the rest in `attachments`, text+media folds into `content` text plus
+`attachments`, and `voice_item`/`video_item` mark the message unsupported
+and drop it deterministically. Missing CDN fields and over-limit
+plaintext drop immediately; transport failures retry at most three times
+before the message drops, so a poison media item cannot wedge the
+provider cursor. Outbound `deliver` resolves each `assetRef`, encrypts,
+calls `getuploadurl` (`filekey` = `<deliveryId>-<index>`, `no_need_thumb`),
+posts the ciphertext to the CDN URL as `application/octet-stream`, and
+sends the returned `x-encrypted-param` as `encrypt_query_param` inside
+`image_item`/`file_item` — text plus attachments share one `item_list`.
+Unresolvable or foreign `assetRef`s fail `permanent` with
+`weixin-ilink-asset`; audio stays `unsupported-capability`; upload/CDN
+failures stay `transient` (`weixin-ilink-cdn`) and never record a
+receipt. Focused coverage:
+`tests/unit/channel/weixin-ilink-media.test.ts` (encrypt/decrypt
+round-trip, media-disabled drops, retry/drop bounds, size limits,
+foreign refs, CDN failure injection, file asset store persistence).
+
 ## Validation and merge gate
 
 Every increment starts from current `origin/main` in its own `agent/*`

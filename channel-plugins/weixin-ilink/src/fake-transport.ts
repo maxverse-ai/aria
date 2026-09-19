@@ -12,6 +12,8 @@ import type {
   IlinkSendTypingInput,
   IlinkTransport,
   IlinkUpdatesPage,
+  IlinkUploadUrlInput,
+  IlinkUploadUrlResult,
 } from './transport';
 
 /**
@@ -43,6 +45,19 @@ export class FakeIlinkTransport implements IlinkTransport, IlinkLoginService {
   private readonly sendWaiters: Array<() => void> = [];
   private qrScript: IlinkQrStatus[] = [{ status: 'confirmed' }];
 
+  /** getuploadurl calls, in order. */
+  readonly uploadRequests: IlinkUploadUrlInput[] = [];
+  /** CDN uploads: url -> ciphertext as passed over the wire. */
+  readonly uploads = new Map<string, Buffer>();
+  /** CDN bytes scripted for download, keyed by URL. */
+  private readonly downloads = new Map<string, Buffer>();
+  private failUpload: unknown;
+  private failDownload: unknown;
+  private uploadUrlResult: IlinkUploadUrlResult = {
+    uploadFullUrl: 'https://fake-cdn.invalid/upload',
+  };
+  private uploadSeq = 0;
+
   constructor(private readonly options: { idleMs?: number } = {}) {}
 
   push(messages: IlinkInboundMessage[]): void {
@@ -62,6 +77,24 @@ export class FakeIlinkTransport implements IlinkTransport, IlinkLoginService {
   /** The next sendMessage parks until releaseSends — used for drain tests. */
   holdNextSend(): void {
     this.holdSend = true;
+  }
+
+  /** Override the next getuploadurl result. */
+  scriptUploadUrl(result: IlinkUploadUrlResult): void {
+    this.uploadUrlResult = result;
+  }
+
+  /** Script ciphertext served by cdnDownload for a URL. */
+  pushDownload(url: string, ciphertext: Buffer): void {
+    this.downloads.set(url, ciphertext);
+  }
+
+  failNextUpload(error: unknown): void {
+    this.failUpload = error;
+  }
+
+  failNextDownload(error: unknown): void {
+    this.failDownload = error;
   }
 
   releaseSends(): void {
@@ -149,6 +182,43 @@ export class FakeIlinkTransport implements IlinkTransport, IlinkLoginService {
       throw error;
     }
     this.sent.push(message);
+  }
+
+  async getUploadUrl(input: IlinkUploadUrlInput): Promise<IlinkUploadUrlResult> {
+    if (this.failUpload) {
+      const error = this.failUpload;
+      this.failUpload = undefined;
+      throw error;
+    }
+    this.uploadRequests.push(input);
+    return this.uploadUrlResult;
+  }
+
+  async cdnUpload(url: string, ciphertext: Buffer): Promise<string> {
+    if (this.failUpload) {
+      const error = this.failUpload;
+      this.failUpload = undefined;
+      throw error;
+    }
+    this.uploads.set(url, Buffer.from(ciphertext));
+    this.uploadSeq += 1;
+    return `fake-encrypted-param-${this.uploadSeq}`;
+  }
+
+  async cdnDownload(url: string): Promise<Buffer> {
+    if (this.failDownload) {
+      const error = this.failDownload;
+      this.failDownload = undefined;
+      throw error;
+    }
+    const bytes = this.downloads.get(url);
+    if (!bytes) {
+      throw new ChannelPluginError('fake CDN has no such object', {
+        kind: 'transient',
+        code: 'weixin-ilink-cdn',
+      });
+    }
+    return Buffer.from(bytes);
   }
 
   async getConfig(input: IlinkGetConfigInput): Promise<IlinkAccountConfig> {

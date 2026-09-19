@@ -5,7 +5,17 @@ export {
   weixinIlinkManifest,
 } from './manifest';
 export {
+  FileIlinkAssetStore,
+  ILINK_ASSET_REF_PREFIX,
+  ilinkAssetRef,
+  InMemoryAssetStore,
+  type IlinkAssetStore,
+  type IlinkStoredAsset,
+} from './asset-store';
+export {
+  DEFAULT_MEDIA_MAX_BYTES,
   DEFAULT_POLL_TIMEOUT_MS,
+  MAX_MEDIA_MAX_BYTES,
   validateWeixinIlinkConfig,
   type WeixinIlinkConfig,
 } from './config';
@@ -36,6 +46,16 @@ export {
 } from './delivery-ledger';
 export { FakeIlinkTransport } from './fake-transport';
 export {
+  decryptIlinkMedia,
+  encryptIlinkMedia,
+  generateIlinkMediaKey,
+  ILINK_ITEM_TYPE,
+  ilinkMediaMd5,
+  outboundCdnMedia,
+  outboundMediaItem,
+  type IlinkMediaType,
+} from './media';
+export {
   createHttpIlinkLoginService,
   DEFAULT_LOGIN_POLL_MS,
   DEFAULT_LOGIN_TIMEOUT_MS,
@@ -62,11 +82,18 @@ export {
   isIlinkAuthError,
   type HttpIlinkTransportOptions,
   type IlinkAccountConfig,
+  type IlinkCdnMedia,
+  type IlinkFileItem,
   type IlinkGetConfigInput,
+  type IlinkImageItem,
   type IlinkInboundMessage,
   type IlinkMessageItem,
   type IlinkSendMessage,
   type IlinkSendTypingInput,
   type IlinkTransport,
   type IlinkUpdatesPage,
+  type IlinkUploadUrlInput,
+  type IlinkUploadUrlResult,
+  type IlinkVideoItem,
+  type IlinkVoiceItem,
 } from './transport';

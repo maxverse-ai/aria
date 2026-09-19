@@ -110,8 +110,10 @@ never logged.
 
 `MessageItem` types: `text_item` (`{ text }`), `image_item`, `voice_item`
 (SILK), `file_item`, `video_item`, `ref_msg` (quoted/referenced message),
-and `tool_call_start_item`/`tool_call_result_item`. The text MVP handles
-`text_item` and `ref_msg` normalization only; media kinds are Stage 12.
+and `tool_call_start_item`/`tool_call_result_item`. `text_item` and
+`ref_msg` normalize into the envelope text; `image_item` and `file_item`
+are implemented in Stage 12A; `voice_item`, `video_item`, and tool items
+remain unsupported.
 
 ## Outbound path
 
@@ -120,7 +122,7 @@ and `tool_call_start_item`/`tool_call_result_item`. The text MVP handles
 Response is `{ ret, errmsg }`. Aria requires a checkpoint before delivery
 and a deterministic receipt derived from `deliveryId`.
 
-## Media pipeline (Stage 12, recorded for completeness)
+## Media pipeline (Stage 12A implemented)
 
 All media moves through the CDN (`novac2c.cdn.weixin.qq.com/c2c`) under
 AES-128-ECB: `getuploadurl` yields `upload_full_url`/`upload_param`, the

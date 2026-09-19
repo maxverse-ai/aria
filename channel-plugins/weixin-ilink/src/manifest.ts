@@ -8,9 +8,10 @@ export const WEIXIN_ILINK_PACKAGE_VERSION = '0.1.0';
 export const WEIXIN_ILINK_PLUGIN_ID = 'weixin-ilink';
 
 /**
- * Text-MVP capability declaration: long-poll ingress, p2p text only.
- * Media, group, proactive, and multi-account capabilities are declared
- * individually in Stage 12 — never silently emulated here.
+ * Capability declaration: long-poll ingress, p2p text plus the Stage 12A
+ * image/file CDN pipeline. Media stays off per instance until config
+ * `mediaEnabled` opts in; group, proactive, and multi-account capabilities
+ * are declared individually in later Stage 12 increments.
  */
 export const weixinIlinkManifest: ChannelPluginManifest = {
   abiVersion: CHANNEL_PLUGIN_ABI_VERSION,
@@ -35,13 +36,15 @@ export const weixinIlinkManifest: ChannelPluginManifest = {
       appId: { type: 'string', minLength: 1 },
       clientVersion: { type: 'integer', minimum: 0 },
       routeTag: { type: 'string', minLength: 1 },
+      mediaEnabled: { type: 'boolean' },
+      mediaMaxBytes: { type: 'integer', minimum: 1, maximum: 52428800 },
     },
     additionalProperties: false,
   },
   capabilities: {
     ingress: 'poll',
-    inbound: ['text'],
-    outbound: ['text'],
+    inbound: ['text', 'image', 'file'],
+    outbound: ['text', 'image', 'file'],
     streaming: 'none',
     conversations: ['p2p'],
     proactiveMessages: false,
