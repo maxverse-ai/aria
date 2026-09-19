@@ -15,7 +15,7 @@ import {
   writeActiveProfile,
 } from '../../../src/config/profile-store';
 import { createDefaultProfileConfig } from '../../../src/config/profile-schema';
-import { secretKeyForApp } from '../../../src/config/schema';
+import { secretKeyForApp, type SecretInput } from '../../../src/config/schema';
 
 const roots: string[] = [];
 
@@ -112,7 +112,7 @@ async function fixture(activeName: string): Promise<string> {
   return rootDir;
 }
 
-function exportDocument(name: string, appId: string, secret: unknown) {
+function exportDocument(name: string, appId: string, secret: SecretInput) {
   const profile = createDefaultProfileConfig({
     agentKind: 'codex',
     accounts: { app: { id: appId, secret, tenant: 'feishu' } },

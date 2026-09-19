@@ -180,9 +180,13 @@ Summarize profile-local lifecycle and concurrency events (read-only)
 
 ## `aria inbox`
 
+_隐藏命令（面向机器或已弃用）：仍可使用，但不在 `aria --help` 中显示。_
+
 Read the per-scope steering mailbox (agent-facing pull side)
 
 ### `aria inbox check`
+
+_隐藏命令（面向机器或已弃用）：仍可使用，但不在 `aria --help` 中显示。_
 
 Report the unread steering count for this scope
 
@@ -194,6 +198,8 @@ Report the unread steering count for this scope
 
 ### `aria inbox pull`
 
+_隐藏命令（面向机器或已弃用）：仍可使用，但不在 `aria --help` 中显示。_
+
 Print every unread steering body and mark it pulled
 
 | 选项 | 说明 |
@@ -202,13 +208,25 @@ Print every unread steering body and mark it pulled
 | `--dir <path>` | mailbox directory (defaults to the profile inbox layout) |
 | `--json` | print machine-readable JSON |
 
+## `aria capabilities`
+
+List supported control-plane operations (read-only)
+
+| 选项 | 说明 |
+| --- | --- |
+| `--json` | print stable machine-readable JSON |
+
 ## `aria control`
 
-Discover Aria control-plane capabilities
+_隐藏命令（面向机器或已弃用）：仍可使用，但不在 `aria --help` 中显示。_
+
+Deprecated alias for `aria capabilities`
 
 ### `aria control capabilities`
 
-List supported control-plane operations (read-only)
+_隐藏命令（面向机器或已弃用）：仍可使用，但不在 `aria --help` 中显示。_
+
+Deprecated alias for `aria capabilities` (read-only)
 
 | 选项 | 说明 |
 | --- | --- |
@@ -344,6 +362,8 @@ Revoke an Agent trigger grant
 | `--json` | print machine-readable JSON |
 
 ### `aria trigger agent <command>`
+
+_隐藏命令（面向机器或已弃用）：仍可使用，但不在 `aria --help` 中显示。_
 
 Execute a grant-scoped create/list/history/snooze/update/cancel operation
 
@@ -501,9 +521,13 @@ Show profile runtime lock and registered processes (read-only)
 
 ## `aria worker`
 
+_隐藏命令（面向机器或已弃用）：仍可使用，但不在 `aria --help` 中显示。_
+
 Run Aria as a channel-free managed worker
 
 ### `aria worker discover`
+
+_隐藏命令（面向机器或已弃用）：仍可使用，但不在 `aria --help` 中显示。_
 
 List configured worker identities as secret-free JSON
 
@@ -512,6 +536,8 @@ List configured worker identities as secret-free JSON
 | `--config <path> *(required)*` | path to the Aria root config |
 
 ### `aria worker serve`
+
+_隐藏命令（面向机器或已弃用）：仍可使用，但不在 `aria --help` 中显示。_
 
 Serve newline-delimited JSON-RPC over stdin/stdout
 
@@ -559,12 +585,13 @@ Install (if needed) and start the bridge as an OS-managed daemon
 
 ## `aria stop`
 
-Stop the OS-managed daemon and disable autostart (service definition stays)
+Stop the OS-managed daemon now; boot-time autostart stays enabled (use `unregister` to remove the service)
 
 | 选项 | 说明 |
 | --- | --- |
 | `--profile <name>` | profile name (defaults to active profile) |
 | `--web-ui` | target the supervisor service (auto-detected when no per-profile service exists) |
+| `--keep-autostart` | keep boot-time autostart enabled after stopping (this is the default) |
 | `--json` | print machine-readable JSON |
 
 ## `aria restart`
@@ -665,9 +692,11 @@ Atomically switch back to the previous installed version
 
 ## `aria secrets`
 
-Manage the bridge's encrypted secret keystore (~/.aria/secrets.enc)
+Manage Lark/Feishu App Secrets in the encrypted keystore (~/.aria/secrets.enc); not a general-purpose secret store
 
 ### `aria secrets get`
+
+_隐藏命令（面向机器或已弃用）：仍可使用，但不在 `aria --help` 中显示。_
 
 Exec-provider protocol: read JSON request from stdin, write JSON response to stdout. Used by lark-cli config bind --source lark-channel.
 
@@ -698,3 +727,7 @@ Delete an entry from the encrypted keystore
 | `--app-id <id> *(required)*` | App ID to remove |
 | `--yes *(required)*` | confirm secret deletion |
 | `--profile <name>` | profile name (defaults to active profile) |
+
+## `aria completion <shell>`
+
+Print a shell completion script for bash, zsh, or fish (e.g. `aria completion bash > ~/.local/share/bash-completion/completions/aria`)

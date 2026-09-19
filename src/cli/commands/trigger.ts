@@ -18,6 +18,7 @@ import {
   type TriggerPlanSnapshot,
   type TriggerReadSnapshot,
 } from '../../trigger/operations';
+import { positiveIntOption } from '../parse';
 
 export interface TriggerContractCliOptions {
   json?: boolean;
@@ -53,7 +54,7 @@ export async function runTriggerGet(id: string, opts: TriggerContractCliOptions 
 }
 
 export async function runTriggerPreview(id: string, opts: TriggerContractCliOptions & { count?: string } = {}): Promise<void> {
-  const count = Number(opts.count ?? 5);
+  const count = positiveIntOption(opts.count, '--count', 5);
   const snapshot = await api(opts).preview(id, count);
   console.log(opts.json ? JSON.stringify(snapshot, null, 2) : snapshot.fireTimes.map((at) => new Date(at).toISOString()).join('\n'));
 }

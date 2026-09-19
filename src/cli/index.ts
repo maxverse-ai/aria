@@ -75,12 +75,23 @@ import { runChatList, runChatMention } from './commands/chat';
 import { runDoctor } from './commands/doctor';
 import { runEngines } from './commands/engines';
 import { runLogs } from './commands/logs';
+import { emitCompletion, type CompletionShell } from './completion';
 
 // Announce an unsupported-but-not-yet-removed runtime before any command runs.
 const nodeVersionWarning = runtimeNotice();
 if (nodeVersionWarning) process.stderr.write(nodeVersionWarning);
 
 const program = new Command();
+
+// `--app-secret` puts a credential on the command line (shell history,
+// process listings). Kept for automation, but every use gets a warning.
+const warnAppSecretOnCommandLine = (appSecret: string | undefined): void => {
+  if (appSecret !== undefined) {
+    process.stderr.write(
+      'warning: --app-secret exposes the secret in shell history and process listings; prefer interactive input or `secrets set` on shared machines\n',
+    );
+  }
+};
 
 program
   .name('aria')
@@ -112,6 +123,7 @@ program
     tenant?: string;
     skipCheckLarkCli?: boolean;
   }) => {
+    warnAppSecretOnCommandLine(opts.appSecret);
     await runStart(opts);
   });
 
@@ -153,6 +165,7 @@ profile
     appSecret?: string;
     tenant?: string;
   }) => {
+    warnAppSecretOnCommandLine(opts.appSecret);
     await runProfileCreate(name, opts);
   });
 
@@ -204,6 +217,7 @@ profile
   .option('--name <name>', 'import under a different profile name')
   .option('--app-secret <secret>', 'app secret for exports written with secrets redacted')
   .action(async (file: string, opts: { name?: string; appSecret?: string }) => {
+    warnAppSecretOnCommandLine(opts.appSecret);
     await runProfileImport(file, opts);
   });
 
@@ -287,7 +301,7 @@ program
   });
 
 const inbox = program
-  .command('inbox')
+  .command('inbox', { hidden: true })
   .description('Read the per-scope steering mailbox (agent-facing pull side)');
 
 for (const action of ['check', 'pull'] as const) {
@@ -306,15 +320,25 @@ for (const action of ['check', 'pull'] as const) {
     });
 }
 
-const control = program
-  .command('control')
-  .description('Discover Aria control-plane capabilities');
-
-control
+program
   .command('capabilities')
   .description('List supported control-plane operations (read-only)')
   .option('--json', 'print stable machine-readable JSON')
   .action(async (opts: { json?: boolean }) => {
+    await runControlCapabilities(opts);
+  });
+
+// Deprecated spelling kept for compatibility — hidden from `aria --help`.
+const control = program
+  .command('control', { hidden: true })
+  .description('Deprecated alias for `aria capabilities`');
+
+control
+  .command('capabilities')
+  .description('Deprecated alias for `aria capabilities` (read-only)')
+  .option('--json', 'print stable machine-readable JSON')
+  .action(async (opts: { json?: boolean }) => {
+    console.error('warning: `control capabilities` is deprecated; use `aria capabilities`');
     await runControlCapabilities(opts);
   });
 
@@ -423,7 +447,7 @@ triggerGrant
   .action((id: string, opts: { yes?: boolean; json?: boolean }) => runTriggerGrantRevoke(id, opts));
 
 trigger
-  .command('agent <command>')
+  .command('agent <command>', { hidden: true })
   .description('Execute a grant-scoped create/list/history/snooze/update/cancel operation')
   .requiredOption('--engine <id>', 'calling engine id')
   .option('--input <json>', 'command input', '{}')
@@ -533,7 +557,7 @@ runtime
   });
 
 const worker = program
-  .command('worker')
+  .command('worker', { hidden: true })
   .description('Run Aria as a channel-free managed worker');
 
 worker
@@ -599,16 +623,18 @@ program
     tenant?: string;
     skipCheckLarkCli?: boolean;
   }) => {
+    warnAppSecretOnCommandLine(opts.appSecret);
     await runServiceStart(opts);
   });
 
 program
   .command('stop')
-  .description('Stop the OS-managed daemon and disable autostart (service definition stays)')
+  .description('Stop the OS-managed daemon now; boot-time autostart stays enabled (use `unregister` to remove the service)')
   .option('--profile <name>', 'profile name (defaults to active profile)')
   .option('--web-ui', 'target the supervisor service (auto-detected when no per-profile service exists)')
+  .option('--keep-autostart', 'keep boot-time autostart enabled after stopping (this is the default)')
   .option('--json', 'print machine-readable JSON')
-  .action(async (opts: { profile?: string; webUi?: boolean; json?: boolean }) => {
+  .action(async (opts: { profile?: string; webUi?: boolean; keepAutostart?: boolean; json?: boolean }) => {
     await runServiceStop(opts);
   });
 
@@ -717,10 +743,10 @@ update
 
 const secrets = program
   .command('secrets')
-  .description('Manage the bridge\'s encrypted secret keystore (~/.aria/secrets.enc)');
+  .description('Manage Lark/Feishu App Secrets in the encrypted keystore (~/.aria/secrets.enc); not a general-purpose secret store');
 
 secrets
-  .command('get')
+  .command('get', { hidden: true })
   .description('Exec-provider protocol: read JSON request from stdin, write JSON response to stdout. Used by lark-cli config bind --source lark-channel.')
   .action(async () => {
     await runSecretsGet();
@@ -752,6 +778,17 @@ secrets
   .option('--profile <name>', 'profile name (defaults to active profile)')
   .action(async (opts: { appId: string; profile?: string; yes?: boolean }) => {
     await runSecretsRemove(opts.appId, { profile: opts.profile, yes: opts.yes });
+  });
+
+program
+  .command('completion <shell>')
+  .description('Print a shell completion script for bash, zsh, or fish (e.g. `aria completion bash > ~/.local/share/bash-completion/completions/aria`)')
+  .action((shell: string) => {
+    if (shell !== 'bash' && shell !== 'zsh' && shell !== 'fish') {
+      console.error(`Error: unsupported shell "${shell}" — expected bash, zsh, or fish`);
+      process.exit(1);
+    }
+    process.stdout.write(emitCompletion(program, shell as CompletionShell));
   });
 
 program.parseAsync(process.argv).catch((err: unknown) => {

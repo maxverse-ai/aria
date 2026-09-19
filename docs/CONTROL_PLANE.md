@@ -109,8 +109,8 @@ Signed actor envelopes and replay protection are not shipped.
 | Engine | `profile.engine.update` | `/agent` | `engine-switch` |
 | Profile lifecycle | `profile.activate`, `profile.create`, `profile.archive`, `profile.purge` | CLI; Web create/activate | `none` plus lifecycle saga/projection |
 
-Read-only CLI capabilities remain available through `aria control
-capabilities`, `aria profile show`, `aria config show`, and `aria runtime
+Read-only CLI capabilities remain available through `aria capabilities`,
+`aria profile show`, `aria config show`, and `aria runtime
 status`. The staged write workflow remains `config plan -> confirm -> apply`;
 existing text and JSON presenters are compatibility surfaces over the same API.
 

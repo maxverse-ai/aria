@@ -35,7 +35,7 @@ daemon 日志在 `~/.aria/profiles/<profile>/logs/daemon/` 下。用
 ```bash
 aria start [--profile <name>]      # 安装（如需要）并启动 daemon
 aria status [--profile <name>]     # pid、上次退出码、日志路径
-aria stop [--profile <name>]       # 停止并禁用自启（服务定义保留）
+aria stop [--profile <name>]       # 立即停止；开机自启保持不变（--keep-autostart 可显式声明此默认行为）
 aria restart [--profile <name>]    # 重启；检测到活跃工作时拒绝
 aria unregister [--profile <name>] # 移除 OS 服务注册
 ```
@@ -103,7 +103,7 @@ aria profile import <file> [--name <n>] [--app-secret <s>]
 aria inspect [--profile <name>] [--hours 24]   # 从 profile 日志汇总生命周期/并发事件
 aria runtime status [--profile <name>]         # profile 锁 + 已注册进程
 aria config show [--profile <name>]            # 脱敏的生效配置
-aria control capabilities                      # 支持的控制平面操作
+aria capabilities                              # 支持的控制平面操作
 aria chat list [--profile <name>]              # bot 所在的群 + mention 覆盖状态
 aria engines                                   # --agent 接受的引擎 id
 aria doctor [--profile <name>]                 # 聚合健康检查（失败时退出码非零）
@@ -137,6 +137,20 @@ aria config apply <plan-id>
 字段——编辑 `~/.aria/config.json` 中对应 profile 的字段（不要整体替换
 文件），然后重启 bridge 或在聊天中发送 `/reconnect`。这些字段记录在
 [README](../README.zh.md#working-directories) 中。
+
+## Shell 补全
+
+```bash
+aria completion bash   # 或 zsh / fish——打印待安装的补全脚本
+```
+
+隐藏的机器侧命令（`worker`、`inbox`、`secrets get`、`trigger agent`）和
+弃用别名（`control capabilities`）仍然可用，但不在 `aria --help` 与补全
+中显示，与其服务的机器协议一致。
+
+`--app-secret` 在 `run` / `start` / `profile create` / `profile import`
+上仍为自动化保留；每次使用都会向 stderr 打一条警告，因为该值会落入 shell
+历史与进程列表——共享机器上请改用交互输入或 `aria secrets set`。
 
 ## 故障排查
 

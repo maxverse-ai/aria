@@ -591,24 +591,25 @@ describe('profile-aware service commands', () => {
 
     // Must act on the supervisor service, not silently no-op on a
     // per-profile service that was never installed.
-    expect(supervisor.stopAndDisableAutostart).toHaveBeenCalled();
+    expect(supervisor.stop).toHaveBeenCalled();
     expect(lines.join('\n')).toContain('已指向控制面 supervisor 服务');
     expect(lines).toContain('✓ 控制面 supervisor 已停止运行');
   });
 
-  it('turns off autostart when stopping a registered-but-not-running service', async () => {
+  it('keeps autostart untouched when stopping a registered-but-not-running service', async () => {
     const lines: string[] = [];
     vi.spyOn(console, 'log').mockImplementation((line: string) => {
       lines.push(line);
     });
 
-    // fileExists=true, isRunning=false — nothing to kill, but the login-time
-    // autostart is still armed and would bring the daemon back by itself.
+    // fileExists=true, isRunning=false — nothing to kill, and `stop` leaves
+    // the login-time autostart registration alone by default.
     await runServiceStop({ profile: 'codex-dev' });
 
-    expect(mocks.adapter.disableAutostart).toHaveBeenCalled();
+    expect(mocks.adapter.disableAutostart).not.toHaveBeenCalled();
     expect(mocks.adapter.stopAndDisableAutostart).not.toHaveBeenCalled();
-    expect(lines).toContain('  已关闭开机自启。');
+    expect(mocks.adapter.stop).not.toHaveBeenCalled();
+    expect(lines).toContain('  开机自启保持不变；如不再使用请 `unregister`。');
   });
 
   it('leaves an explicit --profile target alone even when a supervisor service exists', async () => {

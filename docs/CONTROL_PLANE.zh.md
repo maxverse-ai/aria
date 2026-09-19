@@ -103,7 +103,7 @@ planned -> confirmed -> applied
 | 引擎 | `profile.engine.update` | `/agent` | `engine-switch` |
 | Profile 生命周期 | `profile.activate`、`profile.create`、`profile.archive`、`profile.purge` | CLI；Web 端 create/activate | `none`，另有生命周期 saga/投影 |
 
-只读 CLI 能力仍可通过 `aria control capabilities`、`aria profile show`、
+只读 CLI 能力仍可通过 `aria capabilities`、`aria profile show`、
 `aria config show` 和 `aria runtime status` 使用。分阶段写工作流仍是
 `config plan -> confirm -> apply`；既有文本与 JSON 展示器是同一 API 之上
 的兼容面。

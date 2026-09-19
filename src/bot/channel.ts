@@ -291,6 +291,26 @@ function stringifyArgs(args: unknown[]): string {
     .join(' ');
 }
 
+/**
+ * Composition-root factory for read-only CLI calls that need a raw
+ * `LarkChannel` without starting the bridge (e.g. `aria chat list`).
+ * Every `createLarkChannel(` call stays inside this module's boundary.
+ */
+export function createReadOnlyLarkChannel(credentials: {
+  appId: string;
+  appSecret: string;
+  tenant?: string;
+}): LarkChannel {
+  return createLarkChannel({
+    appId: credentials.appId,
+    appSecret: credentials.appSecret,
+    domain: credentials.tenant === 'lark' ? 'https://open.larksuite.com' : 'https://open.feishu.cn',
+    source: 'aria',
+    httpTimeoutMs: 30_000,
+    respectProxyEnv: true,
+  } as LarkChannelOptions);
+}
+
 export interface BridgeChannel {
   channel: LarkChannel;
   /** Pause new agent work and drain old-runtime work before an in-place swap. */

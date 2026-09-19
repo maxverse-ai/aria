@@ -6,6 +6,7 @@ import {
   summarizeObservability,
   type ObservabilitySummary,
 } from '../../observability/inspect';
+import { positiveIntOption } from '../parse';
 
 export interface InspectCliOptions {
   profile?: string;
@@ -14,10 +15,7 @@ export interface InspectCliOptions {
 }
 
 export async function runInspect(opts: InspectCliOptions): Promise<void> {
-  const hours = Number(opts.hours ?? 24);
-  if (!Number.isFinite(hours) || hours <= 0) {
-    throw new Error('--hours must be a positive number');
-  }
+  const hours = positiveIntOption(opts.hours, '--hours', 24);
   const root = await loadRootConfig(paths.configFile);
   const profile = opts.profile ?? (await readActiveProfile(paths.rootDir)) ?? root?.activeProfile;
   if (!profile) throw new Error('no active profile; pass --profile <name>');

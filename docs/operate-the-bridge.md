@@ -38,7 +38,7 @@ the stdout log, `--web-ui` for the Supervisor's).
 ```bash
 aria start [--profile <name>]      # install (if needed) + start the daemon
 aria status [--profile <name>]     # pid, last exit, log paths
-aria stop [--profile <name>]       # stop + disable autostart (definition stays)
+aria stop [--profile <name>]       # stop now; boot autostart stays on (add --keep-autostart to say so explicitly)
 aria restart [--profile <name>]    # restart; refuses while work is active
 aria unregister [--profile <name>] # remove the OS service registration
 ```
@@ -110,7 +110,7 @@ Notes that bite:
 aria inspect [--profile <name>] [--hours 24]   # lifecycle/concurrency summary from profile logs
 aria runtime status [--profile <name>]         # profile lock + registered processes
 aria config show [--profile <name>]            # redacted effective configuration
-aria control capabilities                      # supported control-plane operations
+aria capabilities                              # supported control-plane operations
 aria chat list [--profile <name>]              # chats the bot is in + mention overrides
 aria engines                                   # engine ids accepted by --agent
 aria doctor [--profile <name>]                 # aggregated health check (non-zero on failure)
@@ -146,6 +146,22 @@ For other profile fields the protocol does not cover — `workspaces.default`,
 `access.*` — edit the matching profile's field in `~/.aria/config.json`
 (never replace the whole file) and restart the bridge or send `/reconnect` in
 chat. The [README](../README.md#working-directories) documents those fields.
+
+## Shell completion
+
+```bash
+aria completion bash   # or zsh / fish — prints the script to install
+```
+
+Hidden machine-facing commands (`worker`, `inbox`, `secrets get`,
+`trigger agent`) and deprecated aliases (`control capabilities`) still work
+but are omitted from `aria --help` and completion, same as the machine
+protocols they serve.
+
+`--app-secret` remains accepted on `run` / `start` / `profile create` /
+`profile import` for automation; every use prints a stderr warning because
+the value lands in shell history and process listings — prefer interactive
+input or `aria secrets set` on shared machines.
 
 ## Troubleshooting
 

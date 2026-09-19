@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { createLarkChannel } from '@larksuite/channel';
+import { createReadOnlyLarkChannel } from '../../bot/channel';
 import {
   authorizeAdapterCommands,
   ConfigChangeService,
@@ -52,14 +52,10 @@ export async function runChatList(opts: ChatCliOptions = {}): Promise<void> {
     ...(opts.rootDir ? { config: resolveAppPaths({ rootDir: opts.rootDir }).configFile } : {}),
   });
   const appSecret = await resolveAppSecret(runtime.cfg, runtime.appPaths);
-  const channel = createLarkChannel({
+  const channel = createReadOnlyLarkChannel({
     appId: runtime.cfg.accounts.app.id,
     appSecret,
-    domain:
-      runtime.cfg.accounts.app.tenant === 'lark'
-        ? 'https://open.larksuite.com'
-        : 'https://open.feishu.cn',
-    source: 'aria',
+    tenant: runtime.cfg.accounts.app.tenant,
   });
   const chats = await fetchKnownChats(channel);
   const overrides = runtime.profileConfig.access.chatRequireMention ?? {};

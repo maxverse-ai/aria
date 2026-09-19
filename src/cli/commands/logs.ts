@@ -6,6 +6,7 @@ import { paths } from '../../config/paths';
 import { loadRootConfig, readActiveProfile } from '../../config/profile-store';
 import { daemonStderrPath, daemonStdoutPath, SUPERVISOR_SERVICE_ID } from '../../daemon/paths';
 import { getServiceAdapter } from '../../daemon/service-adapter';
+import { positiveIntOption } from '../parse';
 
 export interface LogsCliOptions {
   profile?: string;
@@ -69,11 +70,7 @@ function daemonLogPath(serviceId: string, stdout: boolean, rootDir?: string): st
 }
 
 function parseLines(raw: string | undefined): number {
-  if (raw === undefined) return DEFAULT_LINES;
-  if (!/^\d+$/.test(raw.trim()) || Number(raw) < 1) {
-    throw new Error('--lines must be a positive integer');
-  }
-  return Number(raw);
+  return positiveIntOption(raw, '--lines', DEFAULT_LINES);
 }
 
 /** Last `count` lines of a file, streamed backwards in one bounded read. */

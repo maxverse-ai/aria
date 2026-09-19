@@ -61,12 +61,17 @@ const OVERRIDES = {
 function parseCli(source) {
   const lines = source.split('\n');
   const varPath = { program: '' }; // commander variable -> full command path
-  const commands = []; // { path, parent, depth, name, description, options }
+  const varHidden = { program: false }; // commander variable -> hidden in --help
+  const commands = []; // { path, parent, depth, name, description, options, hidden }
   const groups = new Map(); // group path -> description
   let current = null;
 
+  // `.command('name')` optionally followed by `, { hidden: true }`;
+  // group 2 is set only when the hidden flag is present.
+  const COMMAND_RE = /\.command\('([^']+)'(, \{ hidden: true \})?\)/;
+
   const joinPath = (parent, name) => (parent ? `${parent} ${name}` : name);
-  const addCommand = (fullPath, parentPath, nameLiteral) => {
+  const addCommand = (fullPath, parentPath, nameLiteral, hidden = false) => {
     const entry = {
       path: fullPath,
       parent: parentPath,
@@ -74,6 +79,7 @@ function parseCli(source) {
       name: nameLiteral ?? fullPath,
       description: '',
       options: [],
+      hidden,
     };
     commands.push(entry);
     return entry;
@@ -101,7 +107,7 @@ function parseCli(source) {
         const p = joinPath(varPath[subject], name);
         const override = OVERRIDES[p];
         if (!override) throw new Error(`gen-cli-reference: loop-expanded ${p} needs an OVERRIDES entry`);
-        const entry = addCommand(p, varPath[subject], name);
+        const entry = addCommand(p, varPath[subject], name, varHidden[subject]);
         entry.description = override.description;
         entry.options = override.options;
       }
@@ -110,42 +116,46 @@ function parseCli(source) {
       continue;
     }
 
-    // `const <v> = <parent>` optionally followed by `  .command('name')`.
+    // `const <v> = <parent>` optionally followed by `  .command('name'[, { hidden: true }])`.
     let m = line.match(/^const (\w+) = (\w+)$/);
     if (m && varPath[m[2]] !== undefined) {
-      const next = lines[i + 1]?.match(/^ {2}\.command\('([^']+)'\)/);
+      const next = lines[i + 1]?.match(new RegExp(`^ {2}${COMMAND_RE.source}`));
       if (next) {
         const p = joinPath(varPath[m[2]], next[1]);
         varPath[m[1]] = p;
+        varHidden[m[1]] = varHidden[m[2]] || Boolean(next[2]);
         groups.set(p, '');
-        current = addCommand(p, varPath[m[2]], next[1]);
+        current = addCommand(p, varPath[m[2]], next[1], varHidden[m[1]]);
         i += 1;
         continue;
       }
     }
-    // `const <v> = <parent>.command('name')` on one line.
-    m = line.match(/^const (\w+) = (\w+)\.command\('([^']+)'\)/);
+    // `const <v> = <parent>.command('name'[, { hidden: true }])` on one line.
+    m = line.match(new RegExp(`^const (\\w+) = (\\w+)${COMMAND_RE.source}`));
     if (m && varPath[m[2]] !== undefined) {
       const p = joinPath(varPath[m[2]], m[3]);
       varPath[m[1]] = p;
+      varHidden[m[1]] = varHidden[m[2]] || Boolean(m[4]);
       groups.set(p, '');
-      current = addCommand(p, varPath[m[2]], m[3]);
+      current = addCommand(p, varPath[m[2]], m[3], varHidden[m[1]]);
     } else {
-      // `<subject>` alone on a line, followed by `  .command('name')`.
+      // `<subject>` alone on a line, followed by `  .command('name'[, { hidden: true }])`.
       m = line.match(/^(\w+)$/);
       if (m && varPath[m[1]] !== undefined) {
-        const next = lines[i + 1]?.match(/^ {2}\.command\('([^']+)'\)/);
+        const next = lines[i + 1]?.match(new RegExp(`^ {2}${COMMAND_RE.source}`));
         if (next) {
-          current = addCommand(joinPath(varPath[m[1]], next[1]), varPath[m[1]], next[1]);
+          const hidden = varHidden[m[1]] || Boolean(next[2]);
+          current = addCommand(joinPath(varPath[m[1]], next[1]), varPath[m[1]], next[1], hidden);
           i += 1;
           continue;
         }
       }
 
-      // `<subject>.command('name')` on one line (e.g. `space.command('prepare ...')`).
-      m = line.match(/^(\w+)\.command\('([^']+)'\)/);
+      // `<subject>.command('name'[, { hidden: true }])` on one line.
+      m = line.match(new RegExp(`^(\\w+)${COMMAND_RE.source}`));
       if (m && varPath[m[1]] !== undefined) {
-        current = addCommand(joinPath(varPath[m[1]], m[2]), varPath[m[1]], m[2]);
+        const hidden = varHidden[m[1]] || Boolean(m[3]);
+        current = addCommand(joinPath(varPath[m[1]], m[2]), varPath[m[1]], m[2], hidden);
       }
     }
 
@@ -229,6 +239,14 @@ function render(commands, groups, locale) {
   for (const c of commands) {
     lines.push(`${headingFor(c.depth)} \`aria ${c.path}\``);
     lines.push('');
+    if (c.hidden) {
+      lines.push(
+        zh
+          ? '_隐藏命令（面向机器或已弃用）：仍可使用，但不在 `aria --help` 中显示。_'
+          : '_Hidden command (machine-facing or deprecated): still functional, but not shown in `aria --help`._',
+        '',
+      );
+    }
     if (c.description) lines.push(c.description, '');
     if (c.options.length > 0) {
       lines.push(zh ? '| 选项 | 说明 |' : '| Option | Description |');

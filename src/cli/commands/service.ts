@@ -440,17 +440,15 @@ async function runServiceStartWebUi(opts: ServiceStartOptions): Promise<void> {
 }
 
 /**
- * `bridge stop` — stop AND prevent auto-restart on next boot.
+ * `bridge stop` — stop the daemon now, WITHOUT touching boot-time autostart.
  *
- * Uses stopAndDisableAutostart so the semantics match on both platforms:
- *  - launchd: bootout + `launchctl disable` (bootout alone is session-scoped:
- *    the plist's RunAtLoad would bring the daemon back at the next login)
- *  - systemd: `disable --now` (stop + remove autostart symlinks)
- *
- * If the user just wants to bounce the service (keep autostart),
- * `restart` is the right command.
+ * Stopping only ends the current session: a registered service keeps its
+ * login-time autostart (launchd RunAtLoad / systemd WantedBy), so the daemon
+ * comes back at the next login unless it is unregistered. `--keep-autostart`
+ * spells that default out explicitly for scripts; there is currently no
+ * CLI-level way to disarm autostart without `unregister`.
  */
-export async function runServiceStop(opts: ServiceProfileOptions = {}): Promise<void> {
+export async function runServiceStop(opts: ServiceProfileOptions & { keepAutostart?: boolean } = {}): Promise<void> {
   const { serviceId, profile, webUi } = await resolveServiceTarget(opts);
   const adapter = requireAdapter('stop', serviceId);
   const snapshot = (result: 'stopped' | 'not-installed' | 'not-running', extra: Record<string, unknown> = {}) =>
@@ -468,16 +466,15 @@ export async function runServiceStop(opts: ServiceProfileOptions = {}): Promise<
     return;
   }
   if (!adapter.isRunning()) {
-    // Not running now, but the registration may still carry login-time
-    // autostart (launchd RunAtLoad / systemd WantedBy) — which is exactly how
-    // a "stopped" daemon comes back on its own. Make `stop` mean stopped.
-    const r = await adapter.disableAutostart();
+    // Nothing running — and nothing to do about autostart either: `stop`
+    // deliberately leaves the login-time registration alone so the daemon
+    // can still come back on its own at the next boot.
     if (opts.json) {
-      console.log(snapshot('not-running', { autostartDisabled: r.ok }));
+      console.log(snapshot('not-running', { autostartKept: true }));
       return;
     }
     console.log(webUi ? 'supervisor 当前没在后台运行。' : 'bot 当前没在后台运行。');
-    if (r.ok) console.log('  已关闭开机自启。');
+    console.log('  开机自启保持不变；如不再使用请 `unregister`。');
     return;
   }
 
@@ -487,14 +484,14 @@ export async function runServiceStop(opts: ServiceProfileOptions = {}): Promise<
   // the supervisor hosts many bots, so there's no single name.)
   const entry = !webUi && profile ? await lookupProfileEntry(profile) : undefined;
 
-  const r = await adapter.stopAndDisableAutostart();
+  const r = await adapter.stop();
   if (!r.ok) {
     console.error(`✗ 停止失败:\n${formatServiceStderr(r.stderr)}`);
     process.exit(1);
   }
   if (opts.json) {
     console.log(snapshot('stopped', {
-      autostartDisabled: true,
+      autostartKept: true,
       bot: entry ? { name: entry.botName, appId: entry.appId } : null,
     }));
     return;
