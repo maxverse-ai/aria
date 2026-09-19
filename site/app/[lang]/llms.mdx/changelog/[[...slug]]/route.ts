@@ -6,7 +6,7 @@ export const revalidate = false;
 
 export async function GET(
   _req: Request,
-  { params }: RouteContext<'/[lang]/llms.mdx/blog/[[...slug]]'>,
+  { params }: RouteContext<'/[lang]/llms.mdx/changelog/[[...slug]]'>,
 ) {
   const { slug, lang } = await params;
   const page = blog.getPage(slug?.slice(0, -1), lang);

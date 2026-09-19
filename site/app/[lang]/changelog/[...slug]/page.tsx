@@ -19,7 +19,7 @@ import sourceMap from '@/lib/generated/source-map.json';
 import lastmodMap from '@/lib/generated/lastmod.json';
 
 export default async function Page(
-  props: PageProps<'/[lang]/blog/[...slug]'>,
+  props: PageProps<'/[lang]/changelog/[...slug]'>,
 ) {
   const params = await props.params;
   const page = blog.getPage(params.slug, params.lang);
@@ -73,7 +73,7 @@ export async function generateStaticParams() {
 }
 
 export async function generateMetadata(
-  props: PageProps<'/[lang]/blog/[...slug]'>,
+  props: PageProps<'/[lang]/changelog/[...slug]'>,
 ): Promise<Metadata> {
   const params = await props.params;
   const page = blog.getPage(params.slug, params.lang);

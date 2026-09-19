@@ -4,7 +4,9 @@ import { appName, blogRoute, docsRoute, gitConfig } from './shared';
 export function baseOptions(lang = 'en'): BaseLayoutProps {
   const prefix = lang === 'en' ? '' : `/${lang}`;
   const t =
-    lang === 'zh' ? { docs: '文档', blog: '博客' } : { docs: 'Docs', blog: 'Blog' };
+    lang === 'zh'
+      ? { docs: '文档', blog: '更新日志' }
+      : { docs: 'Docs', blog: 'Changelog' };
 
   return {
     nav: {

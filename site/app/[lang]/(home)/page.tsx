@@ -8,12 +8,12 @@ const copy: Record<
     tagline:
       'A local-first control plane for coding agents. Chat is the remote control, not the compute plane.',
     docs: 'Read the docs',
-    blog: 'Blog & releases',
+    blog: 'Changelog',
   },
   zh: {
     tagline: '本地优先的编码智能体控制平面。聊天是遥控器，而不是计算平面。',
     docs: '阅读文档',
-    blog: '博客与发布说明',
+    blog: '更新日志',
   },
 };
 
@@ -36,7 +36,7 @@ export default async function HomePage(props: PageProps<'/[lang]'>) {
           {t.docs}
         </Link>
         <Link
-          href={`${prefix}/blog`}
+          href={`${prefix}/changelog`}
           className="rounded-lg border px-5 py-2.5 font-medium"
         >
           {t.blog}

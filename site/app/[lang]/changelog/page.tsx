@@ -13,17 +13,17 @@ interface BlogIndexEntry {
 
 const titles: Record<string, { title: string; description: string }> = {
   en: {
-    title: 'Blog & Release Notes',
+    title: 'Changelog',
     description: 'Release notes and updates from the Aria project.',
   },
   zh: {
-    title: '博客与发布说明',
+    title: '更新日志',
     description: 'Aria 项目的发布说明与更新。',
   },
 };
 
 export default async function BlogIndexPage(
-  props: PageProps<'/[lang]/blog'>,
+  props: PageProps<'/[lang]/changelog'>,
 ) {
   const { lang } = await props.params;
   const t = titles[lang] ?? titles.en;
@@ -74,7 +74,7 @@ export default async function BlogIndexPage(
 }
 
 export async function generateMetadata(
-  props: PageProps<'/[lang]/blog'>,
+  props: PageProps<'/[lang]/changelog'>,
 ): Promise<Metadata> {
   const { lang } = await props.params;
   const t = titles[lang] ?? titles.en;

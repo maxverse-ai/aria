@@ -3,10 +3,10 @@ import { i18n } from './i18n';
 
 export const appName = 'Aria';
 export const docsRoute = '/docs';
-export const blogRoute = '/blog';
+export const blogRoute = '/changelog';
 export const docsImageRoute = '/og/docs';
 export const docsContentRoute = '/llms.mdx/docs';
-export const blogContentRoute = '/llms.mdx/blog';
+export const blogContentRoute = '/llms.mdx/changelog';
 
 export const gitConfig = {
   user: 'maxverse-ai',

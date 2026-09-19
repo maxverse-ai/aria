@@ -12,8 +12,8 @@ Publishing rules (see `docs/DOCUMENTATION_POLICY.md`):
   filename is not an internal class (ledger, delivery plan, handoff,
   implementation/phase/completion record). Withheld documents 404 on the
   public site but stay in the repo; links to them become GitHub URLs.
-- `docs/releases/**` and `docs/blog/**` are published under `/blog` as the
-  blog/release-notes section, newest first.
+- `docs/releases/**` and `docs/blog/**` are published under `/changelog` as the
+  release-notes section, newest first. `/blog` 308-redirects to `/changelog`.
 - `NAME.md` is the English source, `NAME.<locale>.md` its translation
   (e.g. `STEERING.zh.md` → `/zh/docs/steering`). English is the default
   locale and stays unprefixed; Chinese lives under `/zh`. Pages without a

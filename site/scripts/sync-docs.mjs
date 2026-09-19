@@ -8,7 +8,7 @@
 //     implementation/phase/completion records, release-linux-*).
 //   - `NAME.<locale>.md` is the localized variant of `NAME.md`
 //     (e.g. STEERING.zh.md -> steering.zh.mdx).
-//   - docs/releases/** and docs/blog/** become the /blog collection.
+//   - docs/releases/** and docs/blog/** become the /changelog collection.
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -201,14 +201,14 @@ function rewriteLinks(body, srcAbs, srcLocale, selfSlug, collection, warnings) {
         if (!relToDocs.startsWith('..') && decoded.endsWith('.md')) {
           const top = relToDocs.split('/')[0];
           if (BLOG_DIRS.has(top)) {
-            // Links into release notes / blog entries resolve to /blog.
+            // Links into release notes / blog entries resolve to /changelog.
             const relNoExt = relToDocs.slice(top.length + 1).replace(/\.md$/, '');
             const relStem = path.join(
               path.dirname(relNoExt),
               splitLocale(path.basename(relNoExt)).stem,
             );
             const bSlug = slugPath(relStem.split(path.sep).join('/'));
-            return `](/blog/${bSlug}${frag ? `#${frag}` : ''})`;
+            return `](/changelog/${bSlug}${frag ? `#${frag}` : ''})`;
           }
           const { stem, locale: tLocale } = splitLocale(path.basename(relToDocs));
           const tSlug = slugPath(
@@ -316,7 +316,7 @@ for (const rel of files) {
   const role = statusRole(statusLine);
 
   if (top && BLOG_DIRS.has(top)) {
-    // Blog slugs drop the collection dir: docs/releases/v0.4.0.md -> /blog/v0-4-0.
+    // Blog slugs drop the collection dir: docs/releases/v0.4.0.md -> /changelog/v0-4-0.
     blogEntries.push({ rel, stem, locale, slug: relSlug(rel.slice(top.length + 1)), title });
     continue;
   }
@@ -506,7 +506,7 @@ if (canonicalBlog.length > 0) {
     path.join(outBlogDir, 'meta.json'),
     JSON.stringify(
       {
-        title: 'Blog & Release Notes',
+        title: 'Changelog',
         pages: canonicalBlog.map((e) => e.slug.join('/')),
       },
       null,
@@ -517,7 +517,7 @@ if (canonicalBlog.length > 0) {
     path.join(outBlogDir, 'meta.zh.json'),
     JSON.stringify(
       {
-        title: '博客与发布说明',
+        title: '更新日志',
         pages: canonicalBlog.map((e) => e.slug.join('/')),
       },
       null,
