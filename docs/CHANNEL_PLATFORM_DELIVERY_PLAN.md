@@ -67,7 +67,7 @@ that separate plan.
 | 10C | Complete | Named desired-state commands: package pin, instance configure/enable/disable, and provider-neutral login/logout intent |
 | 10D | Complete | Channel-grained runtime reconciliation behind `ChannelRuntimeAdmin` |
 | 10E | Complete | Thin `aria channel` CLI and `/api/channels` console adapters over read/command/admin contracts |
-| 10F | Not complete | Fixture composition and downstream opt-in evidence |
+| 10F | Complete | No-network fixture evidence across pin/trust/configure/login/activate/status/restart/drain/unload/rollback with fail-closed coverage |
 | 11 | Not started | Disabled-by-default `weixin-ilink` text MVP |
 | 12 | Not started | Media, group, proactive-send, and multi-account capabilities |
 
@@ -94,7 +94,7 @@ Stage 10C shipped the desired-state mutation side:
 Package pins and instance changes are separate commands; login/logout are
 recorded as a provider-neutral `auth` intent on the stored instance — no
 credentials or provider UI flow enter the command domain. Plan summaries stay
-redacted (config payload hashes collapse to `configVersion`/`secretRefCount`),
+redacted (config payload hashes collapse to `configVersion`/`refCount`),
 the protected `lark-primary` binding and schema v2 profiles reject cleanly,
 and `auth` is normalized through schema v3 with exact rollback coverage.
 Focused coverage: `tests/unit/application/channel-commands.test.ts`.
@@ -131,6 +131,26 @@ with the same narrow authorization; an online profile contributes its
 external runtime snapshot via `supervisor.externalChannelsFor`. Focused
 coverage: `tests/unit/cli/channel.test.ts` and
 `tests/integration/ui/server.test.ts`.
+
+Stage 10F shipped the no-network composition evidence:
+`tests/integration/channel/fixture-composition.test.ts` drives the no-op
+fixture package (`tests/fixtures/channel/noop-external-channel-plugin.ts`)
+through the complete operations path — pin, deployment trust, configure,
+login intent, activation, canonical status, config-drift restart, disable,
+package unload, and rollback — entirely through the Stage 10B–10E surfaces
+with no socket, file, credential, or provider access. Fail-closed coverage
+includes missing trust (`channel-plugin-untrusted`), undeclared pins
+(`channel-package-not-declared`), pin drift (`channel-package-pin-mismatch`),
+provider-incompatible config (`invalid-channel-plugin-config` at package
+load, before any runtime exists), and transactional start-failure cleanup
+with clean retry. Two boundary fixes landed with the evidence:
+`ChannelRuntimeAdmin` now excludes built-in `lark`/`wechat-kf` instances from
+external reconciliation so each keeps its own runtime owner, and the
+configure command's plan parameters and change fields were renamed
+(`secretRefsJson` → `refMapJson`, `secretRefCount` → `refCount`) so the
+plan payload's secret-name guard cannot reject a legitimate change. No
+defaults, stored bytes, provider connections, or deployment requirements
+changed.
 
 ## Remaining Stage 10: unified operations
 
@@ -314,11 +334,11 @@ installation, and enabling a new account require separate explicit authority.
 
 ## Recommended next task
 
-Start with Stage 10F only. Exercise the complete operations path with an
-already-installed, no-network fixture package: pin, trust, configure,
-login intent, activate, status, restart, drain, unload, and rollback end
-to end through the Stage 10B–10E surfaces. Do not combine it with the
-`weixin-ilink` provider.
+Start with Stage 11A only. Record the `weixin-ilink` protocol and license
+evidence (official protocol flow, authentication lifecycle, cursor and reply
+semantics, provider limits, license obligations) before writing any package
+code; the provider stays outside core, disabled by default, and gated by the
+Stage 9/10 trust and composition boundaries already proven by Stage 10F.
 
 ## Handoff checklist
 

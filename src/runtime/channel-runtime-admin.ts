@@ -62,8 +62,15 @@ export interface ChannelReconcileInput {
   instances: readonly ResolvedChannelInstance[];
 }
 
+const BUILT_IN_PLUGIN_IDS = new Set(['lark', 'wechat-kf']);
+
 function keyOf(ref: ChannelInstanceRef): string {
   return `${ref.pluginId}/${ref.instanceId}`;
+}
+
+/** The admin owns external plugin instances only; built-ins keep their own owners. */
+function isExternal(instance: ChannelInstanceRef): boolean {
+  return !BUILT_IN_PLUGIN_IDS.has(instance.pluginId);
 }
 
 function stableJson(value: unknown): string {
@@ -247,7 +254,8 @@ export class ChannelRuntimeAdmin {
    */
   async reconcile(input: ChannelReconcileInput): Promise<ChannelReconcileReport> {
     const outcomes: ChannelReconcileOutcome[] = [];
-    const enabledInstances = input.instances.filter((instance) => instance.enabled);
+    const externalInstances = input.instances.filter(isExternal);
+    const enabledInstances = externalInstances.filter((instance) => instance.enabled);
     const neededPluginIds = new Set(enabledInstances.map((instance) => instance.pluginId));
     const blockedPluginIds = new Set<string>();
     const pendingLoads: ExternalChannelPluginRequest[] = [];
@@ -290,14 +298,14 @@ export class ChannelRuntimeAdmin {
       }
     }
 
-    const desiredByKey = new Map(input.instances.map((instance) => [keyOf(instance), instance]));
+    const desiredByKey = new Map(externalInstances.map((instance) => [keyOf(instance), instance]));
     for (const managed of this.manager.snapshot().instances) {
       const desired = desiredByKey.get(keyOf(managed));
       if (desired?.enabled) continue;
       outcomes.push(await this.stopInstance(managed));
     }
 
-    for (const instance of input.instances) {
+    for (const instance of externalInstances) {
       if (!instance.enabled || blockedPluginIds.has(instance.pluginId)) continue;
       const current = this.manager.instanceFor(instance);
       if (!current) {

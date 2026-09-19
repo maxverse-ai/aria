@@ -112,7 +112,7 @@ describe('channel.instance.configure', () => {
     expect(changes.map((change: { field: string }) => change.field)).toEqual([
       'channels.instances.personal-1.plugin',
       'channels.instances.personal-1.configVersion',
-      'channels.instances.personal-1.secretRefCount',
+      'channels.instances.personal-1.refCount',
     ]);
     expect(() => normalizeProfileConfig(next.profiles.work!)).not.toThrow();
   });
@@ -151,7 +151,7 @@ describe('channel.instance.configure', () => {
     expect(() =>
       prepare(channelInstanceConfigureCommand, root, {
         ...parameters,
-        secretRefsJson: JSON.stringify({ bearer: { source: 'inline', id: 'x' } }),
+        refMapJson: JSON.stringify({ bearer: { source: 'inline', id: 'x' } }),
       }),
     ).toThrow(/failed validation/);
   });
@@ -237,7 +237,7 @@ describe('schema gating', () => {
             pluginId: 'weixin-ilink',
             configVersion: 1,
             configJson: '{}',
-            secretRefsJson: '{}',
+            refMapJson: '{}',
             package: '@acme/pkg',
             version: '1.0.0',
             requestedAt: 't',

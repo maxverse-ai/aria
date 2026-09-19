@@ -45,7 +45,7 @@ export function channelInstanceConfigureParameters(
     pluginId: input.pluginId,
     configVersion: input.configVersion,
     configJson: JSON.stringify(input.config),
-    secretRefsJson: JSON.stringify(input.secretRefs),
+    refMapJson: JSON.stringify(input.secretRefs),
   };
 }
 
@@ -110,7 +110,7 @@ export const channelInstanceConfigureCommand: ManagementCommandDefinition = {
     const pluginId = stringValue(parameters.pluginId, 'pluginId');
     const configVersion = positiveInteger(parameters.configVersion, 'configVersion');
     const config = jsonRecord(parameters.configJson, 'configJson');
-    const secretRefs = jsonRecord(parameters.secretRefsJson, 'secretRefsJson');
+    const secretRefs = jsonRecord(parameters.refMapJson, 'refMapJson');
     const channels = channelsSection(root.profiles[profile], profile);
     const current = channels.instances[instanceId];
     assertConfigurableInstance(instanceId, pluginId, current);
@@ -158,7 +158,7 @@ export const channelInstanceConfigureCommand: ManagementCommandDefinition = {
           after: configVersion,
         },
         {
-          field: `channels.instances.${instanceId}.secretRefCount`,
+          field: `channels.instances.${instanceId}.refCount`,
           before: current ? Object.keys(current.secretRefs).length : null,
           after: Object.keys(secretRefs).length,
         },
