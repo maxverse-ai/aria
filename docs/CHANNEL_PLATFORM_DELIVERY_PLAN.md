@@ -68,7 +68,7 @@ that separate plan.
 | 10D | Complete | Channel-grained runtime reconciliation behind `ChannelRuntimeAdmin` |
 | 10E | Complete | Thin `aria channel` CLI and `/api/channels` console adapters over read/command/admin contracts |
 | 10F | Complete | No-network fixture evidence across pin/trust/configure/login/activate/status/restart/drain/unload/rollback with fail-closed coverage |
-| 11 | In progress (11A–11E complete) | Disabled-by-default `weixin-ilink` text MVP |
+| 11 | Complete | Disabled-by-default `weixin-ilink` text MVP |
 | 12 | Not started | Media, group, proactive-send, and multi-account capabilities |
 
 The ordinary CLI supplies no external composition input. No real external
@@ -330,12 +330,28 @@ apply its conversation-reset and interruption contracts. Command
 envelopes keep `replyContext` so core can answer in scope. Focused
 coverage: `tests/unit/channel/weixin-ilink-plugin.test.ts`.
 
-### 11F. Single-account grey rollout
+### 11F. Single-account grey rollout — complete
 
-Prove login recovery, process restart, host restart, duplicate input, partial
-delivery, rate limits, reauthentication, bounded drain, and hard rollback with
-one explicitly opted-in account. A successful canary does not change global
-defaults.
+`tests/integration/channel/weixin-ilink-canary.test.ts` exercises one
+explicitly opted-in account end to end against the no-network fake
+provider: pin → enable → QR login → inbound/outbound traffic →
+process/host restart (file state resumes credential, cursor, and delivery
+ledger with no QR round and no redelivery) → hard rollback (disable
+stops the account and unloads the package). Reauthentication works through
+a fresh login intent: a stale bearer projects `reauth-required` and stops
+polling until a new intent marker re-runs the QR flow. Duplicate input is
+suppressed at both the runtime accepted-id set and the durable sink;
+partial delivery recovers through the delivery ledger without
+double-sending completed intents; provider rate limiting keeps the poll
+loop alive; and drain reports bounded in-flight work.
+
+Two platform gaps surfaced by the canary and fixed in the same change:
+`ChannelManager` now accepts `reauth-required` as a legitimate started
+state (a runtime that needs login is not a start failure), and the auth
+command rejects only an identical intent record — a fresh `requestedAt`
+re-marks a consumed login so reauthentication can retry. Global defaults
+are unchanged: `weixin-ilink` is absent from stock profiles and inert
+without explicit pin + trust + enable.
 
 ## Stage 12: optional capabilities
 
@@ -393,12 +409,14 @@ installation, and enabling a new account require separate explicit authority.
 
 ## Recommended next task
 
-Start with Stage 11F only. Produce the single-account grey-rollout
-evidence for `weixin-ilink`: login recovery, process restart, host
-restart, duplicate input, partial delivery, rate limits, reauthentication,
-bounded drain, and hard rollback — all against the no-network fake
-transport with exactly one explicitly opted-in account. A successful
-canary does not change global defaults.
+Start with Stage 12 only. Extend `weixin-ilink` capability by capability,
+each behind its own manifest declaration, limits, fixture, and rollback:
+first images and files through the encrypted CDN pipeline
+(`getuploadurl`, AES-128-ECB, `CDNMedia`), then groups and mentions,
+then explicitly authorized proactive sends, then multi-account isolation.
+Do not emulate unsupported provider capabilities, and do not fold
+capability work into the text-MVP rollout. Protocol contract:
+`docs/WEIXIN_ILINK_PROTOCOL.md`.
 
 ## Handoff checklist
 

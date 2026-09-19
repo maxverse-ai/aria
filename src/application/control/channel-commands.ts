@@ -265,10 +265,10 @@ function authCommand(
           `cannot record a login intent for a disabled channel instance: ${instanceId}`,
         );
       }
-      if (current.auth?.intent === intent) {
+      if (current.auth?.intent === intent && current.auth.requestedAt === requestedAt) {
         throw new ControlChangeError(
           'invalid-plan',
-          `channel instance already holds a ${intent} intent: ${instanceId}`,
+          `channel instance already holds this ${intent} intent: ${instanceId}`,
         );
       }
       const auth: StoredChannelInstanceAuth = { intent, requestedAt };

@@ -38,6 +38,9 @@ export class FakeIlinkTransport implements IlinkTransport, IlinkLoginService {
   private readonly waiters: Array<() => void> = [];
   private served: { nextCursor: string; messages: IlinkInboundMessage[] } | undefined;
   private failNext: unknown;
+  private failSend: unknown;
+  private holdSend = false;
+  private readonly sendWaiters: Array<() => void> = [];
   private qrScript: IlinkQrStatus[] = [{ status: 'confirmed' }];
 
   constructor(private readonly options: { idleMs?: number } = {}) {}
@@ -50,6 +53,19 @@ export class FakeIlinkTransport implements IlinkTransport, IlinkLoginService {
   failNextPoll(error: unknown): void {
     this.failNext = error;
     for (const wake of this.waiters.splice(0)) wake();
+  }
+
+  failNextSend(error: unknown): void {
+    this.failSend = error;
+  }
+
+  /** The next sendMessage parks until releaseSends — used for drain tests. */
+  holdNextSend(): void {
+    this.holdSend = true;
+  }
+
+  releaseSends(): void {
+    for (const release of this.sendWaiters.splice(0)) release();
   }
 
   authFailure(): ChannelPluginError {
@@ -123,6 +139,15 @@ export class FakeIlinkTransport implements IlinkTransport, IlinkLoginService {
   }
 
   async sendMessage(message: IlinkSendMessage): Promise<void> {
+    if (this.holdSend) {
+      this.holdSend = false;
+      await new Promise<void>((resolve) => this.sendWaiters.push(resolve));
+    }
+    if (this.failSend) {
+      const error = this.failSend;
+      this.failSend = undefined;
+      throw error;
+    }
     this.sent.push(message);
   }
 

@@ -203,9 +203,20 @@ describe('channel.instance.login / logout', () => {
     const loggedIn = rootWith(
       v3Profile({ 'personal-1': { ...externalInstance, enabled: true, auth: { intent: 'login', requestedAt: 't0' } } }),
     );
+    // An identical intent record is a no-op and rejected.
     expect(() =>
-      prepare(channelInstanceLoginCommand, loggedIn, channelAuthParameters('personal-1', 't1')),
-    ).toThrow(/already holds a login intent/);
+      prepare(channelInstanceLoginCommand, loggedIn, channelAuthParameters('personal-1', 't0')),
+    ).toThrow(/already holds this login intent/);
+    // A fresh timestamp re-marks the intent so a consumed login can retry.
+    const { root: reauthed } = prepare(
+      channelInstanceLoginCommand,
+      loggedIn,
+      channelAuthParameters('personal-1', 't1'),
+    );
+    expect(reauthed.profiles.work!.channels!.instances['personal-1']!.auth).toEqual({
+      intent: 'login',
+      requestedAt: 't1',
+    });
     const { root: loggedOut } = prepare(
       channelInstanceLogoutCommand,
       loggedIn,

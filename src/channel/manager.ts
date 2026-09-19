@@ -9,6 +9,7 @@ import type {
   ChannelDeliveryReceipt,
   ChannelOutboundIntent,
   ChannelRuntime,
+  ChannelRuntimeSnapshot,
   ChannelRuntimeState,
   ResolvedChannelInstance,
 } from './plugin/types';
@@ -187,8 +188,8 @@ export class ChannelManager {
     try {
       entry.runtime = await this.startEntryRuntime(entry);
       const runtimeSnapshot = entry.runtime.snapshot();
-      this.updateEntry(entry, 'ready', {
-        acceptingInbound: true,
+      this.updateEntry(entry, runtimeSnapshot.state === 'ready' ? 'ready' : 'reauth-required', {
+        acceptingInbound: runtimeSnapshot.acceptingInbound,
         inFlightInbound: runtimeSnapshot.inFlightInbound,
         inFlightOutbound: runtimeSnapshot.inFlightOutbound,
       });
@@ -263,11 +264,15 @@ export class ChannelManager {
       this.entries.push(replacement);
       this.entries.sort((a, b) => a.order - b.order);
       const runtimeSnapshot = replacement.runtime.snapshot();
-      this.updateEntry(replacement, 'ready', {
-        acceptingInbound: true,
-        inFlightInbound: runtimeSnapshot.inFlightInbound,
-        inFlightOutbound: runtimeSnapshot.inFlightOutbound,
-      });
+      this.updateEntry(
+        replacement,
+        runtimeSnapshot.state === 'ready' ? 'ready' : 'reauth-required',
+        {
+          acceptingInbound: runtimeSnapshot.acceptingInbound,
+          inFlightInbound: runtimeSnapshot.inFlightInbound,
+          inFlightOutbound: runtimeSnapshot.inFlightOutbound,
+        },
+      );
       return this.snapshotEntry(replacement);
     } catch (error) {
       await this.addInstance(previousPlan).catch(() => undefined);
@@ -337,14 +342,9 @@ export class ChannelManager {
         entry.runtime = runtime;
         if (this.controller.signal.aborted) throw abortError();
         const runtimeSnapshot = runtime.snapshot();
-        if (runtimeSnapshot.state !== 'ready' || !runtimeSnapshot.acceptingInbound) {
-          throw managerError('channel runtime did not become ready during start', {
-            kind: 'permanent',
-            code: 'channel-runtime-not-ready',
-          });
-        }
-        this.updateEntry(entry, 'ready', {
-          acceptingInbound: true,
+        const entryState = this.startedEntryState(runtimeSnapshot);
+        this.updateEntry(entry, entryState, {
+          acceptingInbound: runtimeSnapshot.acceptingInbound,
           inFlightInbound: runtimeSnapshot.inFlightInbound,
           inFlightOutbound: runtimeSnapshot.inFlightOutbound,
         });
@@ -545,14 +545,30 @@ export class ChannelManager {
       signal: this.controller.signal,
     });
     const runtimeSnapshot = runtime.snapshot();
-    if (runtimeSnapshot.state !== 'ready' || !runtimeSnapshot.acceptingInbound) {
+    try {
+      this.startedEntryState(runtimeSnapshot);
+    } catch (error) {
       await runtime.close().catch(() => undefined);
-      throw managerError('channel runtime did not become ready during start', {
-        kind: 'permanent',
-        code: 'channel-runtime-not-ready',
-      });
+      throw error;
     }
     return runtime;
+  }
+
+  /**
+   * A started runtime is either ready and accepting inbound, or waiting on
+   * credentials: `reauth-required` is a legitimate started state that the
+   * runtime admin resolves through a login intent — it is not a start
+   * failure.
+   */
+  private startedEntryState(
+    snapshot: ChannelRuntimeSnapshot,
+  ): 'ready' | 'reauth-required' {
+    if (snapshot.state === 'ready' && snapshot.acceptingInbound) return 'ready';
+    if (snapshot.state === 'reauth-required') return 'reauth-required';
+    throw managerError('channel runtime did not become ready during start', {
+      kind: 'permanent',
+      code: 'channel-runtime-not-ready',
+    });
   }
 
   private transition(state: ChannelManagerState): void {
