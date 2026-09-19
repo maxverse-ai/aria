@@ -23,6 +23,14 @@ import {
   userLoginStart,
 } from './api';
 import { activateProfile, listBots, listProfiles } from './fleet';
+import {
+  channelDiagnose,
+  channelPlan,
+  channelPlanCommit,
+  channelPlanConfirm,
+  channelPlanShow,
+  channelStatus,
+} from './channels';
 import { onboardCreate, onboardState, onboardValidate } from './onboard';
 import { finishQrRegistration, qrStatus, startQrRegistration } from './qr-register';
 import {
@@ -244,6 +252,32 @@ async function route(
   if (path === '/api/chats' && g) {
     const profile = url.searchParams.get('profile') ?? (await readActiveProfile(deps.rootDir));
     sendJson(res, 200, await listChats(profile ? sup.channelFor(profile) : undefined));
+    return;
+  }
+
+  // --- channel instances ---
+  if (path === '/api/channels' && g) {
+    sendJson(res, 200, await channelStatus(deps, url.searchParams.get('profile') ?? undefined));
+    return;
+  }
+  if (path === '/api/channels/diagnose' && g) {
+    sendJson(res, 200, await channelDiagnose(deps, url.searchParams.get('profile') ?? undefined));
+    return;
+  }
+  if (path === '/api/channels/plan' && g) {
+    sendJson(res, 200, await channelPlanShow(deps, url.searchParams.get('planId') ?? undefined));
+    return;
+  }
+  if (path === '/api/channels/plan' && p) {
+    sendJson(res, 200, await channelPlan(deps, (await readJsonBody(req)) as { profile?: string; command?: string; input?: Record<string, unknown> }));
+    return;
+  }
+  if (path === '/api/channels/plan/confirm' && p) {
+    sendJson(res, 200, await channelPlanConfirm(deps, (await readJsonBody(req)) as { planId?: string }));
+    return;
+  }
+  if (path === '/api/channels/plan/commit' && p) {
+    sendJson(res, 200, await channelPlanCommit(deps, (await readJsonBody(req)) as { planId?: string }));
     return;
   }
 

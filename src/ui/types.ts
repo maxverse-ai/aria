@@ -10,6 +10,7 @@ import type {
   TriggerReadSnapshot,
 } from '../trigger/operations';
 import type { ControlActorContext } from '../application/control';
+import type { ProfileExternalChannelRuntimeSnapshot } from '../runtime/external-channel-runtime';
 
 /**
  * The live per-profile runtime the console edits. The supervisor's `Controls`
@@ -28,6 +29,7 @@ export interface UiRuntime extends MutableProfileState {
 export interface UiSupervisor {
   isOnline(profile: string): boolean;
   controlsFor(profile: string): Controls | undefined;
+  externalChannelsFor(profile: string): ProfileExternalChannelRuntimeSnapshot | undefined;
   channelFor(profile: string): LarkChannel | undefined;
   list(): ManagedStatus[];
   startProfile(profile: string): Promise<void>;

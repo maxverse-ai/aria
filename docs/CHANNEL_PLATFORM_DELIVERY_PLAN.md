@@ -66,7 +66,8 @@ that separate plan.
 | 10B | Complete | Canonical channel read model (`aria.channel.status.v1`) with redacted instance/plugin projections and diagnostics |
 | 10C | Complete | Named desired-state commands: package pin, instance configure/enable/disable, and provider-neutral login/logout intent |
 | 10D | Complete | Channel-grained runtime reconciliation behind `ChannelRuntimeAdmin` |
-| 10E–10F | Not complete | CLI/Web adapters and downstream opt-in evidence |
+| 10E | Complete | Thin `aria channel` CLI and `/api/channels` console adapters over read/command/admin contracts |
+| 10F | Not complete | Fixture composition and downstream opt-in evidence |
 | 11 | Not started | Disabled-by-default `weixin-ilink` text MVP |
 | 12 | Not started | Media, group, proactive-send, and multi-account capabilities |
 
@@ -116,6 +117,20 @@ and forwarded through the registry's managed runtime wrapper); plugins
 without auth support report `channel-auth-unsupported`. The admin never
 writes desired state, installs packages, or resolves secrets. Focused
 coverage: `tests/unit/runtime/channel-runtime-admin.test.ts`.
+
+Stage 10E shipped thin adapters over the same contracts:
+`aria channel list|status|diagnose` renders the Stage 10B read model, and
+`aria channel pin|configure|enable|disable|login|logout` creates redacted
+plans on the shared plan store — commit still goes through `config
+confirm`/`config apply`, so no adapter-specific writer or lifecycle owner
+exists. The local CLI's elevated-command authorization was widened to
+exactly the sensitive channel commands. The console server exposes the
+same surface at `/api/channels` (status, diagnose) and
+`/api/channels/plan` (create/show/confirm/commit) under the `web` actor
+with the same narrow authorization; an online profile contributes its
+external runtime snapshot via `supervisor.externalChannelsFor`. Focused
+coverage: `tests/unit/cli/channel.test.ts` and
+`tests/integration/ui/server.test.ts`.
 
 ## Remaining Stage 10: unified operations
 
@@ -299,10 +314,11 @@ installation, and enabling a new account require separate explicit authority.
 
 ## Recommended next task
 
-Start with Stage 10E only. Add thin CLI and Web adapters over the Stage 10B
-read model, the Stage 10C management commands, and the Stage 10D
-`ChannelRuntimeAdmin` contract. Do not create adapter-specific writers or
-lifecycle owners, and do not combine it with the `weixin-ilink` provider.
+Start with Stage 10F only. Exercise the complete operations path with an
+already-installed, no-network fixture package: pin, trust, configure,
+login intent, activate, status, restart, drain, unload, and rollback end
+to end through the Stage 10B–10E surfaces. Do not combine it with the
+`weixin-ilink` provider.
 
 ## Handoff checklist
 

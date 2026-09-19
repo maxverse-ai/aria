@@ -6,6 +6,9 @@ import {
   ManagementApi,
   configSettingsSnapshot,
   managementCommandRegistry,
+  CHANNEL_INSTANCE_CONFIGURE_COMMAND,
+  CHANNEL_INSTANCE_ENABLE_COMMAND,
+  CHANNEL_INSTANCE_LOGIN_COMMAND,
   PROFILE_ACCESS_UPDATE_COMMAND,
   operationIdForSetting,
   parseSettingValue,
@@ -120,18 +123,30 @@ export function formatApplyResult(result: ControlChangeApplyResult): string {
 }
 
 /**
+ * Elevated commands the authenticated local CLI may plan, confirm, and apply.
+ * Channel mutations share the same plan store, so `config confirm`/`config
+ * apply` must see them too.
+ */
+export const LOCAL_CLI_ELEVATED_COMMANDS: readonly string[] = Object.freeze([
+  PROFILE_ACCESS_UPDATE_COMMAND,
+  CHANNEL_INSTANCE_CONFIGURE_COMMAND,
+  CHANNEL_INSTANCE_ENABLE_COMMAND,
+  CHANNEL_INSTANCE_LOGIN_COMMAND,
+]);
+
+/**
  * The local CLI plans low-risk settings itself (`config plan` only maps
- * LOW_RISK_CONFIG_SETTINGS), but `chat mention` emits a sensitive
- * `profile.access.update` plan on the same plan store — confirm/apply must
- * see the full registry plus a narrow local-cli authorization for that one
- * command so those plans can finish through `config confirm`/`config apply`.
+ * LOW_RISK_CONFIG_SETTINGS), but sensitive plans on the same plan store —
+ * `profile.access.update` from `chat mention` and channel mutations from
+ * `channel *` — must finish through `config confirm`/`config apply` with a
+ * narrow local-cli authorization for exactly those commands.
  */
 function managementApi(opts: Pick<ConfigChangeCliOptions, 'rootDir'>): ManagementApi {
   return new ManagementApi(
     new ConfigChangeService({
       rootDir: opts.rootDir ?? paths.rootDir,
       registry: managementCommandRegistry,
-      authorizeCommand: authorizeAdapterCommands('local-cli', [PROFILE_ACCESS_UPDATE_COMMAND]),
+      authorizeCommand: authorizeAdapterCommands('local-cli', LOCAL_CLI_ELEVATED_COMMANDS),
     }),
   );
 }

@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createDefaultProfileConfig } from '../../../src/config/profile-schema';
+import { migrateRootConfigToSchemaV3 } from '../../../src/config/channel-schema-migration';
 import {
   createRootConfig,
   loadRootConfig,
@@ -43,6 +44,7 @@ function stubSupervisor(): UiSupervisor {
   return {
     isOnline: (p) => online.has(p),
     controlsFor: (p) => online.get(p),
+    externalChannelsFor: () => undefined,
     channelFor: () => undefined,
     list: () =>
       [...online.keys()].map((p) => ({
@@ -329,5 +331,56 @@ describe('ui server (supervisor-backed)', () => {
   it('returns 404 for an unknown QR registration session', async () => {
     const res = await get('/api/profiles/qr/status?sessionId=nope', handle.token);
     expect(res.status).toBe(404);
+  });
+
+  it('serves channel status, plan, confirm, and commit for a v3 profile', async () => {
+    const rc = migrateRootConfigToSchemaV3((await loadRootConfig(configPath))!);
+    const work = rc.profiles.work!;
+    rc.profiles.work = {
+      ...work,
+      channels: {
+        ...work.channels!,
+        instances: {
+          ...work.channels!.instances,
+          'weixin-main': {
+            plugin: 'weixin-ilink',
+            enabled: false,
+            configVersion: 1,
+            config: { mode: 'qr' },
+            secretRefs: { bearer: { source: 'file' as const, id: 'weixin/bearer' } },
+          },
+        },
+      },
+    };
+    await saveRootConfig(rc, configPath);
+
+    const status = await json(await get('/api/channels?profile=work', handle.token));
+    expect(status).toMatchObject({ schema: 'aria.channel.status.v1', profileId: 'work' });
+    expect(
+      status.instances.map((item: { instanceId: string }) => item.instanceId).sort(),
+    ).toEqual(['lark-primary', 'weixin-main']);
+    expect(JSON.stringify(status)).not.toContain('weixin/bearer');
+
+    const plan = await json(await post('/api/channels/plan', handle.token, {
+      profile: 'work',
+      command: 'channel.instance.enable',
+      input: { instanceId: 'weixin-main' },
+    }));
+    expect(plan.operation.id).toBe('channel.instance.enable');
+
+    const confirmed = await json(await post('/api/channels/plan/confirm', handle.token, { planId: plan.id }));
+    expect(confirmed.status).toBe('confirmed');
+    const applied = await json(await post('/api/channels/plan/commit', handle.token, { planId: plan.id }));
+    expect(applied.planId).toBe(plan.id);
+
+    const stored = (await loadRootConfig(configPath))!;
+    expect(stored.profiles.work?.channels?.instances['weixin-main']?.enabled).toBe(true);
+  });
+
+  it('rejects unsupported channel commands and missing plan ids', async () => {
+    expect((await post('/api/channels/plan', handle.token, {
+      command: 'profile.access.update', input: {},
+    })).status).toBe(400);
+    expect((await get('/api/channels/plan', handle.token)).status).toBe(400);
   });
 });

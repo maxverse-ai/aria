@@ -436,6 +436,94 @@ Apply a confirmed configuration change plan
 | --- | --- |
 | `--json` | print stable machine-readable JSON |
 
+## `aria channel`
+
+Inspect and manage channel plugin instances
+
+### `aria channel list`
+
+List resolved channel instances (read-only)
+
+| Option | Description |
+| --- | --- |
+| `--profile <name>` | profile name (defaults to active profile) |
+| `--json` | print stable machine-readable JSON |
+
+### `aria channel status`
+
+Show channel plugin and instance status (read-only)
+
+| Option | Description |
+| --- | --- |
+| `--profile <name>` | profile name (defaults to active profile) |
+| `--json` | print stable machine-readable JSON |
+
+### `aria channel diagnose`
+
+Show channel diagnostics (read-only)
+
+| Option | Description |
+| --- | --- |
+| `--profile <name>` | profile name (defaults to active profile) |
+| `--json` | print stable machine-readable JSON |
+
+### `aria channel pin <package> <version>`
+
+Plan an exact channel plugin package pin
+
+| Option | Description |
+| --- | --- |
+| `--profile <name>` | profile name (defaults to active profile) |
+| `--json` | print stable machine-readable JSON |
+
+### `aria channel configure <instance-id>`
+
+Plan a channel instance configuration
+
+| Option | Description |
+| --- | --- |
+| `--plugin <id> *(required)*` | channel plugin id |
+| `--config <json> *(required)*` | instance config payload as JSON |
+| `--secret-refs <json>` | secret references as JSON |
+| `--profile <name>` | profile name (defaults to active profile) |
+| `--json` | print stable machine-readable JSON |
+
+### `aria channel enable <instance-id>`
+
+Plan enabling a channel instance
+
+| Option | Description |
+| --- | --- |
+| `--profile <name>` | profile name (defaults to active profile) |
+| `--json` | print stable machine-readable JSON |
+
+### `aria channel disable <instance-id>`
+
+Plan disabling a channel instance
+
+| Option | Description |
+| --- | --- |
+| `--profile <name>` | profile name (defaults to active profile) |
+| `--json` | print stable machine-readable JSON |
+
+### `aria channel login <instance-id>`
+
+Plan a provider login intent for a channel instance
+
+| Option | Description |
+| --- | --- |
+| `--profile <name>` | profile name (defaults to active profile) |
+| `--json` | print stable machine-readable JSON |
+
+### `aria channel logout <instance-id>`
+
+Plan a provider logout intent for a channel instance
+
+| Option | Description |
+| --- | --- |
+| `--profile <name>` | profile name (defaults to active profile) |
+| `--json` | print stable machine-readable JSON |
+
 ## `aria space`
 
 Prepare, activate and roll back execution spaces

@@ -43,6 +43,17 @@ import {
   runConfigSettings,
 } from './commands/config-change';
 import {
+  runChannelConfigure,
+  runChannelDiagnose,
+  runChannelDisable,
+  runChannelEnable,
+  runChannelList,
+  runChannelLogin,
+  runChannelLogout,
+  runChannelPin,
+  runChannelStatus,
+} from './commands/channel';
+import {
   runUpdateApply,
   runUpdateCancel,
   runUpdateCheck,
@@ -515,6 +526,102 @@ config
   .option('--json', 'print stable machine-readable JSON')
   .action(async (planId: string, opts: { json?: boolean }) => {
     await runConfigApply(planId, opts);
+  });
+
+const channel = program
+  .command('channel')
+  .description('Inspect and manage channel plugin instances');
+
+channel
+  .command('list')
+  .description('List resolved channel instances (read-only)')
+  .option('--profile <name>', 'profile name (defaults to active profile)')
+  .option('--json', 'print stable machine-readable JSON')
+  .action(async (opts: { profile?: string; json?: boolean }) => {
+    await runChannelList(opts);
+  });
+
+channel
+  .command('status')
+  .description('Show channel plugin and instance status (read-only)')
+  .option('--profile <name>', 'profile name (defaults to active profile)')
+  .option('--json', 'print stable machine-readable JSON')
+  .action(async (opts: { profile?: string; json?: boolean }) => {
+    await runChannelStatus(opts);
+  });
+
+channel
+  .command('diagnose')
+  .description('Show channel diagnostics (read-only)')
+  .option('--profile <name>', 'profile name (defaults to active profile)')
+  .option('--json', 'print stable machine-readable JSON')
+  .action(async (opts: { profile?: string; json?: boolean }) => {
+    await runChannelDiagnose(opts);
+  });
+
+channel
+  .command('pin <package> <version>')
+  .description('Plan an exact channel plugin package pin')
+  .option('--profile <name>', 'profile name (defaults to active profile)')
+  .option('--json', 'print stable machine-readable JSON')
+  .action(async (packageName: string, version: string, opts: { profile?: string; json?: boolean }) => {
+    await runChannelPin(packageName, version, opts);
+  });
+
+channel
+  .command('configure <instance-id>')
+  .description('Plan a channel instance configuration')
+  .requiredOption('--plugin <id>', 'channel plugin id')
+  .requiredOption('--config-version <n>', 'plugin config schema version', parseInt)
+  .requiredOption('--config <json>', 'instance config payload as JSON')
+  .option('--secret-refs <json>', 'secret references as JSON')
+  .option('--profile <name>', 'profile name (defaults to active profile)')
+  .option('--json', 'print stable machine-readable JSON')
+  .action(async (instanceId: string, opts: {
+    plugin: string;
+    configVersion: number;
+    config: string;
+    secretRefs?: string;
+    profile?: string;
+    json?: boolean;
+  }) => {
+    await runChannelConfigure(instanceId, opts);
+  });
+
+channel
+  .command('enable <instance-id>')
+  .description('Plan enabling a channel instance')
+  .option('--profile <name>', 'profile name (defaults to active profile)')
+  .option('--json', 'print stable machine-readable JSON')
+  .action(async (instanceId: string, opts: { profile?: string; json?: boolean }) => {
+    await runChannelEnable(instanceId, opts);
+  });
+
+channel
+  .command('disable <instance-id>')
+  .description('Plan disabling a channel instance')
+  .option('--profile <name>', 'profile name (defaults to active profile)')
+  .option('--json', 'print stable machine-readable JSON')
+  .action(async (instanceId: string, opts: { profile?: string; json?: boolean }) => {
+    await runChannelDisable(instanceId, opts);
+  });
+
+channel
+  .command('login <instance-id>')
+  .description('Plan a provider login intent for a channel instance')
+  .option('--profile <name>', 'profile name (defaults to active profile)')
+  .option('--json', 'print stable machine-readable JSON')
+  .action(async (instanceId: string, opts: { profile?: string; json?: boolean }) => {
+    await runChannelLogin(instanceId, opts);
+  });
+
+channel
+  .command('logout <instance-id>')
+  .description('Plan a provider logout intent for a channel instance')
+  .option('--profile <name>', 'profile name (defaults to active profile)')
+  .option('--json', 'print stable machine-readable JSON')
+  .action(async (instanceId: string, opts: { profile?: string; json?: boolean }) => {
+    await runChannelLogout(instanceId, opts);
   });
 
 const space = program.command('space').description('Prepare, activate and roll back execution spaces');
