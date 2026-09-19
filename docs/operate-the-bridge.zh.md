@@ -82,6 +82,7 @@ aria profile remove <name>                     # 归档本地状态（默认）
 aria profile remove <name> --purge --yes       # 永久删除
 aria profile export <name>                     # 默认脱敏
 aria profile export <name> --include-secrets --yes
+aria profile import <file> [--name <n>] [--app-secret <s>]
 ```
 
 容易踩的坑：
@@ -93,6 +94,8 @@ aria profile export <name> --include-secrets --yes
 - 用错 `--agent` 创建的 profile 无法转换：先停掉或注销其服务，
   `profile remove`，再重建。
 - `profile export` 默认脱敏；`--include-secrets --yes` 才导出敏感配置。
+- `profile import` 只导入配置和 app secret——会话历史和工作区数据不随
+  导出文件迁移。完整数据迁移用 `aria space prepare`。
 
 ## 只读检查
 

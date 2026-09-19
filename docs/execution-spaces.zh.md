@@ -16,6 +16,7 @@
 
 ```bash
 aria space status [--profile <name>]                     # 当前模式、保留的 preparation、旧版清单
+aria space list [--profile <name>]                       # 全部 preparation：活跃、保留、已暂存
 aria space prepare <deployment-file> [--profile <name>]  # 暂存并校验一个不可变 preparation（profile 离线）
 aria space inspect <selection-file> [--profile <name>]   # 审查 preparation，不改变状态
 aria space activate <selection-file> [--profile <name>]  # 在 profile 停止时激活

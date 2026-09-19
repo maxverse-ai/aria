@@ -17,6 +17,7 @@ If you run a personal bot with a single agent, you do not need this page.
 
 ```bash
 aria space status [--profile <name>]                     # current mode, retained preparations, legacy inventory
+aria space list [--profile <name>]                       # all preparations: active, retained, staged
 aria space prepare <deployment-file> [--profile <name>]  # stage + verify an immutable preparation (profile offline)
 aria space inspect <selection-file> [--profile <name>]   # review a preparation, no state changes
 aria space activate <selection-file> [--profile <name>]  # activate while the profile is stopped

@@ -56,6 +56,8 @@ transition.
 ```sh
 aria update check
 aria update plan
+aria update plan-show <plan-id>
+aria update cancel <plan-id>
 aria update apply <plan-id>
 aria update status <operation-id>
 aria update rollback
@@ -64,6 +66,12 @@ aria update rollback
 - `aria update plan --target-version <x.y.z>` selects an exact complete immutable
   release. The command prints the plan id, digest, expiry, and exact apply
   command.
+- `aria update plan-show <plan-id>` reads a persisted plan back — its
+  lifecycle state (`active`/`expired`/`cancelled`) and every operation that
+  consumed it. `aria update cancel <plan-id>` marks an unapplied plan
+  cancelled: the plan file is kept as evidence, `cancelledAt` is recorded,
+  and `apply` rejects it. A plan that was already applied cannot be
+  cancelled.
 - `apply` and `rollback` use a detached OS executor by default so a service
   restart cannot terminate its own updater. `--foreground` is a recovery-only
   escape hatch.

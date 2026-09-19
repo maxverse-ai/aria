@@ -13,6 +13,7 @@ import {
   runProfileCreate,
   runProfileStart,
   runProfileExport,
+  runProfileImport,
   runProfileList,
   runProfileRemove,
   runProfileUse,
@@ -43,8 +44,10 @@ import {
 } from './commands/config-change';
 import {
   runUpdateApply,
+  runUpdateCancel,
   runUpdateCheck,
   runUpdatePlan,
+  runUpdatePlanShow,
   runUpdateRollback,
   runUpdateStatus,
 } from './commands/update';
@@ -127,8 +130,9 @@ profile
 profile
   .command('list')
   .description('List configured profiles')
-  .action(async () => {
-    await runProfileList();
+  .option('--json', 'print machine-readable JSON')
+  .action(async (opts: { json?: boolean }) => {
+    await runProfileList(opts);
   });
 
 profile
@@ -194,6 +198,15 @@ profile
     });
   });
 
+profile
+  .command('import <file>')
+  .description('Import a `profile export` document (configuration + app secret only; data does not travel)')
+  .option('--name <name>', 'import under a different profile name')
+  .option('--app-secret <secret>', 'app secret for exports written with secrets redacted')
+  .action(async (file: string, opts: { name?: string; appSecret?: string }) => {
+    await runProfileImport(file, opts);
+  });
+
 program
   .command('ui')
   .description('Open the local web console (config, profiles, online bots) in your browser')
@@ -206,8 +219,9 @@ program
 program
   .command('ps')
   .description('List running bridge processes on this machine')
-  .action(() => {
-    runPs();
+  .option('--json', 'print machine-readable JSON')
+  .action((opts: { json?: boolean }) => {
+    runPs(opts);
   });
 
 const chat = program
@@ -485,6 +499,10 @@ for (const action of ['status', 'rollback'] as const) {
     .option('--json', 'print machine-readable metadata')
     .action(async (opts: SpaceCliOptions) => runSpaceCommand(action, undefined, opts));
 }
+space.command('list').description('List a profile\'s space preparations: active, retained, and staged receipts (read-only)')
+  .option('--profile <name>', 'profile name')
+  .option('--json', 'print machine-readable metadata')
+  .action(async (opts: SpaceCliOptions) => runSpaceCommand('list', undefined, opts));
 space.command('prepare <deployment-file>').description('Stage and verify an offline profile; legacy data stays sealed unless imported by a trusted adapter')
   .option('--profile <name>', 'profile name').option('--id <id>', 'resume an exact preparation id')
   .option('--json', 'print preparation selection')
@@ -553,8 +571,9 @@ preflight
 program
   .command('kill <target>')
   .description('Kill a running bridge process by short id or list index (SIGTERM, then SIGKILL after 2s). Was `stop <target>` in older versions.')
-  .action(async (target: string) => {
-    await runKillCli(target);
+  .option('--json', 'print machine-readable JSON')
+  .action(async (target: string, opts: { json?: boolean }) => {
+    await runKillCli(target, opts);
   });
 
 // === service-level commands (OS-managed daemon: launchd/systemd/schtasks) ===
@@ -588,8 +607,9 @@ program
   .description('Stop the OS-managed daemon and disable autostart (service definition stays)')
   .option('--profile <name>', 'profile name (defaults to active profile)')
   .option('--web-ui', 'target the supervisor service (auto-detected when no per-profile service exists)')
-  .action(async (opts: { profile?: string; webUi?: boolean }) => {
-    await runServiceStop({ profile: opts.profile, webUi: opts.webUi });
+  .option('--json', 'print machine-readable JSON')
+  .action(async (opts: { profile?: string; webUi?: boolean; json?: boolean }) => {
+    await runServiceStop(opts);
   });
 
 program
@@ -613,8 +633,9 @@ program
   .description('Show OS service status (pid, last exit, log paths)')
   .option('--profile <name>', 'profile name (defaults to active profile)')
   .option('--web-ui', 'target the supervisor service instead of a per-profile one')
-  .action(async (opts: { profile?: string; webUi?: boolean }) => {
-    await runServiceStatus({ profile: opts.profile, webUi: opts.webUi });
+  .option('--json', 'print machine-readable JSON')
+  .action(async (opts: { profile?: string; webUi?: boolean; json?: boolean }) => {
+    await runServiceStatus(opts);
   });
 
 program
@@ -622,8 +643,9 @@ program
   .description('Remove the OS service registration (bootout + delete plist)')
   .option('--profile <name>', 'profile name (defaults to active profile)')
   .option('--web-ui', 'target the supervisor service instead of a per-profile one')
-  .action(async (opts: { profile?: string; webUi?: boolean }) => {
-    await runServiceUnregister({ profile: opts.profile, webUi: opts.webUi });
+  .option('--json', 'print machine-readable JSON')
+  .action(async (opts: { profile?: string; webUi?: boolean; json?: boolean }) => {
+    await runServiceUnregister(opts);
   });
 
 // === distribution commands (private immutable GitHub Releases) ===
@@ -648,6 +670,22 @@ update
   .option('--json', 'print machine-readable JSON')
   .action(async (opts: { targetVersion?: string; force?: boolean; json?: boolean }) => {
     await runUpdatePlan({ version: opts.targetVersion, force: opts.force, json: opts.json });
+  });
+
+update
+  .command('plan-show <plan-id>')
+  .description('Show a persisted update plan and its lifecycle state (read-only)')
+  .option('--json', 'print machine-readable JSON')
+  .action(async (planId: string, opts: { json?: boolean }) => {
+    await runUpdatePlanShow(planId, opts);
+  });
+
+update
+  .command('cancel <plan-id>')
+  .description('Cancel an unapplied update plan; the plan file is kept as evidence')
+  .option('--json', 'print machine-readable JSON')
+  .action(async (planId: string, opts: { json?: boolean }) => {
+    await runUpdateCancel(planId, opts);
   });
 
 update
@@ -701,8 +739,9 @@ secrets
   .command('list')
   .description('List the IDs of secrets in the encrypted keystore (no secrets shown)')
   .option('--profile <name>', 'profile name (defaults to active profile)')
-  .action(async (opts: { profile?: string }) => {
-    await runSecretsList({ profile: opts.profile });
+  .option('--json', 'print machine-readable JSON')
+  .action(async (opts: { profile?: string; json?: boolean }) => {
+    await runSecretsList(opts);
   });
 
 secrets

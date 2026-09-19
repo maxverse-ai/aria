@@ -44,6 +44,10 @@ Show a redacted profile summary (read-only)
 
 List configured profiles
 
+| Option | Description |
+| --- | --- |
+| `--json` | print machine-readable JSON |
+
 ### `aria profile create <name>`
 
 Create a profile; interactive terminals also start it on the existing Supervisor
@@ -86,6 +90,15 @@ Export one profile as JSON
 | `--include-secrets` | include secret provider configuration and app secret values |
 | `--yes` | confirm exporting secrets |
 
+### `aria profile import <file>`
+
+Import a `profile export` document (configuration + app secret only; data does not travel)
+
+| Option | Description |
+| --- | --- |
+| `--name <name>` | import under a different profile name |
+| `--app-secret <secret>` | app secret for exports written with secrets redacted |
+
 ## `aria ui`
 
 Open the local web console (config, profiles, online bots) in your browser
@@ -98,6 +111,10 @@ Open the local web console (config, profiles, online bots) in your browser
 ## `aria ps`
 
 List running bridge processes on this machine
+
+| Option | Description |
+| --- | --- |
+| `--json` | print machine-readable JSON |
 
 ## `aria chat`
 
@@ -421,6 +438,15 @@ Roll back the active execution-space preparation
 | `--profile <name>` | profile name |
 | `--json` | print machine-readable metadata |
 
+### `aria space list`
+
+List a profile's space preparations: active, retained, and staged receipts (read-only)
+
+| Option | Description |
+| --- | --- |
+| `--profile <name>` | profile name |
+| `--json` | print machine-readable metadata |
+
 ### `aria space prepare <deployment-file>`
 
 Stage and verify an offline profile; legacy data stays sealed unless imported by a trusted adapter
@@ -512,6 +538,10 @@ Check live daemon activity before restart (read-only)
 
 Kill a running bridge process by short id or list index (SIGTERM, then SIGKILL after 2s). Was `stop <target>` in older versions.
 
+| Option | Description |
+| --- | --- |
+| `--json` | print machine-readable JSON |
+
 ## `aria start`
 
 Install (if needed) and start the bridge as an OS-managed daemon
@@ -535,6 +565,7 @@ Stop the OS-managed daemon and disable autostart (service definition stays)
 | --- | --- |
 | `--profile <name>` | profile name (defaults to active profile) |
 | `--web-ui` | target the supervisor service (auto-detected when no per-profile service exists) |
+| `--json` | print machine-readable JSON |
 
 ## `aria restart`
 
@@ -555,6 +586,7 @@ Show OS service status (pid, last exit, log paths)
 | --- | --- |
 | `--profile <name>` | profile name (defaults to active profile) |
 | `--web-ui` | target the supervisor service instead of a per-profile one |
+| `--json` | print machine-readable JSON |
 
 ## `aria unregister`
 
@@ -564,6 +596,7 @@ Remove the OS service registration (bootout + delete plist)
 | --- | --- |
 | `--profile <name>` | profile name (defaults to active profile) |
 | `--web-ui` | target the supervisor service instead of a per-profile one |
+| `--json` | print machine-readable JSON |
 
 ## `aria update`
 
@@ -585,6 +618,22 @@ Download, verify, and persist an expiring update plan
 | --- | --- |
 | `--target-version <version>` | select an exact stable version |
 | `--force` | allow an older target version |
+| `--json` | print machine-readable JSON |
+
+### `aria update plan-show <plan-id>`
+
+Show a persisted update plan and its lifecycle state (read-only)
+
+| Option | Description |
+| --- | --- |
+| `--json` | print machine-readable JSON |
+
+### `aria update cancel <plan-id>`
+
+Cancel an unapplied update plan; the plan file is kept as evidence
+
+| Option | Description |
+| --- | --- |
 | `--json` | print machine-readable JSON |
 
 ### `aria update apply <plan-id>`
@@ -638,6 +687,7 @@ List the IDs of secrets in the encrypted keystore (no secrets shown)
 | Option | Description |
 | --- | --- |
 | `--profile <name>` | profile name (defaults to active profile) |
+| `--json` | print machine-readable JSON |
 
 ### `aria secrets remove`
 

@@ -54,6 +54,44 @@ describe('DistributionService', () => {
     expect(fixture.services.restartAndCheck).not.toHaveBeenCalled();
     expect((await fixture.store.readState()).current).toEqual(fixture.installed);
   });
+
+  it('cancels a plan by marking it, keeps the plan file, and rejects apply', async () => {
+    const fixture = await createFixture();
+    const plan = await fixture.service.createPlan();
+
+    const cancelled = await fixture.service.cancelPlan(plan.id);
+
+    expect(cancelled.cancelledAt).toBe('2026-08-29T00:00:00.000Z');
+    // The plan file stays as evidence.
+    expect((await fixture.store.readPlan(plan.id)).cancelledAt).toBe(cancelled.cancelledAt);
+    await expect(fixture.service.apply(plan.id)).rejects.toThrow('update plan was cancelled');
+    const report = await fixture.service.planStatus(plan.id);
+    expect(report.state).toBe('cancelled');
+    // Cancelling again is idempotent.
+    expect((await fixture.service.cancelPlan(plan.id)).cancelledAt).toBe(cancelled.cancelledAt);
+  });
+
+  it('refuses to cancel a plan that was already applied', async () => {
+    const fixture = await createFixture();
+    const plan = await fixture.service.createPlan();
+    await fixture.service.apply(plan.id);
+
+    await expect(fixture.service.cancelPlan(plan.id)).rejects.toThrow('already applied');
+    expect((await fixture.store.readPlan(plan.id)).cancelledAt).toBeUndefined();
+    const report = await fixture.service.planStatus(plan.id);
+    expect(report.operations.map((operation) => operation.status)).toEqual(['succeeded']);
+  });
+
+  it('reports an active plan with no operations via planStatus', async () => {
+    const fixture = await createFixture();
+    const plan = await fixture.service.createPlan();
+
+    const report = await fixture.service.planStatus(plan.id);
+
+    expect(report.state).toBe('active');
+    expect(report.plan.id).toBe(plan.id);
+    expect(report.operations).toEqual([]);
+  });
 });
 
 async function createFixture(options: { failFirstHealthCheck?: boolean } = {}) {

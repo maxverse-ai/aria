@@ -44,6 +44,8 @@ export interface ServiceProfileOptions {
   profile?: string;
   /** Target the machine-wide supervisor service instead of a per-profile one. */
   webUi?: boolean;
+  /** Print a stable machine-readable snapshot instead of text. */
+  json?: boolean;
 }
 
 export interface ServiceRestartOptions extends ServiceProfileOptions {
@@ -80,7 +82,10 @@ async function resolveServiceTarget(
   // keeps respawning it after every `kill`. An explicit `--profile` is left
   // alone: the user asked for that per-profile service, not the machine-wide one.
   if (!opts.profile && !serviceFileExists(profile) && serviceFileExists(SUPERVISOR_SERVICE_ID)) {
-    console.log(`ℹ profile「${profile}」没有独立的后台服务,已指向控制面 supervisor 服务(等同 --web-ui)。`);
+    // Keep stdout clean for --json consumers; the notice is advisory only.
+    if (!opts.json) {
+      console.log(`ℹ profile「${profile}」没有独立的后台服务,已指向控制面 supervisor 服务(等同 --web-ui)。`);
+    }
     return { serviceId: SUPERVISOR_SERVICE_ID, webUi: true };
   }
   return { serviceId: profile, profile, webUi: false };
@@ -448,7 +453,17 @@ async function runServiceStartWebUi(opts: ServiceStartOptions): Promise<void> {
 export async function runServiceStop(opts: ServiceProfileOptions = {}): Promise<void> {
   const { serviceId, profile, webUi } = await resolveServiceTarget(opts);
   const adapter = requireAdapter('stop', serviceId);
+  const snapshot = (result: 'stopped' | 'not-installed' | 'not-running', extra: Record<string, unknown> = {}) =>
+    JSON.stringify(
+      { schema: 'aria.stop.v1', apiVersion: 1, serviceId, target: webUi ? 'supervisor' : 'profile', result, ...extra },
+      null,
+      2,
+    );
   if (!adapter.fileExists()) {
+    if (opts.json) {
+      console.log(snapshot('not-installed'));
+      return;
+    }
     console.log(webUi ? 'supervisor 还没在后台运行过,无需停止。' : 'bot 还没在后台运行过,无需停止。');
     return;
   }
@@ -457,6 +472,10 @@ export async function runServiceStop(opts: ServiceProfileOptions = {}): Promise<
     // autostart (launchd RunAtLoad / systemd WantedBy) — which is exactly how
     // a "stopped" daemon comes back on its own. Make `stop` mean stopped.
     const r = await adapter.disableAutostart();
+    if (opts.json) {
+      console.log(snapshot('not-running', { autostartDisabled: r.ok }));
+      return;
+    }
     console.log(webUi ? 'supervisor 当前没在后台运行。' : 'bot 当前没在后台运行。');
     if (r.ok) console.log('  已关闭开机自启。');
     return;
@@ -472,6 +491,13 @@ export async function runServiceStop(opts: ServiceProfileOptions = {}): Promise<
   if (!r.ok) {
     console.error(`✗ 停止失败:\n${formatServiceStderr(r.stderr)}`);
     process.exit(1);
+  }
+  if (opts.json) {
+    console.log(snapshot('stopped', {
+      autostartDisabled: true,
+      bot: entry ? { name: entry.botName, appId: entry.appId } : null,
+    }));
+    return;
   }
   if (webUi) {
     console.log('✓ 控制面 supervisor 已停止运行');
@@ -600,14 +626,36 @@ function printProfileAssessment(assessment: RestartProfileAssessment): void {
 export async function runServiceStatus(opts: ServiceProfileOptions = {}): Promise<void> {
   const { serviceId, profile, webUi } = await resolveServiceTarget(opts);
   const adapter = requireAdapter('status', serviceId);
+  const snapshot = (state: 'not-installed' | 'stopped' | 'running', extra: Record<string, unknown> = {}) =>
+    JSON.stringify(
+      {
+        schema: 'aria.status.v1',
+        apiVersion: 1,
+        serviceId,
+        target: webUi ? 'supervisor' : 'profile',
+        state,
+        logs: { stdout: daemonStdoutPath(serviceId), stderr: daemonStderrPath(serviceId) },
+        ...extra,
+      },
+      null,
+      2,
+    );
   const startHint = webUi ? '`start --web-ui`' : '`start`';
   const label = webUi ? '控制面 supervisor' : 'bot';
   if (!adapter.fileExists()) {
+    if (opts.json) {
+      console.log(snapshot('not-installed'));
+      return;
+    }
     console.log(`${label} 当前没在后台运行(从未启动过)`);
     console.log(`  通过 ${startHint} 启动`);
     return;
   }
   if (!adapter.isRunning()) {
+    if (opts.json) {
+      console.log(snapshot('stopped'));
+      return;
+    }
     console.log(`${label} 当前没在后台运行`);
     console.log(`  通过 ${startHint} 重新启动`);
     return;
@@ -616,6 +664,17 @@ export async function runServiceStatus(opts: ServiceProfileOptions = {}): Promis
   const entry = !webUi && profile ? await lookupProfileEntry(profile) : undefined;
 
   const { pid, lastExit } = adapter.parseStatus(adapter.describeStatus());
+
+  if (opts.json) {
+    console.log(snapshot('running', {
+      pid: pid ? Number(pid) : null,
+      lastExit: lastExit && lastExit !== '-1' ? lastExit : null,
+      ...(webUi
+        ? { bots: readAndPrune().filter((e) => Boolean(e.botName)).map((e) => e.botName) }
+        : { bot: entry ? { name: entry.botName, appId: entry.appId } : null }),
+    }));
+    return;
+  }
 
   if (webUi) {
     console.log('✓ 控制面 supervisor 正在后台运行');
@@ -647,19 +706,35 @@ export async function runServiceUnregister(opts: ServiceProfileOptions = {}): Pr
   const { serviceId, webUi } = await resolveServiceTarget(opts);
   const adapter = requireAdapter('unregister', serviceId);
   const label = webUi ? 'supervisor' : 'bot';
+  const snapshot = (result: 'not-installed' | 'unregistered', extra: Record<string, unknown> = {}) =>
+    JSON.stringify(
+      { schema: 'aria.unregister.v1', apiVersion: 1, serviceId, target: webUi ? 'supervisor' : 'profile', result, ...extra },
+      null,
+      2,
+    );
   if (!adapter.fileExists()) {
+    if (opts.json) {
+      console.log(snapshot('not-installed'));
+      return;
+    }
     console.log(`${label} 还没在后台运行过,无需清理。`);
     return;
   }
+  let stopped = false;
   if (adapter.isRunning()) {
     const r = await adapter.stopAndDisableAutostart();
     if (!r.ok) {
       console.warn(`⚠ 停止 ${label} 时有警告(继续清理):\n${formatServiceStderr(r.stderr)}`);
     } else {
-      console.log(`✓ 已停止 ${label}`);
+      stopped = true;
+      if (!opts.json) console.log(`✓ 已停止 ${label}`);
     }
   }
   await adapter.deleteFile();
+  if (opts.json) {
+    console.log(snapshot('unregistered', { stopped }));
+    return;
+  }
   console.log('✓ 已清除后台运行注册');
   console.log(`  (配置 / 日志 / 会话保留在 ${paths.rootDir})`);
 }

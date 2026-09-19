@@ -83,6 +83,11 @@ export interface UpdatePlanV1 {
   downloadDirectory: string;
   services: UpdateServiceTarget[];
   force: boolean;
+  /**
+   * Set by `aria update cancel`. The plan file is kept as evidence — the
+   * timestamp marks it unusable for `apply` without deleting it.
+   */
+  cancelledAt?: string;
 }
 
 export type UpdateOperationStatus =
@@ -152,6 +157,7 @@ export interface DistributionRepository {
   writeOperation(operation: UpdateOperationV1): Promise<void>;
   readOperation(id: string): Promise<UpdateOperationV1>;
   readLatestOperation(): Promise<UpdateOperationV1 | undefined>;
+  listOperations(): Promise<UpdateOperationV1[]>;
   withLock<T>(fn: () => Promise<T>): Promise<T>;
 }
 

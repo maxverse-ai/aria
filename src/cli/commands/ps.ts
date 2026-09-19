@@ -10,8 +10,18 @@ import type { ProcessEntry } from '../../runtime/registry';
  * state. Persistence happens on the next `register` / `unregister` /
  * `updateEntry` call.
  */
-export function runPs(): void {
+export interface PsCliOptions {
+  json?: boolean;
+}
+
+export function runPs(opts: PsCliOptions = {}): void {
   const live = readAndPrune();
+  if (opts.json) {
+    console.log(
+      JSON.stringify({ schema: 'aria.ps.v1', apiVersion: 1, processes: live }, null, 2),
+    );
+    return;
+  }
   if (live.length === 0) {
     console.log('当前没有 bot 在运行。');
     return;
@@ -33,21 +43,38 @@ export function runPs(): void {
   printTable([headers, ...rows]);
 }
 
-export async function runKillCli(target: string | undefined): Promise<void> {
+export async function runKillCli(target: string | undefined, opts: PsCliOptions = {}): Promise<void> {
+  const fail = (error: string, extra: Record<string, unknown> = {}): never => {
+    if (opts.json) {
+      console.log(JSON.stringify({ schema: 'aria.kill.v1', apiVersion: 1, ok: false, error, ...extra }, null, 2));
+    } else {
+      console.error(error);
+    }
+    process.exit(1);
+  };
   if (!target) {
-    console.error('用法: aria kill <bot id 或序号>');
-    process.exit(1);
+    fail('usage: aria kill <bot id or #>');
   }
-  const entry = resolveTarget(target);
+  const entry = resolveTarget(target!);
   if (!entry) {
-    console.error(`✗ 没找到匹配的 bot:${target}`);
-    console.error('  用 `aria ps` 看可选目标。');
-    process.exit(1);
+    fail(`no matching bot: ${target}`, { hint: 'run `aria ps` to list targets' });
   }
-  const owner = findOwningService(entry);
+  const owner = findOwningService(entry!);
   if (owner) {
+    if (opts.json) {
+      console.log(
+        JSON.stringify(
+          { schema: 'aria.kill.v1', apiVersion: 1, ok: false,
+            error: `bot ${entry!.id} (pid ${entry!.pid}) is owned by ${owner.platformName}; SIGTERM is restarted within seconds`,
+            owner },
+          null,
+          2,
+        ),
+      );
+      process.exit(1);
+    }
     console.error(
-      `✗ bot ${entry.id} (pid ${entry.pid}) 由 ${owner.platformName} 托管,` +
+      `✗ bot ${entry!.id} (pid ${entry!.pid}) 由 ${owner.platformName} 托管,` +
         'SIGTERM 之后会被服务管理器立刻重启。',
     );
     console.error(`  要停掉它:  ${owner.stopHint}`);
@@ -55,20 +82,25 @@ export async function runKillCli(target: string | undefined): Promise<void> {
     process.exit(1);
   }
 
-  console.log(`正在关闭 bot ${entry.id}…`);
-  let result: StopProcessEntryResult;
-  try {
-    result = await stopProcessEntry(entry);
-  } catch (err) {
-    console.error(`✗ 关闭失败:${(err as Error).message}`);
-    process.exit(1);
-  }
+  const result = await stopProcessEntry(entry!).catch((err: unknown) =>
+    fail(`stop failed: ${(err as Error).message}`),
+  );
 
-  if (result === 'killed') {
-    console.log(`✓ 已强制关闭 bot ${entry.id}。`);
+  if (opts.json) {
+    console.log(
+      JSON.stringify(
+        { schema: 'aria.kill.v1', apiVersion: 1, ok: true, id: entry!.id, pid: entry!.pid, result },
+        null,
+        2,
+      ),
+    );
     return;
   }
-  console.log(`✓ 已关闭 bot ${entry.id}。`);
+  if (result === 'killed') {
+    console.log(`✓ 已强制关闭 bot ${entry!.id}。`);
+    return;
+  }
+  console.log(`✓ 已关闭 bot ${entry!.id}。`);
 }
 
 /**

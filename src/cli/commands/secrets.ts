@@ -36,6 +36,7 @@ const PROTOCOL_VERSION = 1;
 interface SecretProfileOptions {
   profile?: string;
   rootDir?: string;
+  json?: boolean;
 }
 
 interface SecretRemoveOptions extends SecretProfileOptions {
@@ -105,6 +106,16 @@ export async function runSecretsSet(
 export async function runSecretsList(opts: SecretProfileOptions = {}): Promise<void> {
   const appPaths = await resolveSecretProfilePaths(opts);
   const ids = await listSecretIds(appPaths);
+  if (opts.json) {
+    console.log(
+      JSON.stringify(
+        { schema: 'aria.secrets.list.v1', apiVersion: 1, profile: appPaths.profile, ids },
+        null,
+        2,
+      ),
+    );
+    return;
+  }
   if (ids.length === 0) {
     console.log('No secrets in the encrypted keystore.');
     return;

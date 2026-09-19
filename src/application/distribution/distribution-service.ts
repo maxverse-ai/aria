@@ -28,6 +28,12 @@ export interface CreateUpdatePlanOptions {
   ttlMs?: number;
 }
 
+export interface UpdatePlanReport {
+  plan: UpdatePlanV1;
+  state: 'active' | 'expired' | 'cancelled';
+  operations: UpdateOperationV1[];
+}
+
 export class DistributionService {
   constructor(
     private readonly store: DistributionRepository,
@@ -123,12 +129,49 @@ export class DistributionService {
       : await this.store.readLatestOperation();
   }
 
+  /**
+   * Read-back for `aria update plan-show`: the persisted plan plus the
+   * derived lifecycle state and every operation that consumed it.
+   */
+  async planStatus(planId: string): Promise<UpdatePlanReport> {
+    const plan = await this.store.readPlan(planId);
+    const operations = (await this.store.listOperations()).filter(
+      (operation) => operation.planId === planId,
+    );
+    return { plan, state: updatePlanState(plan, this.now()), operations };
+  }
+
+  /**
+   * Mark a plan cancelled. The plan file stays on disk as evidence — the
+   * `cancelledAt` timestamp is what `apply` rejects. Serialized under the
+   * store lock so it cannot race an in-flight apply: a running apply holds
+   * the lock and this call fails honestly instead of marking mid-flight.
+   */
+  async cancelPlan(planId: string): Promise<UpdatePlanV1> {
+    return this.store.withLock(async () => {
+      const plan = await this.store.readPlan(planId);
+      if (plan.cancelledAt) return plan;
+      const consumed = (await this.store.listOperations()).some(
+        (operation) => operation.planId === planId && operation.status === 'succeeded',
+      );
+      if (consumed) {
+        throw new Error(`update plan ${planId} was already applied; nothing to cancel`);
+      }
+      plan.cancelledAt = this.now().toISOString();
+      await this.store.writePlan(plan);
+      return plan;
+    });
+  }
+
   private async applyLocked(plan: UpdatePlanV1, operation: UpdateOperationV1): Promise<UpdateOperationV1> {
     let switched = false;
     let previous: InstalledVersion | null = null;
     let installed: InstalledVersion | null = null;
     let targets = plan.services;
     try {
+      // Re-read under the lock so a cancel that landed after `apply`'s
+      // optimistic read still stops the apply before any I/O.
+      plan = await this.store.readPlan(plan.id);
       assertPlanFresh(plan, this.now());
       transition(operation, 'verifying', this.now());
       await this.store.writeOperation(operation);
@@ -342,7 +385,14 @@ function newUpdateOperation(id: string, plan: UpdatePlanV1, now: Date): UpdateOp
 
 function assertPlanFresh(plan: UpdatePlanV1, now: Date): void {
   if (plan.schemaVersion !== UPDATE_PLAN_SCHEMA_VERSION) throw new Error('unsupported update plan schemaVersion');
+  if (plan.cancelledAt) throw new Error('update plan was cancelled; create a new plan');
   if (Date.parse(plan.expiresAt) <= now.getTime()) throw new Error('update plan expired; create a new plan');
+}
+
+function updatePlanState(plan: UpdatePlanV1, now: Date): 'active' | 'expired' | 'cancelled' {
+  if (plan.cancelledAt) return 'cancelled';
+  if (Date.parse(plan.expiresAt) <= now.getTime()) return 'expired';
+  return 'active';
 }
 
 function mergeVersions(

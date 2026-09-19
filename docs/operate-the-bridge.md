@@ -87,6 +87,7 @@ aria profile remove <name>                     # archive local state (default)
 aria profile remove <name> --purge --yes       # permanently delete
 aria profile export <name>                     # secrets redacted by default
 aria profile export <name> --include-secrets --yes
+aria profile import <file> [--name <n>] [--app-secret <s>]
 ```
 
 Notes that bite:
@@ -99,6 +100,9 @@ Notes that bite:
 - A profile created with the wrong `--agent` cannot be converted: stop or
   unregister its service first, `profile remove`, then recreate.
 - `profile export` redacts app secrets unless `--include-secrets --yes`.
+- `profile import` brings configuration and the app secret only — session
+  history and workspace data do not travel in an export. For a full data
+  migration use `aria space prepare`.
 
 ## Read-only inspection
 

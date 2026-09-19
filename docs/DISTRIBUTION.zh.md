@@ -51,6 +51,8 @@ aria --version
 ```sh
 aria update check
 aria update plan
+aria update plan-show <plan-id>
+aria update cancel <plan-id>
 aria update apply <plan-id>
 aria update status <operation-id>
 aria update rollback
@@ -58,6 +60,11 @@ aria update rollback
 
 - `aria update plan --target-version <x.y.z>` 选择一个精确的完整不可变
   Release。命令会打印 plan id、摘要、过期时间和精确的 apply 命令。
+- `aria update plan-show <plan-id>` 读回一个持久化 plan——它的生命周期
+  状态（`active`/`expired`/`cancelled`）和所有消费过它的操作。
+  `aria update cancel <plan-id>` 把未应用的 plan 标记为取消：plan 文件
+  保留为证据并记录 `cancelledAt`，`apply` 会拒绝它。已经应用的 plan
+  不能取消。
 - `apply` 和 `rollback` 默认使用脱离 daemon 生命周期的系统执行器，服务
   重启不会杀掉自己的更新进程。`--foreground` 仅是恢复时的逃生舱。
 - 在 Linux 上，detached 瞬态 unit 在 `GH_CONFIG_DIR` 存在时显式继承它，

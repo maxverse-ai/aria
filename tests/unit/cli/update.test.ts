@@ -1,8 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   runUpdateApply,
+  runUpdateCancel,
   runUpdateCheck,
   runUpdatePlan,
+  runUpdatePlanShow,
 } from '../../../src/cli/commands/update';
 
 /**
@@ -17,6 +19,8 @@ import {
 const mocks = vi.hoisted(() => ({
   check: vi.fn(),
   createPlan: vi.fn(),
+  planStatus: vi.fn(),
+  cancelPlan: vi.fn(),
   apply: vi.fn(),
   execute: vi.fn(),
   executeRollback: vi.fn(),
@@ -48,6 +52,8 @@ beforeEach(() => {
     service: {
       check: mocks.check,
       createPlan: mocks.createPlan,
+      planStatus: mocks.planStatus,
+      cancelPlan: mocks.cancelPlan,
       apply: mocks.apply,
       rollback: vi.fn(),
       status: vi.fn(),
@@ -74,8 +80,8 @@ describe('aria update', () => {
     await runUpdateCheck();
 
     expect(mocks.check).toHaveBeenCalledOnce();
-    expect(output.join('\n')).toContain('当前版本: 0.4.0 (c40d5e7add27)');
-    expect(output.join('\n')).toContain('已经是最新版本。');
+    expect(output.join('\n')).toContain('current: 0.4.0 (c40d5e7add27)');
+    expect(output.join('\n')).toContain('Already on the latest version.');
   });
 
   it('says no release is available rather than failing when the channel is empty', async () => {
@@ -83,7 +89,7 @@ describe('aria update', () => {
 
     await runUpdateCheck();
 
-    expect(output.join('\n')).toContain('没有可用的完整、不可变内部版本。');
+    expect(output.join('\n')).toContain('No complete, immutable internal release is available.');
   });
 
   it('forwards an exact target version into the plan', async () => {
@@ -96,7 +102,49 @@ describe('aria update', () => {
     await runUpdatePlan({ version: '0.3.2' });
 
     expect(mocks.createPlan).toHaveBeenCalledWith({ version: '0.3.2', force: undefined });
-    expect(output.join('\n')).toContain('✓ 更新计划已创建: plan-1');
+    expect(output.join('\n')).toContain('✓ Update plan created: plan-1');
+  });
+
+  it('shows a persisted plan with its lifecycle state', async () => {
+    mocks.planStatus.mockResolvedValue({
+      plan: {
+        id: 'plan-1',
+        createdAt: '2026-09-15T05:00:00.000Z',
+        expiresAt: '2026-09-16T05:00:00.000Z',
+        target: release,
+      },
+      state: 'active',
+      operations: [],
+    });
+
+    await runUpdatePlanShow('plan-1');
+
+    expect(mocks.planStatus).toHaveBeenCalledWith('plan-1');
+    const text = output.join('\n');
+    expect(text).toContain('plan:    plan-1 (active)');
+    expect(text).toContain('apply:   aria update apply plan-1');
+  });
+
+  it('prints the plan report as JSON when asked', async () => {
+    const report = { plan: { id: 'plan-1', target: release }, state: 'cancelled', operations: [] };
+    mocks.planStatus.mockResolvedValue(report);
+
+    await runUpdatePlanShow('plan-1', { json: true });
+
+    expect(JSON.parse(output.pop()!)).toEqual(report);
+  });
+
+  it('cancels a plan and reports the evidence timestamp', async () => {
+    mocks.cancelPlan.mockResolvedValue({
+      id: 'plan-1',
+      cancelledAt: '2026-09-15T06:00:00.000Z',
+      target: release,
+    });
+
+    await runUpdateCancel('plan-1');
+
+    expect(mocks.cancelPlan).toHaveBeenCalledWith('plan-1');
+    expect(output.join('\n')).toContain('✓ Update plan cancelled: plan-1');
   });
 
   it('hands a plan to the detached executor, not to the foreground process', async () => {
@@ -106,7 +154,7 @@ describe('aria update', () => {
 
     expect(mocks.execute).toHaveBeenCalledWith('plan-1');
     expect(mocks.apply).not.toHaveBeenCalled();
-    expect(output.join('\n')).toContain('状态: aria update status op-1');
+    expect(output.join('\n')).toContain('status: aria update status op-1');
   });
 
   it('applies in the foreground only when asked', async () => {

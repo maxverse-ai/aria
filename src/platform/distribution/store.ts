@@ -104,16 +104,20 @@ export class DistributionStore {
   }
 
   async readLatestOperation(): Promise<UpdateOperationV1 | undefined> {
+    const operations = await this.listOperations();
+    return operations.sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))[0];
+  }
+
+  async listOperations(): Promise<UpdateOperationV1[]> {
     try {
       const names = (await readdir(this.paths.operationsDir)).filter((name) => name.endsWith('.json')).sort();
       const operations = await Promise.all(names.map(async (name) => {
         const value = await readJsonIfExists(join(this.paths.operationsDir, name));
         return value as UpdateOperationV1 | undefined;
       }));
-      return operations.filter((value): value is UpdateOperationV1 => Boolean(value))
-        .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))[0];
+      return operations.filter((value): value is UpdateOperationV1 => Boolean(value));
     } catch (err) {
-      if ((err as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') return [];
       throw err;
     }
   }

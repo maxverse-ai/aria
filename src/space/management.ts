@@ -1,7 +1,7 @@
 import { retainPreparation, retainedPreparations } from './retained-preparation';
 import { SpaceReadAccess } from './read-access';
 import { randomBytes, randomUUID } from 'node:crypto';
-import { cp, mkdir, rm, stat } from 'node:fs/promises';
+import { cp, mkdir, readdir, rm, stat } from 'node:fs/promises';
 import { resolveAppPaths, type AppPaths } from '../config/app-paths';
 import type { ProfileConfig, RootConfig } from '../config/profile-schema';
 import type { ExecutionSpaceSelection } from '../config/execution-spaces';
@@ -193,6 +193,46 @@ export class SpaceManagementService {
         migration: { ...previous.migration, catalogDigest: inventory.digest, stateDigest: sourceDigest, sourceChecks: [], verified: true },
       });
     });
+  }
+
+  /** Read-only inventory of a profile's preparation receipts. Receipts are
+   * immutable files; listing never activates, rolls back, or rewrites them. */
+  async listPreparations(profile: string, actor: ControlActorContext) {
+    const { config, paths } = await this.target(profile, actor);
+    const directory = join(paths.profileDir, 'space-control', 'preparations');
+    await assertConfinedPath(paths.profileDir, directory);
+    const retained = await retainedPreparations(paths.profileDir, paths.profile);
+    let names: string[] = [];
+    try {
+      names = await readdir(directory);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    }
+    const preparations = [];
+    for (const id of names.filter((name) => /^[a-f0-9]{32}$/.test(name)).sort()) {
+      let entry: Record<string, unknown>;
+      try {
+        const receipt = (await readPrivateJson(
+          join(directory, id, 'receipt.json'), paths.profileDir)) as SpacePreparationReceipt;
+        entry = {
+          id,
+          schema: receipt.schema,
+          createdAt: receipt.createdAt,
+          driver: receipt.deployment?.driver,
+          engineId: receipt.deployment?.engineId,
+          importedSessions: receipt.migration?.importedSessions,
+          sealedSessions: receipt.migration?.sealedSessions,
+        };
+      } catch (error) {
+        entry = { id, error: error instanceof Error ? error.message : String(error) };
+      }
+      preparations.push({
+        ...entry,
+        active: config.executionSpaces?.preparationId === id,
+        retained: retained.some((value) => value.selection.preparationId === id),
+      });
+    }
+    return { schema: 'aria.space.list.v1', profile: paths.profile, preparations };
   }
 
   async inspectPreparation(profile: string, selection: ExecutionSpaceSelection, actor: ControlActorContext) {

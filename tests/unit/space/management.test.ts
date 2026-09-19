@@ -62,6 +62,30 @@ it('activation is explicit, durable and idempotent; rollback retains both legacy
   expect(await readFile(f.paths.sessionsFile + '.catalog.json', 'utf8')).toBe(legacy);
   expect(await readFile(join(state, 'new-data'), 'utf8')).toBe('written after activation');
 });
+it('lists staged, active and retained preparations without changing state', async () => {
+  const f = await fixture();
+  const before = await readFile(f.paths.configFile, 'utf8');
+  const selection = await f.service.prepare('bot', f.deployment, actor);
+
+  let list = await f.service.listPreparations('bot', actor);
+  expect(list.schema).toBe('aria.space.list.v1');
+  expect(list.profile).toBe('bot');
+  expect(list.preparations).toHaveLength(1);
+  expect(list.preparations[0]).toMatchObject({
+    id: selection.preparationId, driver: 'trusted-process', engineId: 'codex',
+    active: false, retained: false,
+  });
+  expect(await readFile(f.paths.configFile, 'utf8')).toBe(before);
+
+  await f.service.activate('bot', selection, actor);
+  list = await f.service.listPreparations('bot', actor);
+  expect(list.preparations[0]).toMatchObject({ active: true, retained: false });
+
+  await f.service.rollback('bot', actor);
+  list = await f.service.listPreparations('bot', actor);
+  expect(list.preparations[0]).toMatchObject({ active: false, retained: true });
+});
+
 it('activates and rolls back legacy Team with exec secret references without resolving or changing credentials', async () => {
   const f = await fixture();
   const root = (await loadRootConfig(f.paths.configFile))!;

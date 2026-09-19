@@ -7,7 +7,7 @@ import { resolveAppPaths } from '../../config/app-paths';
 import { localCliActor } from '../control-actor';
 
 export interface SpaceCliOptions { profile?: string; rootDir?: string; json?: boolean; id?: string; acceptSealedHistory?: boolean }
-export async function runSpaceCommand(command: 'status' | 'prepare' | 'prepare-upgrade' | 'inspect' | 'activate' | 'rollback', file: string | undefined,
+export async function runSpaceCommand(command: 'status' | 'list' | 'prepare' | 'prepare-upgrade' | 'inspect' | 'activate' | 'rollback', file: string | undefined,
   options: SpaceCliOptions = {}): Promise<void> {
   const rootDir = options.rootDir ?? paths.rootDir;
   const actor = localCliActor(rootDir);
@@ -27,6 +27,8 @@ export async function runSpaceCommand(command: 'status' | 'prepare' | 'prepare-u
     if (!selection) throw new Error('preparation selection is required');
     result = command === 'inspect' ? await service.inspectPreparation(profile, selection, actor)
       : await service.activate(profile, selection, actor, options.acceptSealedHistory);
+  } else if (command === 'list') {
+    result = await service.listPreparations(profile, actor);
   } else result = await service[command](profile, actor);
   console.log(JSON.stringify(result, null, options.json ? undefined : 2));
 }
