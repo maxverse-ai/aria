@@ -10,6 +10,7 @@ import {
   AgentTriggerGovernanceApi,
   type AgentTriggerCommand,
   type AgentTriggerGrantIssueInput,
+  type AgentTriggerGrantView,
 } from '../../trigger/agent';
 import {
   TriggerManagementApi,
@@ -112,6 +113,52 @@ export async function runTriggerGrantRevoke(
   if (!opts.yes) throw new Error('grant revocation requires --yes');
   const revoked = await governance(opts).revoke(id, cliActor);
   console.log(opts.json ? JSON.stringify(revoked, null, 2) : `Agent trigger grant ${revoked.id} revoked.`);
+}
+
+export interface AgentTriggerGrantListSnapshot {
+  schema: 'aria.agent-trigger-grant.list.v1';
+  apiVersion: 1;
+  grants: AgentTriggerGrantView[];
+}
+
+export async function runTriggerGrantList(
+  opts: TriggerContractCliOptions = {},
+): Promise<void> {
+  const snapshot: AgentTriggerGrantListSnapshot = {
+    schema: 'aria.agent-trigger-grant.list.v1',
+    apiVersion: 1,
+    grants: await governance(opts).list(cliActor),
+  };
+  printSnapshot(snapshot, opts.json, formatGrantList);
+}
+
+export async function runTriggerGrantGet(
+  id: string,
+  opts: TriggerContractCliOptions = {},
+): Promise<void> {
+  const grant = await governance(opts).get(id, cliActor);
+  if (!grant) throw new Error(`agent trigger grant not found: ${id}`);
+  printSnapshot(grant, opts.json, formatGrant);
+}
+
+export function formatGrantList(snapshot: AgentTriggerGrantListSnapshot): string {
+  if (snapshot.grants.length === 0) return 'No agent trigger grants.';
+  return snapshot.grants.map(formatGrant).join('\n');
+}
+
+function formatGrant(grant: AgentTriggerGrantView): string {
+  const status = grantStatus(grant);
+  return [
+    `${grant.id}\t${status}\tprincipal=${grant.principalFingerprint.slice(0, 19)}…`,
+    `  profile=${grant.profileId} engine=${grant.engineId}`,
+    `  expires=${new Date(grant.expiresAt).toISOString()} created=${new Date(grant.createdAt).toISOString()}`,
+    `  limits: definitions<=${grant.limits.maxActiveDefinitions} runs/day<=${grant.limits.maxRunsPerDay} runtime<=${grant.limits.maxRuntimeMs}ms prompt<=${grant.limits.maxPromptBytes}B schedules=${grant.limits.allowedScheduleKinds.join('|')}`,
+  ].join('\n');
+}
+
+function grantStatus(grant: AgentTriggerGrantView): 'active' | 'revoked' | 'expired' {
+  if (grant.state === 'revoked') return 'revoked';
+  return grant.expiresAt <= Date.now() ? 'expired' : 'active';
 }
 
 export async function runAgentTrigger(

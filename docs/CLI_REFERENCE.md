@@ -249,6 +249,22 @@ Issue a bearer grant; the token is shown once
 | `--yes *(required)*` | confirm grant issuance |
 | `--json` | print machine-readable JSON |
 
+#### `aria trigger grant list`
+
+List issued Agent trigger grants (read-only)
+
+| Option | Description |
+| --- | --- |
+| `--json` | print machine-readable JSON |
+
+#### `aria trigger grant get <id>`
+
+Read one Agent trigger grant (read-only)
+
+| Option | Description |
+| --- | --- |
+| `--json` | print machine-readable JSON |
+
 #### `aria trigger grant revoke <id>`
 
 Revoke an Agent trigger grant
@@ -578,4 +594,5 @@ Delete an entry from the encrypted keystore
 | Option | Description |
 | --- | --- |
 | `--app-id <id> *(required)*` | App ID to remove |
+| `--yes *(required)*` | confirm secret deletion |
 | `--profile <name>` | profile name (defaults to active profile) |

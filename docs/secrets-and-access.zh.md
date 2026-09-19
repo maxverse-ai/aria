@@ -15,7 +15,7 @@ Aria 把凭证放在哪里，以及谁能和你的 bot 说话。
 ```bash
 aria secrets set --app-id cli_xxx [--profile <name>]   # 无回显提示输入
 aria secrets list [--profile <name>]                   # 只列 id，不显示值
-aria secrets remove --app-id cli_xxx [--profile <name>]
+aria secrets remove --app-id cli_xxx --yes [--profile <name>]
 ```
 
 `aria secrets get` 是同一密钥库面向机器的一侧：从 stdin 读取 JSON 请求，

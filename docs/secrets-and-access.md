@@ -16,7 +16,7 @@ PersonalAgent app.
 ```bash
 aria secrets set --app-id cli_xxx [--profile <name>]   # prompts without echoing
 aria secrets list [--profile <name>]                   # ids only, never values
-aria secrets remove --app-id cli_xxx [--profile <name>]
+aria secrets remove --app-id cli_xxx --yes [--profile <name>]
 ```
 
 `aria secrets get` is the machine side of the same keystore: it reads a JSON

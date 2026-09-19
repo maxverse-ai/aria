@@ -158,7 +158,7 @@ describe('profile create command', () => {
       rootDir: root, agent: 'claude', appId: 'cli_alice', appSecret: 'manual-secret', start: false,
     });
     expect(auth.startProfile).not.toHaveBeenCalled();
-    expect(output).toHaveBeenCalledWith(expect.stringContaining('尚未启动'));
+    expect(output).toHaveBeenCalledWith(expect.stringContaining('not started'));
   });
 
   it('refuses to overwrite an existing profile', async () => {

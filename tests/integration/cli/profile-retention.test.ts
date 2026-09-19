@@ -75,7 +75,7 @@ describe('profile retention and export', () => {
     await expect(stat(join(root, 'profiles', 'codex-dev'))).rejects.toMatchObject({ code: 'ENOENT' });
     expect(Object.keys(await readRoot(root))).toContain('profiles');
     expect((await readRoot(root)).profiles['codex-dev']).toBeUndefined();
-    expect(logs.join('\n')).toContain('已归档 profile');
+    expect(logs.join('\n')).toContain('archived profile');
     expect(await appliedOperation(root)).toBe('profile.archive');
 
     const failRoot = await makeRoot();

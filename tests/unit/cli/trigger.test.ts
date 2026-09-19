@@ -6,7 +6,9 @@ import {
   formatTriggerCapabilities,
   runTriggerCapabilities,
   runAgentTrigger,
+  runTriggerGrantGet,
   runTriggerGrantIssue,
+  runTriggerGrantList,
   runTriggerExecute,
   runTriggerList,
   runTriggerSchema,
@@ -119,6 +121,58 @@ describe('trigger contract CLI', () => {
     } finally {
       delete process.env.ARIA_TRIGGER_GRANT_TOKEN;
     }
+  });
+
+  it('lists and reads grants without exposing the token or principal', async () => {
+    const rootDir = await mkdtemp(join(tmpdir(), 'aria-trigger-grant-cli-'));
+    roots.push(rootDir);
+    const output = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+
+    await runTriggerGrantList({ rootDir, json: true });
+    expect(JSON.parse(String(output.mock.calls.at(-1)?.[0]))).toMatchObject({
+      schema: 'aria.agent-trigger-grant.list.v1',
+      grants: [],
+    });
+
+    await runTriggerGrantIssue({
+      rootDir,
+      json: true,
+      yes: true,
+      input: JSON.stringify({
+        profileId: 'profile-a',
+        engineId: 'codex',
+        principal: 'codex-agent-a',
+        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60_000).toISOString(),
+      }),
+    });
+    const issued = JSON.parse(String(output.mock.calls.at(-1)?.[0])) as {
+      grant: { id: string };
+    };
+
+    await runTriggerGrantList({ rootDir, json: true });
+    const list = JSON.parse(String(output.mock.calls.at(-1)?.[0])) as {
+      grants: Array<Record<string, unknown>>;
+    };
+    expect(list.grants).toHaveLength(1);
+    expect(list.grants[0]).toMatchObject({
+      id: issued.grant.id,
+      state: 'active',
+      profileId: 'profile-a',
+      engineId: 'codex',
+      limits: { maxActiveDefinitions: 3 },
+    });
+    expect(JSON.stringify(list)).not.toContain('codex-agent-a');
+    expect(JSON.stringify(list)).not.toContain(issued.grant.id.concat('.'));
+
+    await runTriggerGrantGet(issued.grant.id, { rootDir, json: true });
+    expect(JSON.parse(String(output.mock.calls.at(-1)?.[0]))).toMatchObject({
+      id: issued.grant.id,
+      state: 'active',
+    });
+
+    await expect(runTriggerGrantGet('missing-grant', { rootDir })).rejects.toThrow(
+      'agent trigger grant not found: missing-grant',
+    );
   });
 
   it('creates and reads definitions through the management API adapter', async () => {

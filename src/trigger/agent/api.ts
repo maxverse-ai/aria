@@ -91,6 +91,19 @@ export class AgentTriggerGovernanceApi {
     return publicGrant(await this.store.revoke(identifier(id, 'grantId'), this.now()));
   }
 
+  /** Read-only grant enumeration for operator adapters. */
+  async list(actor: ControlActorContext): Promise<AgentTriggerGrantView[]> {
+    requireAdministrator(actor);
+    return (await this.store.list()).map(publicGrant);
+  }
+
+  /** Read one grant by id; undefined when it does not exist. */
+  async get(id: string, actor: ControlActorContext): Promise<AgentTriggerGrantView | undefined> {
+    requireAdministrator(actor);
+    const grant = await this.store.get(identifier(id, 'grantId'));
+    return grant ? publicGrant(grant) : undefined;
+  }
+
   async execute(request: AgentTriggerRequest): Promise<AgentTriggerResult> {
     validateRequest(request);
     const grant = await this.authorize(request.grantToken, request.engineId);

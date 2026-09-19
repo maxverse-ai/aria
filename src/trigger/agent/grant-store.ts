@@ -8,6 +8,7 @@ import type { AgentTriggerGrantRecord } from './types';
 export interface AgentTriggerGrantStore {
   create(record: AgentTriggerGrantRecord): Promise<AgentTriggerGrantRecord>;
   get(id: string): Promise<AgentTriggerGrantRecord | undefined>;
+  list(): Promise<AgentTriggerGrantRecord[]>;
   authenticate(token: string): Promise<AgentTriggerGrantRecord | undefined>;
   revoke(id: string, now: number): Promise<AgentTriggerGrantRecord>;
 }
@@ -34,6 +35,13 @@ export class FileAgentTriggerGrantStore implements AgentTriggerGrantStore {
   async get(id: string): Promise<AgentTriggerGrantRecord | undefined> {
     const value = (await this.read()).grants[id];
     return value ? structuredClone(value) : undefined;
+  }
+
+  async list(): Promise<AgentTriggerGrantRecord[]> {
+    const state = await this.read();
+    return Object.values(state.grants)
+      .map((grant) => structuredClone(grant))
+      .sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id));
   }
 
   async authenticate(token: string): Promise<AgentTriggerGrantRecord | undefined> {

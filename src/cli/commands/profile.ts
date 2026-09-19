@@ -56,7 +56,7 @@ export async function runProfileList(opts: ProfileCommandOptions = {}): Promise<
     profiles = await listAllProfiles(rootDir);
   } catch (err) {
     if (!(err instanceof Error) || !err.message.startsWith('root config not found:')) throw err;
-    console.log('暂无 profile。');
+    console.log('No profiles configured.');
     return;
   }
 
@@ -132,16 +132,16 @@ export async function runProfileCreate(
     tenant: opts.tenant,
     allowBootstrap: true,
   });
-  console.log(`✓ profile「${name}」配置已保存。`);
+  console.log(`✓ profile '${name}' configuration saved.`);
   const shouldStart = opts.start ?? Boolean(process.stdin.isTTY && process.stdout.isTTY);
   if (shouldStart) {
     try {
       await runProfileStart(name, opts);
     } catch (error) {
-      throw new Error(`配置已保存，但未确认上线：${error instanceof Error ? error.message : String(error)}\n无需重新创建；重试：aria profile start ${name}`);
+      throw new Error(`configuration saved, but the start was not confirmed: ${error instanceof Error ? error.message : String(error)}\nno need to re-create; retry: aria profile start ${name}`);
     }
   } else {
-    console.log(`尚未启动，暂不能接收消息。上线：aria profile start ${name}`);
+    console.log(`not started; it cannot receive messages yet. start it: aria profile start ${name}`);
   }
 }
 
@@ -149,9 +149,9 @@ export async function runProfileStart(name: string, opts: ProfileCommandOptions 
   const rootDir = opts.rootDir ?? paths.rootDir;
   const root = await loadRootConfig(resolveAppPaths({ rootDir }).configFile);
   if (!root?.profiles[name]) throw new Error(`profile not found: ${name}`);
-  console.log(`正在通过 Supervisor 启动 profile「${name}」…`);
+  console.log(`starting profile '${name}' via the Supervisor…`);
   await startProfileOnHost(name, rootDir);
-  console.log(`✓ profile「${name}」启动成功。请发送一条私聊消息验证实际回复。`);
+  console.log(`✓ profile '${name}' started. send a direct message to verify it replies.`);
 }
 
 export async function runProfileUse(
@@ -163,9 +163,9 @@ export async function runProfileUse(
     name,
     localCliActor(rootDir),
   );
-  console.log(`已切换到 profile: ${name}`);
+  console.log(`switched to profile: ${name}`);
   if (result.projection.status === 'failed') {
-    console.warn('⚠ active-profile 兼容投影写入失败；config.json 已完成切换');
+    console.warn('⚠ active-profile compatibility projection write failed; config.json was switched');
   }
 }
 
@@ -189,15 +189,15 @@ export async function runProfileRemove(
     ? await service.purge(name, localCliActor(rootDir))
     : await service.archive(name, localCliActor(rootDir));
   if (result.mode === 'purge') {
-    console.log(`已永久删除 profile: ${name}`);
+    console.log(`permanently deleted profile: ${name}`);
     if (result.cleanup.status === 'failed') {
-      console.warn(`⚠ profile 已从配置删除，但暂存目录清理失败: ${result.archivedTo ?? name}`);
+      console.warn(`⚠ profile removed from config, but staging directory cleanup failed: ${result.archivedTo ?? name}`);
     }
   } else {
-    console.log(`已归档 profile: ${name}${result.archivedTo ? ` -> ${result.archivedTo}` : ''}`);
+    console.log(`archived profile: ${name}${result.archivedTo ? ` -> ${result.archivedTo}` : ''}`);
   }
   if (result.projection.status === 'failed') {
-    console.warn('⚠ active-profile 兼容投影写入失败；config.json 已完成更新');
+    console.warn('⚠ active-profile compatibility projection write failed; config.json was updated');
   }
 }
 
@@ -246,7 +246,7 @@ export async function runProfileExport(
     throw new Error('output already exists; use --force');
   }
   await writeFileAtomic(opts.output, body, { mode: 0o600 });
-  console.log(`已导出 profile: ${name} -> ${opts.output}`);
+  console.log(`exported profile: ${name} -> ${opts.output}`);
 }
 
 function cloneJson<T>(value: T): T {

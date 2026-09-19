@@ -54,7 +54,9 @@ import {
   runTriggerCapabilities,
   runTriggerConfirm,
   runTriggerExecute,
+  runTriggerGrantGet,
   runTriggerGrantIssue,
+  runTriggerGrantList,
   runTriggerGrantRevoke,
   runTriggerGet,
   runTriggerList,
@@ -330,6 +332,18 @@ triggerGrant
   .requiredOption('--yes', 'confirm grant issuance')
   .option('--json', 'print machine-readable JSON')
   .action((opts: { input?: string; yes?: boolean; json?: boolean }) => runTriggerGrantIssue(opts));
+
+triggerGrant
+  .command('list')
+  .description('List issued Agent trigger grants (read-only)')
+  .option('--json', 'print machine-readable JSON')
+  .action((opts: { json?: boolean }) => runTriggerGrantList(opts));
+
+triggerGrant
+  .command('get <id>')
+  .description('Read one Agent trigger grant (read-only)')
+  .option('--json', 'print machine-readable JSON')
+  .action((id: string, opts: { json?: boolean }) => runTriggerGrantGet(id, opts));
 
 triggerGrant
   .command('revoke <id>')
@@ -639,9 +653,10 @@ secrets
   .command('remove')
   .description('Delete an entry from the encrypted keystore')
   .requiredOption('--app-id <id>', 'App ID to remove')
+  .requiredOption('--yes', 'confirm secret deletion')
   .option('--profile <name>', 'profile name (defaults to active profile)')
-  .action(async (opts: { appId: string; profile?: string }) => {
-    await runSecretsRemove(opts.appId, { profile: opts.profile });
+  .action(async (opts: { appId: string; profile?: string; yes?: boolean }) => {
+    await runSecretsRemove(opts.appId, { profile: opts.profile, yes: opts.yes });
   });
 
 program.parseAsync(process.argv).catch((err: unknown) => {

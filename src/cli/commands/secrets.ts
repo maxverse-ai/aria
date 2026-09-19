@@ -38,6 +38,10 @@ interface SecretProfileOptions {
   rootDir?: string;
 }
 
+interface SecretRemoveOptions extends SecretProfileOptions {
+  yes?: boolean;
+}
+
 /**
  * `secrets get` — exec-provider protocol mode.
  *
@@ -86,26 +90,26 @@ export async function runSecretsSet(
   opts: SecretProfileOptions = {},
 ): Promise<void> {
   if (!appId) {
-    console.error('用法: aria secrets set --app-id <id>');
+    console.error('usage: aria secrets set --app-id <id>');
     process.exit(1);
   }
-  const plaintext = await promptPassword(`输入 ${appId} 的 App Secret: `);
+  const plaintext = await promptPassword(`App Secret for ${appId}: `);
   if (!plaintext) {
-    console.error('✗ 取消(secret 为空)');
+    console.error('✗ cancelled (empty secret)');
     process.exit(1);
   }
   await setAppSecret(appId, plaintext, opts);
-  console.log(`✓ 已加密存到 ~/.aria/secrets.enc`);
+  console.log('✓ stored encrypted in ~/.aria/secrets.enc');
 }
 
 export async function runSecretsList(opts: SecretProfileOptions = {}): Promise<void> {
   const appPaths = await resolveSecretProfilePaths(opts);
   const ids = await listSecretIds(appPaths);
   if (ids.length === 0) {
-    console.log('当前没有加密存储的 secret。');
+    console.log('No secrets in the encrypted keystore.');
     return;
   }
-  console.log(`# 当前共 ${ids.length} 个 secret 在加密存储里\n`);
+  console.log(`# ${ids.length} secret(s) in the encrypted keystore\n`);
   for (const id of ids) {
     console.log(`  - ${id}`);
   }
@@ -113,19 +117,20 @@ export async function runSecretsList(opts: SecretProfileOptions = {}): Promise<v
 
 export async function runSecretsRemove(
   appId: string | undefined,
-  opts: SecretProfileOptions = {},
+  opts: SecretRemoveOptions = {},
 ): Promise<void> {
   if (!appId) {
-    console.error('用法: aria secrets remove --app-id <id>');
+    console.error('usage: aria secrets remove --app-id <id>');
     process.exit(1);
   }
+  if (!opts.yes) throw new Error('secrets remove requires --yes');
   const id = secretKeyForApp(appId);
   const removed = await removeAppSecret(appId, opts);
   if (!removed) {
-    console.error(`✗ 没找到 secret: ${id}`);
+    console.error(`✗ secret not found: ${id}`);
     process.exit(1);
   }
-  console.log(`✓ 已删除 ${id}`);
+  console.log(`✓ removed ${id}`);
 }
 
 export async function resolveSecretAcrossProfiles(
