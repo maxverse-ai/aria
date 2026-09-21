@@ -219,17 +219,21 @@ export class CodexAppServerRuntime implements EngineRuntime {
 
   async statusSnapshot(): Promise<EngineStatusSnapshot> {
     const client = await this.client();
-    const [account, limits, models] = await Promise.all([
+    const [account, models] = await Promise.all([
       client.request<AccountResponse>('account/read'),
-      client.request<AccountRateLimitsResponse>('account/rateLimits/read'),
       this.listModelResponses(),
     ]);
+    // `account/rateLimits/read` requires ChatGPT login; apiKey/bedrock accounts
+    // always fail the probe, so it is only sent when the account qualifies.
+    const limits = account.account?.type === 'chatgpt'
+      ? await client.request<AccountRateLimitsResponse>('account/rateLimits/read')
+      : undefined;
     const defaultModel = models.find((model) => model.isDefault);
     return {
       model: this.latestModel ?? defaultModel?.displayName ?? defaultModel?.model,
       ...accountStatus(account),
       ...(this.latestContext ? { contextWindow: this.latestContext } : {}),
-      rateLimits: rateLimitWindows(limits),
+      ...(limits ? { rateLimits: rateLimitWindows(limits) } : {}),
       updatedAt: Date.now(),
     };
   }

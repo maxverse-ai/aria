@@ -95,6 +95,7 @@ describe('Codex App Server runtime', () => {
       contextWindow: { usedTokens: 200, totalTokens: 1000 },
     });
     expect(status.rateLimits).toContainEqual(expect.objectContaining({ usedPercent: 1, windowDurationMins: 10080 }));
+    expect(await requestMethodLines(root)).toContain('account/rateLimits/read');
     await expect(runtime.listModels(new AbortController().signal)).resolves.toEqual([
       {
         value: 'gpt-test',
@@ -125,6 +126,28 @@ describe('Codex App Server runtime', () => {
     await runtime.dispose();
     await runtime.dispose();
     await expect(runtime.client()).rejects.toThrow('runtime is disposed');
+  });
+
+  it('skips the rate-limit probe for API key accounts', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'aria-codex-app-server-apikey-'));
+    roots.push(root);
+    const runtime = new CodexAppServerRuntime({
+      binary: await writeFakeCodex(root, { accountType: 'apiKey' }),
+      profileStateDir: root,
+      inheritCodexHome: true,
+      sandbox: 'workspace-write',
+    });
+
+    const status = await runtime.statusSnapshot();
+    expect(status.rateLimits).toBeUndefined();
+    expect(status).toMatchObject({ model: 'GPT Test', account: 'API key' });
+    expect(status.plan).toBeUndefined();
+
+    const methods = await requestMethodLines(root);
+    expect(methods).toContain('account/read');
+    expect(methods).toContain('model/list');
+    expect(methods).not.toContain('account/rateLimits/read');
+    await runtime.dispose();
   });
 
   it('normalizes commentary, tools, and the final answer', async () => {
@@ -514,6 +537,11 @@ async function serviceTierRequestLines(root: string): Promise<string[]> {
   return value.trim().split('\n').filter(Boolean);
 }
 
+async function requestMethodLines(root: string): Promise<string[]> {
+  const value = await readFile(join(root, 'requests.log'), 'utf8');
+  return value.trim().split('\n').filter(Boolean);
+}
+
 async function steeringRequests(root: string): Promise<unknown[]> {
   const value = await readFile(join(root, 'steering-requests.log'), 'utf8');
   return value.trim().split('\n').filter(Boolean).map((line) => JSON.parse(line));
@@ -528,7 +556,7 @@ async function waitForLifecycleLine(root: string, expected: string): Promise<voi
   throw new Error(`timed out waiting for lifecycle line: ${expected}`);
 }
 
-async function writeFakeCodex(root: string, options: { failFirstInitialize?: boolean } = {}): Promise<string> {
+async function writeFakeCodex(root: string, options: { failFirstInitialize?: boolean; accountType?: 'chatgpt' | 'apiKey' } = {}): Promise<string> {
   const path = join(root, 'codex');
   const lifecyclePath = join(root, 'lifecycle.log');
   const initializeFailurePath = join(root, 'initialize-failed');
@@ -544,7 +572,9 @@ const lifecyclePath = ${JSON.stringify(lifecyclePath)};
 const initializeFailurePath = ${JSON.stringify(initializeFailurePath)};
 const serviceTierRequestPath = ${JSON.stringify(join(root, 'service-tier-requests.log'))};
 const steeringRequestPath = ${JSON.stringify(join(root, 'steering-requests.log'))};
+const requestMethodPath = ${JSON.stringify(join(root, 'requests.log'))};
 const failFirstInitialize = ${JSON.stringify(options.failFirstInitialize === true)};
+const accountType = ${JSON.stringify(options.accountType ?? 'chatgpt')};
 fs.appendFileSync(lifecyclePath, 'spawn\\n');
 const readline = require('node:readline');
 const rl = readline.createInterface({ input: process.stdin });
@@ -589,6 +619,7 @@ const completeSteeredTurn = () => {
 };
 rl.on('line', (line) => {
   const msg = JSON.parse(line);
+  if (msg.method) fs.appendFileSync(requestMethodPath, msg.method + '\\n');
   if (msg.id === 900 && msg.result && msg.result.decision === 'decline') {
     setImmediate(completeTurn);
   } else if (msg.method === 'initialize') {
@@ -629,7 +660,9 @@ rl.on('line', (line) => {
     send({ id: msg.id, result: { turnId: 'turn-1' } });
     setImmediate(completeSteeredTurn);
   } else if (msg.method === 'account/read') {
-    send({ id: msg.id, result: { account: { type: 'chatgpt', email: 'private@example.com', planType: 'pro' }, requiresOpenaiAuth: true } });
+    send({ id: msg.id, result: accountType === 'apiKey'
+      ? { account: { type: 'apiKey' }, requiresOpenaiAuth: false }
+      : { account: { type: 'chatgpt', email: 'private@example.com', planType: 'pro' }, requiresOpenaiAuth: true } });
   } else if (msg.method === 'account/rateLimits/read') {
     const rateLimits = { limitId: 'codex', limitName: null, primary: { usedPercent: 1, windowDurationMins: 10080, resetsAt: 2000000000 }, secondary: null, planType: 'pro' };
     send({ id: msg.id, result: { rateLimits, rateLimitsByLimitId: { codex: rateLimits } } });

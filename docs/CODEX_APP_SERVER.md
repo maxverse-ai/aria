@@ -48,9 +48,11 @@ ordering.
 ## Live status
 
 `/status` reads structured metadata from
-`account/read`, `account/rateLimits/read`, and `model/list`. The card displays
-the model, plan, context usage, and remaining limit windows. Account email is
-intentionally not rendered in chat.
+`account/read` and `model/list`, plus `account/rateLimits/read` when the account
+is a ChatGPT login — the rate-limit endpoint only exists for that account type,
+so API key and Bedrock profiles skip it and show no limit windows. The card
+displays the model, plan, context usage, and remaining limit windows. Account
+email is intentionally not rendered in chat.
 
 ## Service tiers and Fast mode
 
