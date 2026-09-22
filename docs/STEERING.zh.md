@@ -473,6 +473,7 @@ outcome 应该如实说明而不是猜。
 | Devin | `session/prompt` merge | inferred——`userMessageId` 对比 | deferred → auto-flush；mailbox 最后 |
 | Claude/Kimi | notice + pull，底层走 stdio 用户行推送（`--input-format stream-json`） | none——echo 能观测到但从不作为依据；post-tool 门闩降级 | mailbox → 下轮 sweep；deferred → auto-flush |
 | Grok | 现有 stdio 路径 | 视实现 | deferred → auto-flush |
+| OpenCode/MiMo | 一次性 stdin prompt；无 live-input 通道 | 无 | deferred → auto-flush |
 | 未来 ACP 引擎 | `session/inject` > `_session/steering` > prompt-merge | 显式 `messageId` | deferred → auto-flush |
 
 Devin 在 adapter 里的细节。mid-turn 的 `session/prompt` 要到 turn

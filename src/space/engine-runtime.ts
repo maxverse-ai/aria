@@ -24,7 +24,7 @@ import { seedNativeTemplates } from './native-templates';
 import { spaceEngineCapabilities } from './capabilities';
 import { verifyWorkspaceSkillCatalog } from '../agent/runtime/workspace-assets';
 
-export const SPACE_ENGINE_IDS = ['opencode', 'grok', 'codex', 'claude', 'pi', 'kimi', 'dsh', 'devin'] as const;
+export const SPACE_ENGINE_IDS = ['opencode', 'grok', 'codex', 'claude', 'pi', 'kimi', 'mimo', 'dsh', 'devin'] as const;
 export type SpaceEngineId = typeof SPACE_ENGINE_IDS[number];
 export interface SpaceEngineDeployment {
   readonly engineId: SpaceEngineId;
@@ -50,6 +50,8 @@ export function spaceEngineProfile(profile: EngineProfileConfig, paths: SpacePat
   result.sandbox = permissionsToLegacySandbox(result.permissions);
   switch (deployment.engineId) {
     case 'opencode': result.opencode = { ...result.opencode, binaryPath: deployment.binary,
+      dataHome: paths.data, configHome: paths.config, cacheHome: paths.cache, stateHome: paths.state }; break;
+    case 'mimo': result.mimo = { ...result.mimo, binaryPath: deployment.binary,
       dataHome: paths.data, configHome: paths.config, cacheHome: paths.cache, stateHome: paths.state }; break;
     case 'grok': result.grok = { ...result.grok, binaryPath: deployment.binary, grokHome: join(paths.home, '.grok'), inheritGrokHome: false }; break;
     case 'codex': result.codex = { ...result.codex, binaryPath: deployment.binary, codexHome: join(paths.home, '.codex'), inheritCodexHome: false }; break;
@@ -180,7 +182,7 @@ export async function createSpaceEngineRuntime(input: {
   };
   registerRuntimeQueries(runtime, {
     ...(ownedQueries.listHistory ? { listHistory: (query) => bound(() => ownedQueries.listHistory!(query)) }
-      : deployment.engineId === 'opencode' && legacyPlugin.listHistory ? {
+      : (deployment.engineId === 'opencode' || deployment.engineId === 'mimo') && legacyPlugin.listHistory ? {
         listHistory: (query) => bound(() => legacyPlugin.listHistory!({ ...query, profileConfig: profile, profileDir: runtimeStateDirectory })),
       } : deployment.engineId === 'claude' && deployment.queryNode ? {
         listHistory: async (query) => confinedClaudeHistory(launch, deployment.queryNode!, query.cwd, query.limit),

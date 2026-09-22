@@ -33,6 +33,7 @@ describe('engine plugin registry', () => {
     expect(ids).toContain('codex');
     expect(ids).toContain('grok');
     expect(ids).toContain('opencode');
+    expect(ids).toContain('mimo');
     expect(ids).toContain('dsh');
     expect(ids).toContain('kimi');
     expect(ids).toContain('pi');

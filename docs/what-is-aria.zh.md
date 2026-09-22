@@ -48,7 +48,8 @@ channel 归一化 → 访问控制 + 寻址 → profile / 会话 / 工作空间
 
 内置引擎插件（即 `--agent <kind>` 的取值）：`claude`（Claude Code）、
 `codex`（Codex CLI）、`grok`（Grok Build）、`devin`（Devin）、`opencode`
-（OpenCode）、`dsh`（DeepSeek Harness）、`kimi`（Kimi Code）和 `pi`（Pi）。
+（OpenCode）、`dsh`（DeepSeek Harness）、`kimi`（Kimi Code）、`mimo`
+（MiMo Code）和 `pi`（Pi）。
 [引擎插件参考](PLUGINS.md)列出了每个引擎的历史、实时输入和服务档位能力。
 
 Lark / 飞书内置提供，是目前的生产频道——见

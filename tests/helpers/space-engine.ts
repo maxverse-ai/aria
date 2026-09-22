@@ -20,7 +20,8 @@ export function spaceEngineMain(input: { engine: string; envKeys: string[]; sent
   if (promptIndex >= 0) record.systemPrompt = fs.readFileSync(record.argv[promptIndex + 1]!, 'utf8');
   save();
 
-  if (input.engine === 'opencode' && ['session', 'models'].includes(record.argv[0]!)) { send([]); return; }
+  if ((input.engine === 'opencode' || input.engine === 'mimo')
+    && ['session', 'models'].includes(record.argv[0]!)) { send([]); return; }
   if (input.engine === 'codex' || input.engine === 'grok' || input.engine === 'devin') {
     const rl = require('node:readline').createInterface({ input: process.stdin });
     rl.on('line', (line: string) => {
@@ -87,7 +88,7 @@ export function spaceEngineMain(input: { engine: string; envKeys: string[]; sent
 
   const complete = () => {
     save();
-    if (input.engine === 'opencode') {
+    if (input.engine === 'opencode' || input.engine === 'mimo') {
       send({ type: 'text', sessionID: 'session-old', part: { type: 'text', text: 'fixture answer' } });
     } else if (input.engine === 'pi') {
       send({ type: 'session', id: 'session-old' });

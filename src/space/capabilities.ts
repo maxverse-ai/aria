@@ -11,7 +11,7 @@ export function spaceEngineCapabilities(engineId: SpaceEngineId, deployment: Pic
     engineId,
     topology: ['codex', 'grok', 'devin'].includes(engineId) ? 'profile-daemon' as const : 'one-shot' as const,
     nativeResume: engineId !== 'dsh',
-    nativeHistory: ['codex', 'grok', 'opencode', 'devin'].includes(engineId) || (engineId === 'claude' && Boolean(deployment.queryNode)),
+    nativeHistory: ['codex', 'grok', 'opencode', 'mimo', 'devin'].includes(engineId) || (engineId === 'claude' && Boolean(deployment.queryNode)),
     catalogHistory: true,
     verifiedNativeImport: engineId === 'codex',
     nativeTools: deployment.tools ? ['lark-cli'] : [],

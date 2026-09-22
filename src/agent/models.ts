@@ -96,6 +96,14 @@ export const KIMI_MODELS: ModelOption[] = [
   { value: 'kimi-k2-thinking', label: 'Kimi K2 Thinking' },
 ];
 
+/** MiMo-Code models (provider/model patterns supported by `mimo --model`). */
+export const MIMO_MODELS: ModelOption[] = [
+  { value: DEFAULT_MODEL, label: '跟随默认（不指定）' },
+  { value: 'mimo/mimo-auto', label: 'MiMo Auto' },
+  { value: 'deepseek/deepseek-v4-pro', label: 'DeepSeek V4 Pro' },
+  { value: 'deepseek/deepseek-v4-flash', label: 'DeepSeek V4 Flash' },
+];
+
 /** Pi models (provider/model patterns supported by `pi --model`). */
 export const PI_MODELS: ModelOption[] = [
   { value: DEFAULT_MODEL, label: '跟随默认（不指定）' },

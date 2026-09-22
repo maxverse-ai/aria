@@ -172,7 +172,7 @@ describe('business workspace provisioning', () => {
     b.resources = [{ name: 'project', path: s.root, access: 'read-only' }];
     await expect(s.owner(s.definition(b), 'execution').prepare(s.context)).rejects.toThrow('conflict');
   });
-  it.each(['claude', 'grok', 'opencode', 'pi', 'kimi', 'dsh'])('provides an explicit lazy catalog for %s without claiming native verification', async engine => {
+  it.each(['claude', 'grok', 'opencode', 'mimo', 'pi', 'kimi', 'dsh'])('provides an explicit lazy catalog for %s without claiming native verification', async engine => {
     const s = await setup(engine), owner = s.owner(); await owner.prepare(s.context); await owner.recordDiscovery(s.key);
     expect(await readFile(join(s.paths.workspace, '.aria/skills.md'), 'utf8')).toContain('/review:');
     expect((await owner.status(s.context)).discovery).toBe('explicit-catalog');

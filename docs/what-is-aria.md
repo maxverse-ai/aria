@@ -56,7 +56,8 @@ channel normalization → access + addressing → profile / session / workspace
 
 Built-in engine plugins (the `--agent <kind>` values): `claude` (Claude Code),
 `codex` (Codex CLI), `grok` (Grok Build), `devin` (Devin), `opencode`
-(OpenCode), `dsh` (DeepSeek Harness), `kimi` (Kimi Code), and `pi` (Pi). The
+(OpenCode), `dsh` (DeepSeek Harness), `kimi` (Kimi Code), `mimo` (MiMo Code),
+and `pi` (Pi). The
 [engine plugin reference](PLUGINS.md) lists each engine's history, live-input,
 and service-tier capabilities.
 

@@ -13,6 +13,7 @@ Aria 通过插件注册表驱动本地编码 agent CLI。当前构建内置八�
 | `grok` | Grok Build | 有，ACP 会话列表 | 有，Agent stdio interject | 无 |
 | `devin` | Devin | 有，ACP 会话列表 | 有条件，ACP `session/inject` steer | 无 |
 | `opencode` | OpenCode | 有 | 无 | 无 |
+| `mimo` | MiMo Code | 有 | 无 | 无 |
 | `dsh` | DeepSeek Harness | 无 | 无 | 无 |
 | `kimi` | Kimi Code | 有 | 无 | 无 |
 | `pi` | Pi | 有 | 无 | 无 |

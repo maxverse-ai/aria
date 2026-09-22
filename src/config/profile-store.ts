@@ -70,6 +70,7 @@ type StoredProfileConfig = Pick<
   | 'opencode'
   | 'dsh'
   | 'kimi'
+  | 'mimo'
   | 'pi'
   | 'devin'
   | 'plugins'
@@ -116,6 +117,7 @@ function serializeProfileConfig(profile: ProfileConfig): StoredProfileConfig {
     ...(profile.opencode ? { opencode: profile.opencode } : {}),
     ...(profile.dsh ? { dsh: profile.dsh } : {}),
     ...(profile.kimi ? { kimi: profile.kimi } : {}),
+    ...(profile.mimo ? { mimo: profile.mimo } : {}),
     ...(profile.pi ? { pi: profile.pi } : {}),
     ...(profile.devin ? { devin: profile.devin } : {}),
     ...(profile.plugins && profile.plugins.length > 0 ? { plugins: profile.plugins } : {}),

@@ -108,6 +108,21 @@ export interface KimiConfig {
   mode?: number;
 }
 
+export interface MimoConfig {
+  binaryPath: string;
+  realpath?: string;
+  version?: string;
+  sha256?: string;
+  owner?: number;
+  mode?: number;
+  /** XDG data home override (sessions, auth). Defaults to the user's home. */
+  dataHome?: string;
+  /** XDG config home override. Also exported as MIMOCODE_CONFIG_DIR. */
+  configHome?: string;
+  cacheHome?: string;
+  stateHome?: string;
+}
+
 export interface PiConfig {
   binaryPath: string;
   realpath?: string;
@@ -278,6 +293,7 @@ export interface ProfileConfig {
   opencode?: OpencodeConfig;
   dsh?: DshConfig;
   kimi?: KimiConfig;
+  mimo?: MimoConfig;
   pi?: PiConfig;
   devin?: DevinConfig;
   /** External engine plugin package names, loaded at profile start. */
@@ -329,6 +345,7 @@ export interface CreateDefaultProfileConfigInput {
   opencode?: OpencodeConfig;
   dsh?: DshConfig;
   kimi?: KimiConfig;
+  mimo?: MimoConfig;
   pi?: PiConfig;
   devin?: DevinConfig;
   plugins?: string[];
@@ -380,6 +397,7 @@ export function normalizeEngineProfileConfig(input: unknown): EngineProfileConfi
     opencode?: OpencodeConfig;
     dsh?: DshConfig;
     kimi?: KimiConfig;
+    mimo?: MimoConfig;
     pi?: PiConfig;
     devin?: DevinConfig;
     plugins?: unknown;
@@ -443,6 +461,7 @@ export function normalizeEngineProfileConfig(input: unknown): EngineProfileConfi
     ...(raw.opencode ? { opencode: normalizeOpencode(raw.opencode) } : {}),
     ...(raw.dsh ? { dsh: normalizeDsh(raw.dsh) } : {}),
     ...(raw.kimi ? { kimi: normalizeKimi(raw.kimi) } : {}),
+    ...(raw.mimo ? { mimo: normalizeMimo(raw.mimo) } : {}),
     ...(raw.pi ? { pi: normalizePi(raw.pi) } : {}),
     ...(raw.devin ? { devin: normalizeDevin(raw.devin) } : {}),
     ...(plugins.length > 0 ? { plugins } : {}),
@@ -680,6 +699,21 @@ function normalizeGrok(input: GrokConfig): GrokConfig {
     ...(typeof input.mode === 'number' ? { mode: input.mode } : {}),
     ...(typeof input.grokHome === 'string' ? { grokHome: input.grokHome } : {}),
     inheritGrokHome: input.inheritGrokHome !== false,
+  };
+}
+
+function normalizeMimo(input: MimoConfig): MimoConfig {
+  return {
+    binaryPath: input.binaryPath,
+    ...(typeof input.realpath === 'string' ? { realpath: input.realpath } : {}),
+    ...(typeof input.version === 'string' ? { version: input.version } : {}),
+    ...(typeof input.sha256 === 'string' ? { sha256: input.sha256 } : {}),
+    ...(typeof input.owner === 'number' ? { owner: input.owner } : {}),
+    ...(typeof input.mode === 'number' ? { mode: input.mode } : {}),
+    ...(typeof input.dataHome === 'string' ? { dataHome: input.dataHome } : {}),
+    ...(typeof input.configHome === 'string' ? { configHome: input.configHome } : {}),
+    ...(typeof input.cacheHome === 'string' ? { cacheHome: input.cacheHome } : {}),
+    ...(typeof input.stateHome === 'string' ? { stateHome: input.stateHome } : {}),
   };
 }
 

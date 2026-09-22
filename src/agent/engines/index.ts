@@ -6,6 +6,7 @@ import { devinEnginePlugin, devinRuntimeFactory } from './devin/plugin';
 import { dshEnginePlugin, dshRuntimeFactory } from './dsh/plugin';
 import { grokEnginePlugin, grokRuntimeFactory } from './grok/plugin';
 import { kimiEnginePlugin, kimiRuntimeFactory } from './kimi/plugin';
+import { mimoEnginePlugin, mimoRuntimeFactory } from './mimo/plugin';
 import { opencodeEnginePlugin, opencodeRuntimeFactory } from './opencode/plugin';
 import { piEnginePlugin, piRuntimeFactory } from './pi/plugin';
 
@@ -17,6 +18,7 @@ const factories = new Map<EnginePlugin, EngineRuntimeFactory>([
   [opencodeEnginePlugin, opencodeRuntimeFactory],
   [dshEnginePlugin, dshRuntimeFactory],
   [kimiEnginePlugin, kimiRuntimeFactory],
+  [mimoEnginePlugin, mimoRuntimeFactory],
   [piEnginePlugin, piRuntimeFactory],
 ]);
 

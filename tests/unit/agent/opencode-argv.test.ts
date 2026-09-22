@@ -40,4 +40,21 @@ describe('OpenCode argv contract', () => {
   it('omits --auto unless explicitly enabled', () => {
     expect(buildOpenCodeArgs({ cwd: '/repo' })).not.toContain('--auto');
   });
+
+  it('honours a fork-specific auto-approve flag', () => {
+    expect(
+      buildOpenCodeArgs({
+        cwd: '/repo',
+        autoApprove: true,
+        autoApproveFlag: '--dangerously-skip-permissions',
+      }),
+    ).toEqual([
+      'run',
+      '--dangerously-skip-permissions',
+      '--format',
+      'json',
+      '--dir',
+      '/repo',
+    ]);
+  });
 });

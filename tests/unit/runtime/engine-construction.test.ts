@@ -9,7 +9,7 @@ import { normalizeEngineProfileConfig } from '../../../src/config/profile-schema
 import { prepareProfileEngineRuntime } from '../../../src/runtime/agent-runtime';
 import { FakeAgentAdapter } from '../../helpers/fake-agent';
 
-const engines = ['claude', 'codex', 'grok', 'opencode', 'dsh', 'kimi', 'pi', 'devin'];
+const engines = ['claude', 'codex', 'grok', 'opencode', 'mimo', 'dsh', 'kimi', 'pi', 'devin'];
 const roots: string[] = [];
 
 afterEach(async () => {

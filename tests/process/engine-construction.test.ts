@@ -7,7 +7,7 @@ import { normalizeEngineProfileConfig, type EngineProfileConfig } from '../../sr
 import { createProfileConversationHost } from '../../src/conversation/profile-host';
 import { prepareProfileEngineRuntime } from '../../src/runtime/agent-runtime';
 
-const allEngines = ['claude', 'codex', 'grok', 'opencode', 'dsh', 'kimi', 'pi', 'devin'] as const;
+const allEngines = ['claude', 'codex', 'grok', 'opencode', 'mimo', 'dsh', 'kimi', 'pi', 'devin'] as const;
 type Engine = typeof allEngines[number];
 // `dsh` reports progress over an extra stdio descriptor, which Node only
 // supports on POSIX hosts, so its launch cases do not apply on Windows.
@@ -19,7 +19,8 @@ const envKeys = [
   'LARK_CHANNEL', 'LARK_CHANNEL_PROFILE', 'LARK_CHANNEL_HOME',
   'LARK_CHANNEL_CONFIG', 'LARKSUITE_CLI_CONFIG_DIR',
   'CODEX_HOME', 'GROK_HOME', 'GROK_DISABLE_AUTOUPDATER', 'DSH_HOME',
-  'XDG_DATA_HOME', 'XDG_CONFIG_HOME', 'OPENCODE_CONFIG_DIR', 'XDG_CACHE_HOME', 'XDG_STATE_HOME',
+  'XDG_DATA_HOME', 'XDG_CONFIG_HOME', 'OPENCODE_CONFIG_DIR', 'MIMOCODE_CONFIG_DIR',
+  'XDG_CACHE_HOME', 'XDG_STATE_HOME',
 ];
 interface LaunchRecord {
   engine: Engine;
@@ -70,6 +71,7 @@ describe('prepared profile runtime process compatibility', () => {
       profile.sandbox.defaultMode = 'read-only';
       if (engine !== 'claude') profile[engine]!.binaryPath = join(root, 'wrong-binary');
       if (profile.opencode) profile.opencode.configHome = join(root, 'wrong-xdg');
+      if (profile.mimo) profile.mimo.configHome = join(root, 'wrong-xdg');
       if (profile.pi) profile.pi.sessionDir = join(root, 'wrong-sessions');
 
       const runtime = prepared.create();
@@ -169,6 +171,20 @@ describe('prepared profile runtime process compatibility', () => {
             expect(record.env[key]).toBe(custom ? join(root, 'custom-xdg', directory) : process.env[key]);
           }
           break;
+        case 'mimo':
+          expect(record.argv).toEqual([
+            'run', '--session', 'session-old', '--model', 'test-model',
+            ...(custom ? ['--dangerously-skip-permissions'] : []), '--format', 'json', '--dir', root,
+            '--variant', 'high',
+          ]);
+          for (const [key, directory] of [
+            ['XDG_DATA_HOME', 'data'], ['XDG_CONFIG_HOME', 'config'],
+            ['XDG_CACHE_HOME', 'cache'], ['XDG_STATE_HOME', 'state'],
+            ['MIMOCODE_CONFIG_DIR', 'config'],
+          ] as const) {
+            expect(record.env[key]).toBe(custom ? join(root, 'custom-xdg', directory) : process.env[key]);
+          }
+          break;
         case 'pi':
           expect(record.argv).toEqual([
             '-p', '--mode', 'json', '--session', 'session-old', '--model', 'test-model',
@@ -259,7 +275,7 @@ function profileFor(engine: Engine, binary: string, root: string, custom: boolea
     if (engine === 'grok') settings.grokHome = join(root, 'custom-grok');
     if (engine === 'pi') settings.sessionDir = join(root, 'custom-pi');
     if (engine === 'dsh') settings.dshHome = join(root, 'custom-dsh');
-    if (engine === 'opencode') {
+    if (engine === 'opencode' || engine === 'mimo') {
       for (const name of ['data', 'config', 'cache', 'state']) {
         settings[name + 'Home'] = join(root, 'custom-xdg', name);
       }
@@ -385,7 +401,7 @@ function fakeMain(input: { engine: Engine; recordPath: string; envKeys: string[]
 
   const complete = () => {
     save();
-    if (input.engine === 'opencode') {
+    if (input.engine === 'opencode' || input.engine === 'mimo') {
       send({ type: 'text', sessionID: 'session-old', part: { type: 'text', text: 'fixture answer' } });
     } else if (input.engine === 'pi') {
       send({ type: 'session', id: 'session-old' });

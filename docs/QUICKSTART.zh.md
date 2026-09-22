@@ -15,7 +15,8 @@ Aria 是一个本地优先（local-first）的编程 agent 控制平面：聊天
   `.node-version`。
 - 本机至少安装并登录一个 agent CLI：Claude Code（`claude`）、Codex CLI
   （`codex`）、Grok Build（`grok`）、OpenCode（`opencode`）、Devin
-  （`devin`）、DeepSeek Harness（`dsh`）、Kimi Code（`kimi`）或 Pi（`pi`）。
+  （`devin`）、DeepSeek Harness（`dsh`）、Kimi Code（`kimi`）、MiMo Code
+  （`mimo`）或 Pi（`pi`）。
 - 一个飞书 / Lark **PersonalAgent** 应用 —— 也可以让首次启动的扫码向导
   帮你创建并绑定。
 - 已用有权读取 `maxverse-ai/aria` 的账号登录 GitHub CLI（`gh`）。Aria 通过

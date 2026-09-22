@@ -28,7 +28,21 @@ export interface OpenCodeAdapterOptions {
   binary: string;
   profileStateDir: string;
   autoApprove?: boolean;
+  /**
+   * Flag appended to `run` args when autoApprove is on. Defaults to
+   * `--auto`; MiMo-Code renamed it to `--dangerously-skip-permissions`.
+   */
+  autoApproveFlag?: string;
   xdg?: OpenCodeXdg;
+  /**
+   * Env var that points the CLI at its config dir. Defaults to
+   * `OPENCODE_CONFIG_DIR`; MiMo-Code uses `MIMOCODE_CONFIG_DIR`.
+   */
+  configDirEnvKey?: string;
+  /** Engine identity; defaults to opencode (forks override). */
+  id?: string;
+  displayName?: string;
+  agentId?: string;
   /** Maps a reasoning-effort value to CLI args, e.g. `--variant high`. */
   effortFlag?: (value: string) => string[];
   stopGraceMs?: number;
@@ -38,22 +52,30 @@ export interface OpenCodeAdapterOptions {
 type OpenCodeChild = SpawnedProcessByStdio<Writable, Readable, Readable>;
 
 export class OpenCodeAdapter implements AgentAdapter {
-  readonly id = 'opencode';
-  readonly displayName = 'OpenCode';
+  readonly id: string;
+  readonly displayName: string;
 
   private readonly binary: string;
   private readonly profileStateDir: string;
   private readonly autoApprove: boolean;
+  private readonly autoApproveFlag: string;
   private readonly xdg: OpenCodeXdg;
+  private readonly configDirEnvKey: string;
+  private readonly agentId: string;
   private readonly effortFlag: ((value: string) => string[]) | undefined;
   private readonly defaultStopGraceMs: number;
   private readonly ariaChannel: ChannelEnvContext | undefined;
 
   constructor(opts: OpenCodeAdapterOptions) {
+    this.id = opts.id ?? 'opencode';
+    this.displayName = opts.displayName ?? 'OpenCode';
     this.binary = opts.binary;
     this.profileStateDir = opts.profileStateDir;
     this.autoApprove = opts.autoApprove === true;
+    this.autoApproveFlag = opts.autoApproveFlag ?? '--auto';
     this.xdg = opts.xdg ?? {};
+    this.configDirEnvKey = opts.configDirEnvKey ?? 'OPENCODE_CONFIG_DIR';
+    this.agentId = opts.agentId ?? this.id;
     this.effortFlag = opts.effortFlag;
     this.defaultStopGraceMs = opts.stopGraceMs ?? 5000;
     this.ariaChannel = opts.ariaChannel;
@@ -65,8 +87,8 @@ export class OpenCodeAdapter implements AgentAdapter {
 
   async checkAvailability(): Promise<AgentAvailability> {
     return checkAgentAvailability({
-      agentId: 'opencode',
-      agentName: 'OpenCode',
+      agentId: this.agentId,
+      agentName: this.displayName,
       command: this.binary,
       binaryPath: this.binary,
     });
@@ -76,7 +98,7 @@ export class OpenCodeAdapter implements AgentAdapter {
     const availability = await this.checkAvailability();
     if (!availability.ok) {
       throw new SpawnFailed(
-        'opencode binary check failed',
+        `${this.id} binary check failed`,
         availability.error,
         availability.diagnostic.code,
         availability.diagnostic,
@@ -94,6 +116,7 @@ export class OpenCodeAdapter implements AgentAdapter {
       sessionId: opts.sessionId,
       model: opts.model,
       autoApprove: this.autoApprove,
+      autoApproveFlag: this.autoApproveFlag,
     });
     if (opts.reasoningEffort && this.effortFlag) {
       args.push(...this.effortFlag(opts.reasoningEffort));
@@ -102,7 +125,7 @@ export class OpenCodeAdapter implements AgentAdapter {
     if (this.xdg.dataHome) envOverrides.XDG_DATA_HOME = this.xdg.dataHome;
     if (this.xdg.configHome) {
       envOverrides.XDG_CONFIG_HOME = this.xdg.configHome;
-      envOverrides.OPENCODE_CONFIG_DIR = this.xdg.configHome;
+      envOverrides[this.configDirEnvKey] = this.xdg.configHome;
     }
     if (this.xdg.cacheHome) envOverrides.XDG_CACHE_HOME = this.xdg.cacheHome;
     if (this.xdg.stateHome) envOverrides.XDG_STATE_HOME = this.xdg.stateHome;
@@ -133,7 +156,7 @@ export class OpenCodeAdapter implements AgentAdapter {
         stderrBuffer = stderrBuffer.slice(nl + 1);
         if (line.trim()) log.warn('agent', 'stderr', { line });
         if (isWindowsCommandNotFoundLine(line)) {
-          runtimeError = new Error(`failed to spawn opencode: ${line.trim()}`);
+          runtimeError = new Error(`failed to spawn ${this.id}: ${line.trim()}`);
           child.stdout.destroy();
           child.kill();
         }
@@ -157,7 +180,7 @@ export class OpenCodeAdapter implements AgentAdapter {
 
     return {
       runId: opts.runId,
-      events: createEventStream(child, stderrChunks, () => runtimeError, () => stopReason),
+      events: createEventStream(child, stderrChunks, () => runtimeError, () => stopReason, this.id),
       async stop() {
         if (child.exitCode !== null || child.signalCode !== null) return;
         stopReason = 'interrupted';
@@ -206,13 +229,14 @@ async function* createEventStream(
   stderrChunks: Buffer[],
   getError: () => Error | null,
   getStopReason: () => OpenCodeFinishReason | undefined,
+  engineId: string,
 ): AsyncGenerator<AgentEvent> {
   const translator = new OpenCodeJsonlTranslator();
   if (!child.pid) {
     const err = getError();
     yield {
       type: 'error',
-      message: err ? `failed to spawn opencode: ${err.message}` : 'spawn returned no pid',
+      message: err ? `failed to spawn ${engineId}: ${err.message}` : 'spawn returned no pid',
       terminationReason: 'failed',
     };
     return;
@@ -239,7 +263,7 @@ async function* createEventStream(
 
   const earlyRuntimeError = getError();
   if (earlyRuntimeError && child.exitCode === null && child.signalCode === null) {
-    yield* translator.fail(`opencode runtime error: ${earlyRuntimeError.message}`);
+    yield* translator.fail(`${engineId} runtime error: ${earlyRuntimeError.message}`);
     return;
   }
 
@@ -255,12 +279,12 @@ async function* createEventStream(
     if (!translator.terminalEmitted()) {
       const stderr = Buffer.concat(stderrChunks).toString('utf8').trim();
       const detail = stderr ? `: ${stderr.slice(0, 500)}` : '';
-      yield* translator.fail(`opencode exited with code ${exitCode}${detail}`);
+      yield* translator.fail(`${engineId} exited with code ${exitCode}${detail}`);
     }
     return;
   }
   if (runtimeError && !translator.terminalEmitted()) {
-    yield* translator.fail(`opencode runtime error: ${runtimeError.message}`);
+    yield* translator.fail(`${engineId} runtime error: ${runtimeError.message}`);
     return;
   }
 

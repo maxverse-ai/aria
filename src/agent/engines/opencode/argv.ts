@@ -5,6 +5,11 @@ export interface BuildOpenCodeArgsInput {
   model?: string;
   agent?: string;
   autoApprove?: boolean;
+  /**
+   * Flag appended when autoApprove is on. OpenCode uses `--auto`; forks may
+   * rename it (MiMo-Code uses `--dangerously-skip-permissions`).
+   */
+  autoApproveFlag?: string;
 }
 
 export function buildOpenCodeArgs(input: BuildOpenCodeArgsInput): string[] {
@@ -12,7 +17,7 @@ export function buildOpenCodeArgs(input: BuildOpenCodeArgsInput): string[] {
   if (input.sessionId) args.push('--session', input.sessionId);
   if (input.model) args.push('--model', input.model);
   if (input.agent) args.push('--agent', input.agent);
-  if (input.autoApprove === true) args.push('--auto');
+  if (input.autoApprove === true) args.push(input.autoApproveFlag ?? '--auto');
   // The prompt is delivered on stdin; the trailing positionals stay empty so
   // opencode reads stdin as the message (and no XML ever reaches argv).
   args.push('--format', 'json', '--dir', input.cwd);

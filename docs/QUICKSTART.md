@@ -16,7 +16,8 @@ guide walks from a clean machine to a working agent session over chat.
   `.node-version` pins the CI runtime.
 - At least one local agent CLI installed and logged in: Claude Code
   (`claude`), Codex CLI (`codex`), Grok Build (`grok`), OpenCode (`opencode`),
-  Devin (`devin`), DeepSeek Harness (`dsh`), Kimi Code (`kimi`), or Pi (`pi`).
+  Devin (`devin`), DeepSeek Harness (`dsh`), Kimi Code (`kimi`),
+  MiMo Code (`mimo`), or Pi (`pi`).
 - A Feishu / Lark **PersonalAgent** app — or let the first-run QR wizard
   create and bind one for you.
 - The GitHub CLI (`gh`) authenticated with an account that can read

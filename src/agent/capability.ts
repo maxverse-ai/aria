@@ -133,6 +133,24 @@ export function opencodeCapability(profile: Pick<ProfileConfig, 'permissions'>):
   };
 }
 
+export function mimoCapability(profile: Pick<ProfileConfig, 'permissions'>): AgentCapability {
+  const maxAccess = profile.permissions.maxAccess;
+  return {
+    agentId: 'mimo',
+    sessionKind: 'mimo-session',
+    promptInjection: 'stdin-prefix',
+    systemPrompt: BRIDGE_SYSTEM_PROMPT,
+    supportsNativeHistory: true,
+    callback: {
+      marker: '__bridge_cb',
+      legacyMarkers: [],
+    },
+    permissions: {
+      maxAccess,
+    },
+  };
+}
+
 export function dshCapability(profile: Pick<ProfileConfig, 'permissions'>): AgentCapability {
   const maxAccess = profile.permissions.maxAccess;
   return {

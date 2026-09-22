@@ -14,6 +14,10 @@ export interface ListOpenCodeHistoryOptions {
   limit: number;
   ariaChannel?: ChannelEnvContext;
   xdg?: OpenCodeXdg;
+  /** Env var pointing the CLI at its config dir; defaults to OPENCODE_CONFIG_DIR. */
+  configDirEnvKey?: string;
+  /** Engine label used in error messages; defaults to opencode. */
+  engineLabel?: string;
   timeoutMs?: number;
 }
 
@@ -33,7 +37,7 @@ export async function listOpenCodeSessionHistory(
   if (opts.xdg?.dataHome) envOverrides.XDG_DATA_HOME = opts.xdg.dataHome;
   if (opts.xdg?.configHome) {
     envOverrides.XDG_CONFIG_HOME = opts.xdg.configHome;
-    envOverrides.OPENCODE_CONFIG_DIR = opts.xdg.configHome;
+    envOverrides[opts.configDirEnvKey ?? 'OPENCODE_CONFIG_DIR'] = opts.xdg.configHome;
   }
   if (opts.xdg?.cacheHome) envOverrides.XDG_CACHE_HOME = opts.xdg.cacheHome;
   if (opts.xdg?.stateHome) envOverrides.XDG_STATE_HOME = opts.xdg.stateHome;
@@ -45,8 +49,9 @@ export async function listOpenCodeSessionHistory(
   const stderrChunks: Buffer[] = [];
   child.stderr.on('data', (chunk: Buffer) => stderrChunks.push(chunk));
 
+  const engineLabel = opts.engineLabel ?? 'opencode';
   try {
-    const raw = await readStdout(child, timeoutMs);
+    const raw = await readStdout(child, timeoutMs, engineLabel);
     const sessions = JSON.parse(raw) as unknown;
     if (!Array.isArray(sessions)) return [];
     const entries = sessions
@@ -66,7 +71,7 @@ export async function listOpenCodeSessionHistory(
   } catch (err) {
     const stderr = Buffer.concat(stderrChunks).toString('utf8').trim();
     throw new Error(
-      `opencode history query failed: ${err instanceof Error ? err.message : String(err)}${stderr ? `: ${stderr.slice(0, 300)}` : ''}`,
+      `${engineLabel} history query failed: ${err instanceof Error ? err.message : String(err)}${stderr ? `: ${stderr.slice(0, 300)}` : ''}`,
     );
   } finally {
     if (child.exitCode === null && child.signalCode === null) {
@@ -75,7 +80,7 @@ export async function listOpenCodeSessionHistory(
   }
 }
 
-function readStdout(child: OpenCodeChild, timeoutMs: number): Promise<string> {
+function readStdout(child: OpenCodeChild, timeoutMs: number, engineLabel: string): Promise<string> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
     const timer = setTimeout(() => {
@@ -90,7 +95,7 @@ function readStdout(child: OpenCodeChild, timeoutMs: number): Promise<string> {
     child.once('exit', (code) => {
       clearTimeout(timer);
       if (code !== 0) {
-        reject(new Error(`opencode session list exited with code ${code ?? 'null'}`));
+        reject(new Error(`${engineLabel} session list exited with code ${code ?? 'null'}`));
         return;
       }
       resolve(Buffer.concat(chunks).toString('utf8'));

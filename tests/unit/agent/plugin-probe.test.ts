@@ -10,6 +10,7 @@ const ENV_KEYS = [
   'LARK_CHANNEL_CODEX_BIN',
   'LARK_CHANNEL_GROK_BIN',
   'LARK_CHANNEL_OPENCODE_BIN',
+  'LARK_CHANNEL_MIMO_BIN',
   'LARK_CHANNEL_DSH_BIN',
   'LARK_CHANNEL_KIMI_BIN',
   'LARK_CHANNEL_PI_BIN',
@@ -40,6 +41,7 @@ describe('engine probe', () => {
         'opencode',
         '1.18.21',
       );
+      process.env.LARK_CHANNEL_MIMO_BIN = await writeVersionExecutable(dir, 'mimo', '0.9.0');
       process.env.LARK_CHANNEL_DSH_BIN = await writeVersionExecutable(dir, 'dsh', '0.1.1');
       process.env.LARK_CHANNEL_KIMI_BIN = await writeVersionExecutable(dir, 'kimi', '0.36.1');
       process.env.LARK_CHANNEL_PI_BIN = await writeVersionExecutable(dir, 'pi', '0.84.2');
@@ -52,6 +54,7 @@ describe('engine probe', () => {
       expect(byId.get('codex')).toMatchObject({ installed: true, version: '0.149.0' });
       expect(byId.get('grok')).toMatchObject({ installed: true, version: '1.0.13' });
       expect(byId.get('opencode')).toMatchObject({ installed: true, version: '1.18.21' });
+      expect(byId.get('mimo')).toMatchObject({ installed: true, version: '0.9.0' });
       expect(byId.get('dsh')).toMatchObject({ installed: true, version: '0.1.1' });
       expect(byId.get('kimi')).toMatchObject({ installed: true, version: '0.36.1' });
       expect(byId.get('pi')).toMatchObject({ installed: true, version: '0.84.2' });
@@ -67,6 +70,7 @@ describe('engine probe', () => {
     process.env.LARK_CHANNEL_CODEX_BIN = '/nonexistent/codex-missing';
     process.env.LARK_CHANNEL_GROK_BIN = '/nonexistent/grok-missing';
     process.env.LARK_CHANNEL_OPENCODE_BIN = '/nonexistent/opencode-missing';
+    process.env.LARK_CHANNEL_MIMO_BIN = '/nonexistent/mimo-missing';
     process.env.LARK_CHANNEL_DSH_BIN = '/nonexistent/dsh-missing';
     process.env.LARK_CHANNEL_KIMI_BIN = '/nonexistent/kimi-missing';
     process.env.LARK_CHANNEL_PI_BIN = '/nonexistent/pi-missing';
@@ -93,6 +97,7 @@ describe('engine probe', () => {
       process.env.LARK_CHANNEL_CODEX_BIN = missing('codex');
       process.env.LARK_CHANNEL_GROK_BIN = await fake('grok', 'console.error("boom"); process.exit(3);');
       process.env.LARK_CHANNEL_OPENCODE_BIN = await fake('opencode', 'process.exit(0);');
+      process.env.LARK_CHANNEL_MIMO_BIN = missing('mimo');
       process.env.LARK_CHANNEL_DSH_BIN = missing('dsh');
       process.env.LARK_CHANNEL_KIMI_BIN = missing('kimi');
       process.env.LARK_CHANNEL_PI_BIN = missing('pi');

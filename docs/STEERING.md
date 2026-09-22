@@ -523,6 +523,7 @@ Per engine, today and forward:
 | Devin | `session/prompt` merge | inferred — `userMessageId` comparison | deferred → auto-flush; mailbox last |
 | Claude/Kimi | notice + pull over stdio user-line push (`--input-format stream-json`) | none — echo observed but never relied on; post-tool gate defers | mailbox → next-turn sweep; deferred → auto-flush |
 | Grok | existing stdio path | per implementation | deferred → auto-flush |
+| OpenCode/MiMo | one-shot stdin prompt; no live-input channel | none | deferred → auto-flush |
 | Future ACP engine | `session/inject` > `_session/steering` > prompt-merge | explicit `messageId` | deferred → auto-flush |
 
 Devin specifics in the adapter. A mid-turn `session/prompt` resolves only
