@@ -101,6 +101,7 @@ Channel 归一化 → 访问 + 寻址 → profile / session / workspace
 | Grok Build | 通过 Agent stdio 直接接收文本 | ACP 会话、图片输入和实时模型发现 |
 | Devin | 保留到下一轮 | ACP 会话、图片输入、会话模式与宿主提供的 API key 认证 |
 | OpenCode | 保留到下一轮 | 原生历史和实时模型发现 |
+| MiMo Code | 保留到下一轮 | OpenCode 兼容 JSONL 传输、原生历史和实时模型发现 |
 | DeepSeek Harness | 保留到下一轮 | 内置无头适配器 |
 | Kimi Code | 保留到下一轮 | Claude 兼容传输与原生历史 |
 | Pi | 保留到下一轮 | 原生历史与推理强度控制 |
@@ -135,8 +136,8 @@ Aria 的通用“加速开关”：只有 Codex App Server 为所选模型上报
   - Devin：`devin`，安装说明：https://devin.ai —— 其 ACP server 有意不读取
     本机登录凭证，profile 改为从 `DEVIN_API_KEY`（或 `devin.apiKeyEnv`）
     环境变量读取 API key。
-  - DeepSeek Harness（`dsh`）、Kimi Code（`kimi`）和 Pi（`pi`）也已内置；
-    安装对应 CLI 后即可选择。
+  - DeepSeek Harness（`dsh`）、Kimi Code（`kimi`）、MiMo Code（`mimo`）
+    和 Pi（`pi`）也已内置；安装对应 CLI 后即可选择。
 - 一个飞书 / Lark PersonalAgent 应用。首次启动的扫码向导可以帮你创建并绑定。
 
 <a id="install"></a>
@@ -425,13 +426,13 @@ bridge 会检查所选目录存在、是目录，并且不是 `/`、Home 根、�
 
 模式映射：
 
-| Bridge access | Claude permission mode | Codex mode | OpenCode | Devin |
-|---|---|---|---|---|
-| `full` | `bypassPermissions` | `danger-full-access` | `--auto` | `dangerous` 会话模式 |
-| `workspace` | `acceptEdits` | `workspace-write` | 不带 `--auto` | `accept-edits` 会话模式 |
-| `read-only` | `plan` | `read-only` | 不带 `--auto` | `plan` 会话模式 |
+| Bridge access | Claude permission mode | Codex mode | OpenCode | MiMo Code | Devin |
+|---|---|---|---|---|---|
+| `full` | `bypassPermissions` | `danger-full-access` | `--auto` | `--dangerously-skip-permissions` | `dangerous` 会话模式 |
+| `workspace` | `acceptEdits` | `workspace-write` | 不带 `--auto` | 不带 skip flag | `accept-edits` 会话模式 |
+| `read-only` | `plan` | `read-only` | 不带 `--auto` | 不带 skip flag | `plan` 会话模式 |
 
-OpenCode 的权限确认在 bridge 的无头环境下无人应答、会被直接拒绝，因此只有 `full` 会自动批准（`--auto` 下 OpenCode 自身的显式 deny 规则仍然生效）。
+OpenCode 的权限确认在 bridge 的无头环境下无人应答、会被直接拒绝，因此只有 `full` 会自动批准（`--auto` 下 OpenCode 自身的显式 deny 规则仍然生效）。MiMo Code 遵循同样的契约，只是 flag 改名为 `--dangerously-skip-permissions`。
 
 Devin 会话模式在会话声明支持时通过 ACP `session/set_mode` 应用；其余的 `session/request_permission` 请求只在 `full` 档自动应答 `allow_once`，其他档位应答 `reject_once`。
 

@@ -136,7 +136,8 @@ together:
   the profile-owned terminology in topology v1.
 
 The [engine adoption matrix](EXECUTION_SPACE_ARCHITECTURE.md#engine-adoption-matrix)
-records the current Codex, Grok, Claude, Kimi, OpenCode, Pi and DSH paths.
+records the current Codex, Grok, Claude, Kimi, OpenCode, MiMo Code, Pi and
+DSH paths.
 Isolation support must be proven per engine and deployment. Missing history,
 images or live input can be reported as unavailable; missing isolation cannot
 fall back to a shared personal runtime.

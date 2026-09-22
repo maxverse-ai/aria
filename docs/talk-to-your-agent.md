@@ -58,7 +58,7 @@ live-input capability:
 | Codex CLI | Steered directly into the running turn (`turn/steer`) |
 | Grok Build | Steered directly through Agent stdio |
 | Devin | Steered when the ACP server advertises steer support; otherwise queued |
-| Claude Code, Kimi, OpenCode, Pi, DeepSeek Harness, others | Queued and merged into the next turn |
+| Claude Code, Kimi, OpenCode, MiMo Code, Pi, DeepSeek Harness, others | Queued and merged into the next turn |
 
 Steering is currently text-only. Aria removes a message from the next-turn
 queue only after the engine acknowledges it; deferred or rejected attempts

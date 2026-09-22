@@ -53,7 +53,7 @@ Lark / 飞书频道（目前的生产频道）；微信客服有独立的精简�
 | Codex CLI | 直接 steer 进运行中的 turn（`turn/steer`） |
 | Grok Build | 经 Agent stdio 直接 steer |
 | Devin | ACP 服务端声明支持 steer 时 steer；否则排队 |
-| Claude Code、Kimi、OpenCode、Pi、DeepSeek Harness 等 | 排队并并入下一 turn |
+| Claude Code、Kimi、OpenCode、MiMo Code、Pi、DeepSeek Harness 等 | 排队并并入下一 turn |
 
 steering 目前仅支持文本。Aria 只有在引擎确认后才把消息移出下一 turn 队列；
 被推迟或拒绝的尝试保持排队。如果这条消息应该开启一个独立任务而不是并入
