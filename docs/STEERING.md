@@ -20,9 +20,8 @@ there are exactly four places a mid-turn message can land:
 
 This document walks through each mechanism with concrete scenarios, then
 maps them onto what Aria implements per engine today. Reference
-implementations are drawn from `raft-computer` 1.0.15 (the Raft/***REMOVED***
-agent runtime installed on the development machine — its Bun binary
-embeds the full bundled source), Codex App Server, the ACP protocol
+implementations are drawn from `raft-computer` 1.0.15 (a Bun-based
+agent runtime whose binary embeds the full bundled source), Codex App Server, the ACP protocol
 working group, and live JSON-RPC probes against the installed Devin ACP
 build (3000.10.31), alongside Aria's own `src/agent/steering.ts`
 abstraction.
@@ -257,7 +256,7 @@ mid-turn, so Raft could inject the full body. It chooses not to. Instead it
 injects a content-free notice into the running turn:
 
 ```text
-[***REMOVED*** inbox notice:
+[Upstream inbox notice:
 Inbox update: 1 unread messages total; 1 changed targets
 dm:@alice  pending: 1 messages ...]
 ```

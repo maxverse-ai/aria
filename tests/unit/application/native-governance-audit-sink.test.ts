@@ -16,11 +16,11 @@ describe('NativeGovernanceAuditSink', () => {
     roots.push(root);
     const journalFile = join(root, 'changes.jsonl');
     const repository = new FileNativeReadRepository({
-      profileId: '***REMOVED***', snapshotFile: join(root, 'snapshot.json'), journalFile,
+      profileId: 'demo', snapshotFile: join(root, 'snapshot.json'), journalFile,
     });
     const sink = new NativeGovernanceAuditSink(
-      '***REMOVED***',
-      new NativeAuditRecorder({ profileId: '***REMOVED***', repository }),
+      'demo',
+      new NativeAuditRecorder({ profileId: 'demo', repository }),
     );
 
     await sink.record({

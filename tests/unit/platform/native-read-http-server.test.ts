@@ -91,7 +91,7 @@ async function setup(scopes: NativeReadScope[]) {
   const root = await mkdtemp(join(tmpdir(), 'aria-read-api-'));
   roots.push(root);
   const repository = new FileNativeReadRepository({
-    profileId: '***REMOVED***', snapshotFile: join(root, 'snapshot.json'), journalFile: join(root, 'changes.jsonl'),
+    profileId: 'demo', snapshotFile: join(root, 'snapshot.json'), journalFile: join(root, 'changes.jsonl'),
   });
   const endpoint = process.platform === 'win32'
     ? `\\\\.\\pipe\\aria-read-api-${randomUUID()}`
@@ -109,7 +109,7 @@ async function upsert(repository: FileNativeReadRepository, resource: NativeRead
 }
 
 function base<T extends NativeReadResource['resourceType']>(resourceType: T, id: string) {
-  return { resourceType, id, profileId: '***REMOVED***', createdAt: '2026-08-27T00:00:00.000Z', updatedAt: '2026-08-27T00:00:00.000Z' };
+  return { resourceType, id, profileId: 'demo', createdAt: '2026-08-27T00:00:00.000Z', updatedAt: '2026-08-27T00:00:00.000Z' };
 }
 function session(): NativeReadResourceDraft {
   return { ...base('session', 'ses_1'), conversationId: 'cnv_1', agentKind: 'codex', status: 'active',

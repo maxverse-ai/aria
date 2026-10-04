@@ -55,10 +55,10 @@ async function setup() {
   roots.push(root);
   const journalFile = join(root, 'changes.jsonl');
   const repository = new FileNativeReadRepository({
-    profileId: '***REMOVED***', snapshotFile: join(root, 'snapshot.json'), journalFile,
+    profileId: 'demo', snapshotFile: join(root, 'snapshot.json'), journalFile,
   });
   const recorder = new NativeAuditRecorder({
-    profileId: '***REMOVED***', repository, now: () => '2026-08-27T00:00:00.000Z',
+    profileId: 'demo', repository, now: () => '2026-08-27T00:00:00.000Z',
   });
   return { recorder, repository, journalFile };
 }

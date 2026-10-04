@@ -6,7 +6,7 @@ describe('resolveCredentialWithAudit', () => {
   it('records successful access without exposing the credential value', async () => {
     const events: GovernanceAuditEvent[] = [];
     const result = await resolveCredentialWithAudit({
-      profileId: '***REMOVED***',
+      profileId: 'demo',
       targetSourceId: 'cli_app',
       audit: { record: async (event) => { events.push(event); } },
       resolve: async () => 'private-secret-value',
@@ -25,7 +25,7 @@ describe('resolveCredentialWithAudit', () => {
   it('preserves the original resolution failure and does not let audit failure mask it', async () => {
     const original = new Error('credential unavailable');
     await expect(resolveCredentialWithAudit({
-      profileId: '***REMOVED***',
+      profileId: 'demo',
       targetSourceId: 'cli_app',
       audit: { record: async () => { throw new Error('audit unavailable'); } },
       resolve: async () => { throw original; },

@@ -17,8 +17,8 @@ Aria 把聊天用户连接到以 turn（轮）为单位工作的编程引擎。�
 4. **哪里都不安全**，此时诚实的答案只有"等它跑完"或"打断再重说"。
 
 本文用具体场景逐一讲解这四种机制，然后映射到 Aria 今天为每个引擎
-实现的层级。参考实现取自 `raft-computer` 1.0.15（安装在开发机上的
-Raft/***REMOVED*** agent 运行时——它的 Bun 二进制内嵌了完整的打包源码）、
+实现的层级。参考实现取自 `raft-computer` 1.0.15（一个 Bun 版 agent 运行时，
+其二进制内嵌了完整的打包源码）、
 Codex App Server、ACP 协议工作组，以及对本机安装的 Devin ACP 构建
 （3000.10.31）的 JSON-RPC 实测，并对照 Aria 自己的
 `src/agent/steering.ts` 抽象。
@@ -238,7 +238,7 @@ Claude Code 的 stream-json transport 其实**能**在 mid-turn 从 stdin
 而是往运行中的 turn 里写一条 content-free 的通知：
 
 ```text
-[***REMOVED*** inbox notice:
+[Upstream inbox notice:
 Inbox update: 1 unread messages total; 1 changed targets
 dm:@alice  pending: 1 messages ...]
 ```

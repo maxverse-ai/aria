@@ -15,8 +15,8 @@ describe('NativeMessageAuditSink', () => {
     const root = await mkdtemp(join(tmpdir(), 'aria-message-audit-'));
     roots.push(root);
     const journalFile = join(root, 'changes.jsonl');
-    const repository = new FileNativeReadRepository({ profileId: '***REMOVED***', snapshotFile: join(root, 'snapshot.json'), journalFile });
-    const sink = new NativeMessageAuditSink('***REMOVED***', new NativeAuditRecorder({ profileId: '***REMOVED***', repository }));
+    const repository = new FileNativeReadRepository({ profileId: 'demo', snapshotFile: join(root, 'snapshot.json'), journalFile });
+    const sink = new NativeMessageAuditSink('demo', new NativeAuditRecorder({ profileId: 'demo', repository }));
     await sink.record({ eventId: 'inbound:om_secret', direction: 'inbound', conversationKey: 'oc_secret',
       occurredAt: '2026-08-27T00:00:00.000Z', sourceMessageId: 'om_secret', actorSourceId: 'ou_secret', actorKind: 'bot' });
 

@@ -81,7 +81,7 @@ describe('outbound policy loader', () => {
           wrapChannel(channel) {
             return new Proxy(channel, {
               get(target, property, receiver) {
-                if (property === '__***REMOVED***AdminControlChannel') return channel;
+                if (property === '__ariaAdminControlChannel') return channel;
                 return Reflect.get(target, property, receiver);
               },
             });

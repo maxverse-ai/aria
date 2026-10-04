@@ -18,10 +18,10 @@ describe('DefaultNativeReadProfileRuntime', () => {
   it('starts only when called, projects sessions and removes the socket on stop', async () => {
     const root = await mkdtemp(join(tmpdir(), 'aria-native-runtime-'));
     roots.push(root);
-    const paths = resolveAppPaths({ rootDir: root, profile: '***REMOVED***' });
+    const paths = resolveAppPaths({ rootDir: root, profile: 'demo' });
     const entries: SessionCatalogEntry[] = [catalogEntry('thread-secret-1', 1)];
     const runtime = new DefaultNativeReadProfileRuntime({
-      profileId: '***REMOVED***', appPaths: paths, sessionCatalog: { entries: () => entries },
+      profileId: 'demo', appPaths: paths, sessionCatalog: { entries: () => entries },
       token: 'secret', scopes: ['read:sessions'], serverVersion: 'test', instanceId: 'instance-1',
     });
     runtimes.push(runtime);
@@ -48,10 +48,10 @@ describe('DefaultNativeReadProfileRuntime', () => {
   it('refreshes newly observed catalog entries without restarting the API', async () => {
     const root = await mkdtemp(join(tmpdir(), 'aria-native-runtime-'));
     roots.push(root);
-    const paths = resolveAppPaths({ rootDir: root, profile: '***REMOVED***' });
+    const paths = resolveAppPaths({ rootDir: root, profile: 'demo' });
     const entries: SessionCatalogEntry[] = [catalogEntry('thread-secret-1', 1)];
     const runtime = new DefaultNativeReadProfileRuntime({
-      profileId: '***REMOVED***', appPaths: paths, sessionCatalog: { entries: () => entries },
+      profileId: 'demo', appPaths: paths, sessionCatalog: { entries: () => entries },
       token: 'secret', scopes: ['read:sessions'], serverVersion: 'test',
     });
     runtimes.push(runtime);

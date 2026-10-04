@@ -160,7 +160,7 @@ async function setup() {
   const root = await mkdtemp(join(tmpdir(), 'aria-channel-read-'));
   roots.push(root);
   const repository = new FileNativeReadRepository({
-    profileId: '***REMOVED***', snapshotFile: join(root, 'snapshot.json'), journalFile: join(root, 'changes.jsonl'),
+    profileId: 'demo', snapshotFile: join(root, 'snapshot.json'), journalFile: join(root, 'changes.jsonl'),
   });
-  return { repository, projector: new ChannelIdentityReadProjector('***REMOVED***', repository) };
+  return { repository, projector: new ChannelIdentityReadProjector('demo', repository) };
 }

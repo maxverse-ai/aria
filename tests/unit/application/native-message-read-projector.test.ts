@@ -24,12 +24,12 @@ describe('NativeMessageReadProjector', () => {
     roots.push(root);
     const journalFile = join(root, 'changes.jsonl');
     const repository = new FileNativeReadRepository({
-      profileId: '***REMOVED***', snapshotFile: join(root, 'snapshot.json'), journalFile,
+      profileId: 'demo', snapshotFile: join(root, 'snapshot.json'), journalFile,
     });
-    const projector = new NativeMessageReadProjector({ profileId: '***REMOVED***', repository });
+    const projector = new NativeMessageReadProjector({ profileId: 'demo', repository });
     const runSink = new NativeRunAuditSink({
-      profileId: '***REMOVED***', repository,
-      recorder: new NativeAuditRecorder({ profileId: '***REMOVED***', repository }),
+      profileId: 'demo', repository,
+      recorder: new NativeAuditRecorder({ profileId: 'demo', repository }),
     });
     await runSink.record({
       eventId: 'run-secret:started', sourceRunId: 'run-secret', action: 'run.started',
@@ -97,9 +97,9 @@ describe('NativeMessageReadProjector', () => {
     const root = await mkdtemp(join(tmpdir(), 'aria-message-read-'));
     roots.push(root);
     const repository = new FileNativeReadRepository({
-      profileId: '***REMOVED***', snapshotFile: join(root, 'snapshot.json'), journalFile: join(root, 'changes.jsonl'),
+      profileId: 'demo', snapshotFile: join(root, 'snapshot.json'), journalFile: join(root, 'changes.jsonl'),
     });
-    const projector = new NativeMessageReadProjector({ profileId: '***REMOVED***', repository });
+    const projector = new NativeMessageReadProjector({ profileId: 'demo', repository });
     await projector.bind({
       bindingId: 'run-1:session', correlationId: 'im:om_trigger', conversationKey: 'oc_chat',
       conversationKind: 'p2p',
@@ -121,9 +121,9 @@ describe('NativeMessageReadProjector', () => {
     const root = await mkdtemp(join(tmpdir(), 'aria-message-read-'));
     roots.push(root);
     const repository = new FileNativeReadRepository({
-      profileId: '***REMOVED***', snapshotFile: join(root, 'snapshot.json'), journalFile: join(root, 'changes.jsonl'),
+      profileId: 'demo', snapshotFile: join(root, 'snapshot.json'), journalFile: join(root, 'changes.jsonl'),
     });
-    const projector = new NativeMessageReadProjector({ profileId: '***REMOVED***', repository });
+    const projector = new NativeMessageReadProjector({ profileId: 'demo', repository });
     await projector.observe({
       eventId: 'inbound:one', sourceMessageId: 'one', direction: 'inbound',
       conversationKey: 'chat', conversationKind: 'p2p', correlationId: 'turn',

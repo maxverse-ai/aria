@@ -4,7 +4,7 @@ import type { MessageAuditEvent } from '../../../src/runtime/message-audit';
 
 const envelope = {
   sink: 'message.send' as const, intent: 'agent.final' as const,
-  context: { profile: '***REMOVED***', source: 'im' as const, conversationId: 'scope-secret', operationId: 'op-secret' },
+  context: { profile: 'demo', source: 'im' as const, conversationId: 'scope-secret', operationId: 'op-secret' },
   payload: { to: 'chat-secret', input: { text: 'private response' } },
 };
 

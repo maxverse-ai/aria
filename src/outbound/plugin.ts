@@ -161,7 +161,7 @@ function resolveControlChannel(channel: LarkChannel): LarkChannel {
   // ABI v2's deployed ***REMOVED*** plugin exposes its inspected control capability on
   // the wrapped channel. Keep that legacy detail contained at the ABI edge;
   // Aria commands only see the generic `controlChannel` contract.
-  const candidate = Reflect.get(channel as object, '__***REMOVED***AdminControlChannel') as unknown;
+  const candidate = Reflect.get(channel as object, '__ariaAdminControlChannel') as unknown;
   if (candidate && typeof candidate === 'object' && typeof Reflect.get(candidate, 'send') === 'function') {
     return candidate as LarkChannel;
   }

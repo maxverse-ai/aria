@@ -19,8 +19,8 @@ import type { SessionCatalogEntry } from '../../../src/session/catalog';
 
 describe('SessionCatalogReadProjector', () => {
   it('projects Claude and Codex catalog entries without exposing native IDs', async () => {
-    const repository = new MemoryRepository('***REMOVED***');
-    const projector = new SessionCatalogReadProjector({ profileId: '***REMOVED***', repository });
+    const repository = new MemoryRepository('demo');
+    const projector = new SessionCatalogReadProjector({ profileId: 'demo', repository });
     const entries = [
       catalogEntry({ agentId: 'claude', sessionId: 'claude-secret-session' }),
       catalogEntry({ agentId: 'codex', threadId: 'codex-secret-thread', scopeId: 'oc_secret_chat' }),
@@ -40,8 +40,8 @@ describe('SessionCatalogReadProjector', () => {
   });
 
   it('joins generic engine history and keeps repeat scans idempotent', async () => {
-    const repository = new MemoryRepository('***REMOVED***');
-    const projector = new SessionCatalogReadProjector({ profileId: '***REMOVED***', repository });
+    const repository = new MemoryRepository('demo');
+    const projector = new SessionCatalogReadProjector({ profileId: 'demo', repository });
     const entry = catalogEntry({ agentId: 'codex', threadId: 'thread-1' });
     const history = new Map([
       [engineHistorySessionKey('codex', 'thread-1'), { id: 'thread-1', preview: 'Architecture review', updatedAtMs: 2_000, detail: 'Codex' }],
@@ -61,8 +61,8 @@ describe('SessionCatalogReadProjector', () => {
   });
 
   it('preserves learned metadata without producing new events on unchanged rescans', async () => {
-    const repository = new MemoryRepository('***REMOVED***');
-    const projector = new SessionCatalogReadProjector({ profileId: '***REMOVED***', repository });
+    const repository = new MemoryRepository('demo');
+    const projector = new SessionCatalogReadProjector({ profileId: 'demo', repository });
     const entry = catalogEntry({ agentId: 'codex', threadId: 'thread-1' });
     await projector.project({ entries: [entry] });
     const { revision: _revision, ...draft } = repository.resources[0] as NativeSessionResource;
@@ -93,8 +93,8 @@ describe('SessionCatalogReadProjector', () => {
   });
 
   it('skips damaged catalog identities instead of inventing a session', async () => {
-    const repository = new MemoryRepository('***REMOVED***');
-    const projector = new SessionCatalogReadProjector({ profileId: '***REMOVED***', repository });
+    const repository = new MemoryRepository('demo');
+    const projector = new SessionCatalogReadProjector({ profileId: 'demo', repository });
     const damaged = catalogEntry({ agentId: 'codex' });
 
     expect(await projector.project({ entries: [damaged] })).toEqual({ observed: 1, projected: 0, skipped: 1 });
@@ -102,8 +102,8 @@ describe('SessionCatalogReadProjector', () => {
   });
 
   it('preserves the first observed creation time across later source updates', async () => {
-    const repository = new MemoryRepository('***REMOVED***');
-    const projector = new SessionCatalogReadProjector({ profileId: '***REMOVED***', repository });
+    const repository = new MemoryRepository('demo');
+    const projector = new SessionCatalogReadProjector({ profileId: 'demo', repository });
     const first = catalogEntry({ agentId: 'claude', sessionId: 'session-1', updatedAt: 1_000 });
     await projector.project({ entries: [first] });
     await projector.project({ entries: [{ ...first, updatedAt: 2_000, lastSummary: 'new summary' }] });
@@ -116,8 +116,8 @@ describe('SessionCatalogReadProjector', () => {
   });
 
   it('preserves participants learned from message bindings across catalog refreshes', async () => {
-    const repository = new MemoryRepository('***REMOVED***');
-    const projector = new SessionCatalogReadProjector({ profileId: '***REMOVED***', repository });
+    const repository = new MemoryRepository('demo');
+    const projector = new SessionCatalogReadProjector({ profileId: 'demo', repository });
     const entry = catalogEntry({ agentId: 'codex', threadId: 'thread-1' });
     await projector.project({ entries: [entry] });
     const projected = repository.resources[0] as NativeSessionResource;
