@@ -1,8 +1,9 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { isAbsolute, normalize, join } from 'node:path';
-import { FileExecutionOwnership, type ExecutionOwnership, type ExecutionOwnershipLease } from './ownership';
-import type { ExecutionBackend, ExecutionEnvironment, ExecutionEnvironmentSpec } from './types';
+import { FileExecutionOwnership, type ExecutionOwnership, type ExecutionOwnershipLease } from '../ownership';
+import type { ExecutionBackend, ExecutionEnvironment, ExecutionEnvironmentSpec } from '../types';
+import type { ExecutionBackendAdapter } from './types';
 
 export interface PodmanConfiguration {
   readonly binary: string;
@@ -34,6 +35,21 @@ const pathValid = (path: string) => isAbsolute(path) && normalize(path) === path
 // period waiting for `sleep infinity` to be killed. The child sleep keeps the
 // holder idle without a busy loop; the trap lets Podman stop it promptly.
 const spaceHolderScript = 'trap "exit 0" TERM INT; while :; do sleep 2147483647 & wait $!; done';
+
+const persistedConfigurationKeys = ['binary', 'image', 'user', 'network', 'memoryBytes', 'cpus', 'pids', 'tmpBytes', 'managerCwd'] as const;
+
+/** Persisted form of PodmanConfiguration: managerEnv is resolved at launch, never stored. */
+export type PodmanPersistedConfiguration = Omit<PodmanConfiguration, 'managerEnv'>;
+
+export function normalizePodmanPersistedConfiguration(value: unknown): PodmanPersistedConfiguration {
+  if (!value || typeof value !== 'object' || Array.isArray(value)
+    || Object.keys(value).some(k => !(persistedConfigurationKeys as readonly string[]).includes(k))) {
+    throw new Error('invalid execution definition');
+  }
+  const configuration = structuredClone(value) as PodmanPersistedConfiguration;
+  validatePodmanConfiguration({ ...configuration, managerEnv: {} });
+  return configuration;
+}
 
 export function validatePodmanConfiguration(config: PodmanConfiguration): void {
   if (!config || !pathValid(config.binary) || !pathValid(config.managerCwd)
@@ -192,6 +208,12 @@ export class PodmanExecutionBackend implements ExecutionBackend {
     };
   }
 }
+
+export const podmanBackendAdapter: ExecutionBackendAdapter<PodmanPersistedConfiguration> = {
+  id: 'podman',
+  normalizeConfiguration: normalizePodmanPersistedConfiguration,
+  create: (configuration, managerEnv) => new PodmanExecutionBackend({ ...configuration, managerEnv }),
+};
 
 function runPodman(config: PodmanConfiguration, args: readonly string[], signal?: AbortSignal): Promise<{ code: number; stdout: string }> {
   return new Promise((resolve, reject) => {

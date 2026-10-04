@@ -4,7 +4,7 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, it } from 'vitest';
-import { PodmanExecutionBackend } from '../../../src/execution/podman';
+import { PodmanExecutionBackend } from '../../../src/execution/backends/podman';
 import type { ExecutionEnvironment } from '../../../src/execution/types';
 
 // Opt-in: use an isolated Podman store and a pre-pulled Alpine digest. The

@@ -2,7 +2,7 @@ import { ChildProcess } from 'node:child_process';
 import { PassThrough } from 'node:stream';
 import { CodexAppServerClient, type AppServerChild } from '../../../src/agent/engines/codex/app-server/client';
 import { describe, expect, it, vi } from 'vitest';
-import { PodmanExecutionBackend, type PodmanConfiguration } from '../../../src/execution/podman';
+import { PodmanExecutionBackend, type PodmanConfiguration } from '../../../src/execution/backends/podman';
 import type { ExecutionEnvironmentSpec } from '../../../src/execution/types';
 import type { ExecutionOwnership, ExecutionOwnerRecord } from '../../../src/execution/ownership';
 const config: PodmanConfiguration = { binary: '/usr/bin/podman', image: 'registry.example/agent@sha256:' + 'a'.repeat(64),
