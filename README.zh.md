@@ -5,7 +5,7 @@
 [![定位](https://img.shields.io/badge/focus-local--first%20agent%20control-7C5CFC?style=flat-square&labelColor=171717)](#why-aria)
 [![渠道](https://img.shields.io/badge/channels-pluggable-00D6B9?style=flat-square&labelColor=171717)](#runtime-flow)
 [![平台](https://img.shields.io/badge/platforms-Windows%20%7C%20macOS%20%7C%20Linux-55DDE0?style=flat-square&labelColor=171717)](#supported-scope)
-[![分发](https://img.shields.io/badge/distribution-immutable%20GitHub%20Releases-F3B61F?style=flat-square&labelColor=171717)](#install)
+[![分发](https://img.shields.io/badge/distribution-source%20%2B%20GitHub%20Releases-F3B61F?style=flat-square&labelColor=171717)](#install)
 
 **本地优先的编码 Agent 控制平面。聊天是遥控器，不是算力。**
 
@@ -119,7 +119,7 @@ Aria 的通用“加速开关”：只有 Codex App Server 为所选模型上报
 - 多人群必须结构化 `@bot` 才能完成明确寻址；
 - 远端 freshness 历史查询有界；不可用或截断时 fail-open，不会因为历史故障
   静默丢掉最终答案；
-- Aria 仅通过不可变 GitHub Release 分发，不发布到 npm。
+- Aria 目前从源码安装，不发布到 npm；版本化不可变 `v*` GitHub Release 是规划中的分发通道。
 
 <a id="quick-start"></a>
 
@@ -144,7 +144,7 @@ Aria 的通用“加速开关”：只有 Codex App Server 为所选模型上报
 
 ### 安装
 
-Aria 从源码构建运行。需要 Node.js `>=24` 和 pnpm 10：
+Aria 从源码构建运行。需要 Node.js `>=24` 和 pnpm（`packageManager` 固定 `pnpm@12.0.0`，`corepack enable` 即可）：
 
 ```bash
 git clone https://github.com/maxverse-ai/aria.git
@@ -203,9 +203,8 @@ aria status
 aria stop
 ```
 
-使用服务层命令前，应先通过 GitHub Release 安装器完成版本化安装。daemon 定义
-只记录稳定 launcher，实际版本由原子写入的安装状态指针选择，所以升级和回滚
-不需要把服务绑定到某个易失的 npm 缓存路径。
+daemon 定义指向 PATH 上的 `aria` 启动器（源码安装时即 pnpm 全局 link），因此
+服务定义在重建后依然有效；`git pull` 重新构建后重启服务即可。
 
 服务层命令按 profile 注册，每个 profile 有独立服务：
 
@@ -220,7 +219,7 @@ aria unregister [--profile <name>]
 平台映射：
 - **macOS**：launchd 用户代理 `ai.aria.bot.<profile>`
 - **Linux**：systemd 用户单元 `aria.bot.<profile>.service`
-- **Windows**：Task Scheduler 任务 `LarkChannelBridge.Bot.<profile>`，launcher 是 `.cmd`
+- **Windows**：Task Scheduler 任务 `Aria.Bot.<profile>`，launcher 是 `.cmd`
 
 daemon 日志在 `~/.aria/profiles/<profile>/logs/daemon/`。
 
@@ -498,9 +497,9 @@ grep '"event":"enter"' ~/.aria/profiles/<profile>/logs/bridge-$(date +%Y%m%d).js
 **图片发过去 agent 说看不到**：升级到最新版，0.1.0 之前的版本有文件名去重 bug。
 
 **安装后 `aria` 仍然是旧命令，或者找不到命令**：先用 `command -v aria`
-（PowerShell 用 `Get-Command aria`）确认命中的路径，把安装器输出的命令目录放到
-旧 npm/pnpm 全局 bin 目录之前，然后重新打开终端。版本化安装器会把检测到的
-旧全局版本保留为回滚基线，不会主动删除。
+（PowerShell 用 `Get-Command aria`）确认命中的路径，把 pnpm 全局 bin 目录
+（`pnpm bin -g`）放到旧全局 bin 目录之前，然后重新打开终端。
+`pnpm link --global` 不会删除旧全局命令，只新增链接，PATH 顺序决定哪个生效。
 
 <a id="documentation"></a>
 
@@ -620,6 +619,12 @@ export default createAdapter;
 Aria fork 自
 [lark-channel-bridge](https://github.com/zarazhangrui/lark-coding-agent-bridge)
 （MIT），目前在 [maxverse-ai](https://github.com/maxverse-ai) 下独立演化。
+
+## 参与贡献
+
+贡献流程见 [CONTRIBUTING.md](CONTRIBUTING.md)，社区规范见
+[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)。安全问题请按
+[SECURITY.md](SECURITY.md) 私下报告。
 
 ## 许可
 

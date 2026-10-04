@@ -12,7 +12,7 @@ Aria 是一个本地优先（local-first）的编程 agent 控制平面：聊天
 ## 1. 前置条件
 
 - Node.js `>=24.0.0` —— 下限见 `package.json#engines.node`；CI 运行时固定在
-  `.node-version`。pnpm 10（`corepack enable` 即可提供）。
+  `.node-version`。pnpm（`packageManager` 固定 `pnpm@12.0.0`，`corepack enable` 即可提供）。
 - 本机至少安装并登录一个 agent CLI：Claude Code（`claude`）、Codex CLI
   （`codex`）、Grok Build（`grok`）、OpenCode（`opencode`）、Devin
   （`devin`）、DeepSeek Harness（`dsh`）、Kimi Code（`kimi`）、MiMo Code

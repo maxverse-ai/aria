@@ -10,7 +10,7 @@
 ## 安装
 
 Aria 目前从源码安装，包本体尚未发布到 npm。需要 Node.js `>=24` 和
-pnpm 10：
+pnpm（`packageManager` 固定 `pnpm@12.0.0`）：
 
 ```bash
 git clone https://github.com/maxverse-ai/aria.git

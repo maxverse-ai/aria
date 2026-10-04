@@ -13,7 +13,7 @@ guide walks from a clean machine to a working agent session over chat.
 ## 1. Prerequisites
 
 - Node.js `>=24.0.0` — the floor declared in `package.json#engines.node`;
-  `.node-version` pins the CI runtime. pnpm 10 (`corepack enable` provides it).
+  `.node-version` pins the CI runtime. pnpm (`packageManager` pins `pnpm@12.0.0`; `corepack enable` provides it).
 - At least one local agent CLI installed and logged in: Claude Code
   (`claude`), Codex CLI (`codex`), Grok Build (`grok`), OpenCode (`opencode`),
   Devin (`devin`), DeepSeek Harness (`dsh`), Kimi Code (`kimi`),

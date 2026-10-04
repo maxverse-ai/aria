@@ -24,7 +24,7 @@ daemon 的平台映射：
 | --- | --- |
 | macOS | launchd 用户代理 `ai.aria.bot.<profile>` |
 | Linux | systemd 用户单元 `aria.bot.<profile>.service` |
-| Windows | 任务计划程序任务 `LarkChannelBridge.Bot.<profile>`，经 `.cmd` 包装启动 |
+| Windows | 任务计划程序任务 `Aria.Bot.<profile>`，经 `.cmd` 包装启动 |
 
 daemon 日志在 `~/.aria/profiles/<profile>/logs/daemon/` 下。用
 `aria logs [--profile <name>] [--lines <n>] [--follow]` 查看末尾（`--stdout`

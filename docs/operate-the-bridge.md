@@ -27,7 +27,7 @@ Platform mapping for the daemon:
 | --- | --- |
 | macOS | launchd user agent `ai.aria.bot.<profile>` |
 | Linux | systemd user unit `aria.bot.<profile>.service` |
-| Windows | Task Scheduler task `LarkChannelBridge.Bot.<profile>` via a `.cmd` wrapper |
+| Windows | Task Scheduler task `Aria.Bot.<profile>` via a `.cmd` wrapper |
 
 Daemon logs live under `~/.aria/profiles/<profile>/logs/daemon/`. Tail them
 with `aria logs [--profile <name>] [--lines <n>] [--follow]` (`--stdout` for

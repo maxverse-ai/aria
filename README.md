@@ -5,7 +5,7 @@
 [![Focus](https://img.shields.io/badge/focus-local--first%20agent%20control-7C5CFC?style=flat-square&labelColor=171717)](#why-aria)
 [![Channels](https://img.shields.io/badge/channels-pluggable-00D6B9?style=flat-square&labelColor=171717)](#runtime-flow)
 [![Platforms](https://img.shields.io/badge/platforms-Windows%20%7C%20macOS%20%7C%20Linux-55DDE0?style=flat-square&labelColor=171717)](#supported-scope)
-[![Distribution](https://img.shields.io/badge/distribution-immutable%20GitHub%20Releases-F3B61F?style=flat-square&labelColor=171717)](#install)
+[![Distribution](https://img.shields.io/badge/distribution-source%20%2B%20GitHub%20Releases-F3B61F?style=flat-square&labelColor=171717)](#install)
 
 **A local-first control plane for coding agents. Chat is the remote control, not
 the compute plane.**
@@ -127,8 +127,8 @@ The current product boundary is deliberately explicit:
 - multi-person groups require a structured `@bot` for unambiguous addressing;
 - remote freshness history is bounded and fails open when unavailable or
   truncated, so history failure never silently discards a terminal answer;
-- Aria is distributed from immutable GitHub Releases and is not
-  published to npm.
+- Aria is installed from source today and is not published to npm; versioned
+  immutable `v*` GitHub Releases are the planned distribution channel.
 
 ## Quick Start
 
@@ -149,7 +149,8 @@ The current product boundary is deliberately explicit:
 
 ### Install
 
-Aria is built and run from source. Requires Node.js `>=24` and pnpm 10:
+Aria is built and run from source. Requires Node.js `>=24` and pnpm
+(`packageManager` pins `pnpm@12.0.0`; `corepack enable` provides it):
 
 ```bash
 git clone https://github.com/maxverse-ai/aria.git
@@ -209,10 +210,9 @@ aria status
 aria stop
 ```
 
-Install with the versioned GitHub Release installer before using service
-commands. The daemon definition points to Aria's stable launcher, while the
-active version is selected through an atomically written install-state file.
-This keeps service definitions valid across upgrades and rollbacks.
+The daemon definition points at the `aria` launcher on your PATH (the pnpm
+global link when installed from source), so service definitions stay valid
+across rebuilds; restart the service after a `git pull` rebuild.
 
 Service commands install a per-profile service:
 
@@ -227,7 +227,7 @@ aria unregister [--profile <name>]
 Platform mapping:
 - **macOS**: launchd user agent `ai.aria.bot.<profile>`
 - **Linux**: systemd user unit `aria.bot.<profile>.service`
-- **Windows**: Task Scheduler task `LarkChannelBridge.Bot.<profile>`, launched through a `.cmd` wrapper
+- **Windows**: Task Scheduler task `Aria.Bot.<profile>`, launched through a `.cmd` wrapper
 
 Daemon logs are under `~/.aria/profiles/<profile>/logs/daemon/`.
 
@@ -511,10 +511,10 @@ documented with their channel. See the
 **The agent says it cannot see an image I sent.** Upgrade to the latest version. Releases before 0.1.0 had a filename-dedup bug.
 
 **`aria` is still the old command, or is not found after installation.** Check
-`command -v aria` (or `Get-Command aria` in PowerShell), put the installer's
-printed command directory before an older npm/pnpm global bin directory in
-`PATH`, then open a new shell. The versioned installer preserves an adopted
-legacy global command as a rollback baseline; it does not delete it.
+`command -v aria` (or `Get-Command aria` in PowerShell), put the pnpm global
+bin directory (`pnpm bin -g`) before older global bin directories in `PATH`,
+then open a new shell. `pnpm link --global` never deletes an older global
+command — it only adds the new link, so PATH order decides which one wins.
 
 <a id="documentation"></a>
 
@@ -562,7 +562,7 @@ status header every document carries.
 | Multi-channel plugins, lifecycle, isolation, and progressive delivery | [Channel platform architecture](docs/CHANNEL_PLATFORM_ARCHITECTURE.md) |
 | Stored channel instances and reversible schema v2→v3 migration | [Channel profile schema v3](docs/CHANNEL_SCHEMA_V3.md) |
 | Scheduled runs, reminders, future trigger sources, and result routing | [Trigger platform architecture](docs/TRIGGER_PLATFORM_ARCHITECTURE.md) |
-| Private Release installation, update transactions, stable launcher, and rollback | [CLI distribution architecture](docs/DISTRIBUTION.md) |
+| Release installation, update transactions, stable launcher, and rollback | [CLI distribution architecture](docs/DISTRIBUTION.md) |
 | Profile state, managed workspaces, and engine-owned layout | [Workspace and state layout](docs/WORKSPACE_AND_STATE_LAYOUT.md) |
 | Control-plane commands and extension boundary | [Control plane](docs/CONTROL_PLANE.md) |
 | Contributor toolchain and required gates | [Toolchain](docs/TOOLCHAIN.md) |
@@ -637,6 +637,12 @@ Aria was forked from
 [lark-channel-bridge](https://github.com/zarazhangrui/lark-coding-agent-bridge)
 (MIT) and now evolves independently under
 [maxverse-ai](https://github.com/maxverse-ai).
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the workflow and
+[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) for community expectations. Report
+security issues privately via [SECURITY.md](SECURITY.md).
 
 ## License
 

@@ -11,7 +11,7 @@ follows installation, see the [Quickstart](QUICKSTART.md).
 ## Install
 
 Aria is currently installed from source; the package is not yet published to
-npm. Requires Node.js `>=24` and pnpm 10:
+npm. Requires Node.js `>=24` and pnpm (`packageManager` pins `pnpm@12.0.0`):
 
 ```bash
 git clone https://github.com/maxverse-ai/aria.git
