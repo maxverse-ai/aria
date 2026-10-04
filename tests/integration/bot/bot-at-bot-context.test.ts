@@ -160,8 +160,8 @@ describe('sender identity in bridge_context', () => {
     await h.channel.handlers.message?.(
       message({
         messageId: 'om_from_bot',
-        senderId: '***REMOVED***',
-        senderName: '***REMOVED***',
+        senderId: 'ou_peerbot',
+        senderName: 'PeerBot',
         content: '@Bridge 部署完成，请验证',
         rawSenderType: 'app',
         mentions: [
@@ -260,8 +260,8 @@ describe('sender identity in bridge_context', () => {
     await h.channel.handlers.message?.(
       message({
         messageId: 'om_batch_bot',
-        senderId: '***REMOVED***',
-        senderName: '***REMOVED***',
+        senderId: 'ou_peerbot',
+        senderName: 'PeerBot',
         content: '我刚发布了 v1.2.3',
         rawSenderType: 'app',
       }),
@@ -272,7 +272,7 @@ describe('sender identity in bridge_context', () => {
       text: string;
     };
     expect(userInput.text).toContain('[张三 (user)]:');
-    expect(userInput.text).toContain('[***REMOVED*** (bot)]:');
+    expect(userInput.text).toContain('[PeerBot (bot)]:');
     expect(userInput.text).toContain('这个报错怎么回事');
     expect(userInput.text).toContain('我刚发布了 v1.2.3');
   });
