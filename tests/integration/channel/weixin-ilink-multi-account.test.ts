@@ -123,11 +123,14 @@ async function startAccount(
   return { runtime, transport, envelopes, stateDir };
 }
 
-async function waitFor(check: () => boolean, attempts = 400): Promise<void> {
-  for (let i = 0; i < attempts && !check(); i += 1) {
+async function waitFor(
+  check: () => boolean | Promise<boolean>,
+  attempts = 400,
+): Promise<void> {
+  for (let i = 0; i < attempts && !(await check()); i += 1) {
     await new Promise((resolve) => setTimeout(resolve, 5));
   }
-  if (!check()) throw new Error('condition did not become true');
+  if (!(await check())) throw new Error('condition did not become true');
 }
 
 describe('stage 12D multi-account isolation', () => {
@@ -150,7 +153,9 @@ describe('stage 12D multi-account isolation', () => {
       expect(b.envelopes[0]?.actorId).toBe(USER_B);
 
       // Each account persists its own cursor under its own directory:
-      // B's cursor evolves from B's seed, never from A's lineage.
+      // B's cursor evolves from B's seed, never from A's lineage. The
+      // cursor write lands after ingress accept, so wait for it.
+      await waitFor(async () => (await storeA.read()) !== '');
       const cursorA = await storeA.read();
       const cursorB = await storeB.read();
       expect(cursorA).not.toBe('');
@@ -160,6 +165,7 @@ describe('stage 12D multi-account isolation', () => {
       // A second batch advances only A's cursor lineage.
       a.transport.push([messageFor(ACCOUNT_A, { message_id: 7002, seq: 2 })]);
       await waitFor(() => a.envelopes.length === 2);
+      await waitFor(async () => (await storeA.read()) !== cursorA);
       expect(await storeA.read()).not.toBe(cursorA);
       expect((await storeB.read()).startsWith('b-seed')).toBe(true);
     } finally {
