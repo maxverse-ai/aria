@@ -59,7 +59,7 @@ const OVERRIDES = {
 };
 
 function parseCli(source) {
-  const lines = source.split('\n');
+  const lines = source.split(/\r?\n/);
   const varPath = { program: '' }; // commander variable -> full command path
   const varHidden = { program: false }; // commander variable -> hidden in --help
   const commands = []; // { path, parent, depth, name, description, options, hidden }

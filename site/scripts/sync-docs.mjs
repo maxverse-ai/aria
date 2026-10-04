@@ -190,7 +190,7 @@ function stripHeaderMeta(body) {
       if (i % 2 === 1) return part; // fenced code: untouched
       const out = [];
       let inStatusBlock = false;
-      for (const line of part.split('\n')) {
+      for (const line of part.split(/\r?\n/)) {
         if (STATUS_LINE.test(line)) {
           inStatusBlock = true;
           continue;

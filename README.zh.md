@@ -6,6 +6,8 @@
 [![渠道](https://img.shields.io/badge/channels-pluggable-00D6B9?style=flat-square&labelColor=171717)](#runtime-flow)
 [![平台](https://img.shields.io/badge/platforms-Windows%20%7C%20macOS%20%7C%20Linux-55DDE0?style=flat-square&labelColor=171717)](#supported-scope)
 [![分发](https://img.shields.io/badge/distribution-source%20%2B%20GitHub%20Releases-F3B61F?style=flat-square&labelColor=171717)](#install)
+[![CI](https://img.shields.io/github/actions/workflow/status/maxverse-ai/aria/ci.yml?branch=main&style=flat-square&label=CI&labelColor=171717&color=00D6B9)](https://github.com/maxverse-ai/aria/actions/workflows/ci.yml)
+[![License](https://img.shields.io/badge/license-MIT-7C5CFC?style=flat-square&labelColor=171717)](LICENSE)
 
 **本地优先的编码 Agent 控制平面。聊天是遥控器，不是算力。**
 
