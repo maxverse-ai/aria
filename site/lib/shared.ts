@@ -2,7 +2,7 @@ import { createGetUrl } from 'fumadocs-core/source';
 import { i18n } from './i18n';
 
 export const appName = 'Aria';
-export const siteUrl = 'https://ai.***REMOVED***dev.com';
+export const siteUrl = 'https://docs.example.com';
 export const docsRoute = '/docs';
 export const blogRoute = '/changelog';
 export const docsImageRoute = '/og/docs';

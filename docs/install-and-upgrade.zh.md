@@ -9,7 +9,7 @@
 
 ## 安装
 
-Aria 通过私有的不可变 GitHub Releases 分发，不发布到 npm。可复制粘贴的
+Aria 通过不可变 GitHub Releases 分发，不发布到 npm。可复制粘贴的
 bootstrap 命令维护在 [README](../README.zh.md#install) 和
 [快速上手](QUICKSTART.zh.md) 中，它们会：
 

@@ -259,7 +259,7 @@ injects a content-free notice into the running turn:
 ```text
 [***REMOVED*** inbox notice:
 Inbox update: 1 unread messages total; 1 changed targets
-dm:@***REMOVED***  pending: 1 messages ...]
+dm:@alice  pending: 1 messages ...]
 ```
 
 …while the agent's system prompt defines the contract (paraphrased from

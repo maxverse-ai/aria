@@ -49,43 +49,11 @@ pnpm types:check
 Deploy on Vercel with the project root set to `site/`; `pnpm build` is
 self-contained.
 
-## ai.***REMOVED***dev.com deployment
+## Deployment
 
-The site is served at `https://ai.***REMOVED***dev.com/docs` on the ***REMOVED***
-host. The Cloudflare tunnel sends `ai.***REMOVED***dev.com` to the `chord`
-container's nginx (port 4173, formerly the `***REMOVED***` container — it carries the
-`***REMOVED***` network alias), which proxies the docs routes to the `aria-docs`
-container on the `***REMOVED***-net` docker network.
-
-Redeploy after `docs/` or site changes:
-
-```bash
-site/deploy/deploy.sh
-```
-
-which runs the same steps inline: `pnpm install && pnpm build`,
-`docker build -t aria-docs .`, recreate the `aria-docs` container on
-`***REMOVED***-net`, then `install-nginx.sh` against the `chord` front door.
-
-The front-door nginx proxies the docs routes to `http://aria-docs:3000`
-(public paths mirror the app's own routes — no `basePath` is used). The full
-location set lives in `deploy/aria-docs.locations.conf` and is installed into
-`/etc/nginx/conf.d/default.conf` inside the `chord` container as a marked,
-managed block:
-
-```bash
-site/deploy/install-nginx.sh        # idempotent: replaces the marked block,
-                                    # validates with nginx -t, then reloads
-```
-
-If the `chord` container is rebuilt from scratch, rerun that one command —
-the script strips any stale docs locations, inserts the managed block before
-the SPA catch-all, and restores the previous config if `nginx -t` fails. The
-block covers `=/docs`, `/docs/`, `=/zh`, `/zh/`, `=/en`, `/en/`, `=/blog`,
-`/blog/` (308s to `/changelog`), `=/changelog`, `/changelog/`, `/_next/`,
-`=/api/search` (exact match so it does not shadow the app's own `/api/`
-proxy), `/og/`, `=/llms.txt`, `=/llms-full.txt`, `/llms.mdx/`,
-`=/sitemap.xml`, `=/robots.txt`, and `=/feed.xml`.
+The site is a Next.js standalone app. `pnpm build` inside `site/` produces a
+self-contained bundle that can run behind any static host or reverse proxy —
+no `basePath` is used, so public paths mirror the app's own routes.
 
 Do not edit `content/docs/` or `lib/generated/` — both are generated and
 gitignored.

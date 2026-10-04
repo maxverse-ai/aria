@@ -183,11 +183,10 @@
   Both READMEs and `docs/DISTRIBUTION.md` list `aria update check|plan|apply` as
   the consumer upgrade path, and `package.json` carries no `local:rollout`
   script, so the message named a command this repository does not have.
-- Cause: private-fork intake. A machine-private checkout is rolled out by hand,
-  so its fork disables external updates; `518b490` copied that decision over the
-  boundary and replaced three working CLI functions with throwing stubs. The
-  private and public lineages genuinely disagree here, and this file was not on
-  the intake boundary list. Nothing failed, because no test covered the wiring.
+- Cause: an intake from a downstream fork that disables external updates;
+  `518b490` copied that decision over the boundary and replaced three working
+  CLI functions with throwing stubs. Nothing failed, because no test covered
+  the wiring.
 - Fix: restore `runUpdateCheck`, `runUpdatePlan` and `runUpdateApply` to drive
   the distribution service and the detached executor. The service API
   (`check`, `createPlan`, `apply`) was intact throughout.

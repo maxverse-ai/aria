@@ -124,9 +124,9 @@ describe('documentation contract', () => {
   });
 
   it('names only files this repository has as a single source of truth', async () => {
-    // A definition that names a file the repository does not carry — most often
-    // a private-fork artifact that never came across — is a source of truth
-    // nobody can read.
+    // A definition that names a file the repository does not carry — for
+    // example a document that lived only in another checkout — is a source
+    // of truth nobody can read.
     const text = await readFile(join(docsDir, 'DOCUMENTATION_POLICY.md'), 'utf8');
     const section = text
       .split(/^## /m)

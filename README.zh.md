@@ -119,7 +119,7 @@ Aria 的通用“加速开关”：只有 Codex App Server 为所选模型上报
 - 多人群必须结构化 `@bot` 才能完成明确寻址；
 - 远端 freshness 历史查询有界；不可用或截断时 fail-open，不会因为历史故障
   静默丢掉最终答案；
-- Aria 仅通过私有不可变 GitHub Release 分发，不发布到 npm。
+- Aria 仅通过不可变 GitHub Release 分发，不发布到 npm。
 
 <a id="quick-start"></a>
 
@@ -144,7 +144,7 @@ Aria 的通用“加速开关”：只有 Codex App Server 为所选模型上报
 
 ### 安装
 
-Aria 现阶段只通过私有且不可变的 GitHub Release 分发，Aria 包本身不发布到
+Aria 现阶段只通过不可变的 GitHub Release 分发，Aria 包本身不发布到
 npm。先用有权读取 `maxverse-ai/aria` 的 GitHub 账号登录 `gh`，再从最新的
 完整内部版本下载独立安装器：
 
@@ -542,7 +542,7 @@ grep '"event":"enter"' ~/.aria/profiles/<profile>/logs/bridge-$(date +%Y%m%d).js
 
 ## 文档导航
 
-[文档站](https://ai.***REMOVED***dev.com/zh/docs) 发布的是同一个索引：用户指南在前，
+`site/` 目录下的文档站应用发布的是同一个索引：用户指南在前，
 其次是参考，最后是工程规范。[文档政策](docs/DOCUMENTATION_POLICY.md) 定义了
 角色划分，以及每份文档都要带的状态行。
 
@@ -582,7 +582,7 @@ grep '"event":"enter"' ~/.aria/profiles/<profile>/logs/bridge-$(date +%Y%m%d).js
 | 跨引擎的 mid-turn steering 机制：从 loop 内建回调到 mailbox 拉取 | [Steering](docs/STEERING.zh.md) |
 | 多通道插件、生命周期、隔离和渐进式交付 | [通道平台架构](docs/CHANNEL_PLATFORM_ARCHITECTURE.md) |
 | 定时运行、提醒、未来触发源和结果路由 | [触发平台架构](docs/TRIGGER_PLATFORM_ARCHITECTURE.md) |
-| 私有 Release 安装、更新事务、稳定 launcher 与回滚 | [CLI 分发架构](docs/DISTRIBUTION.md) |
+| Release 安装、更新事务、稳定 launcher 与回滚 | [CLI 分发架构](docs/DISTRIBUTION.md) |
 | Profile 状态、托管工作空间和引擎自有布局 | [工作空间与状态布局](docs/WORKSPACE_AND_STATE_LAYOUT.md) |
 | 控制面命令与扩展边界 | [控制平面](docs/CONTROL_PLANE.md) |
 | 贡献者工具链与必跑门禁 | [工具链](docs/TOOLCHAIN.md) |
@@ -598,11 +598,11 @@ grep '"event":"enter"' ~/.aria/profiles/<profile>/logs/bridge-$(date +%Y%m%d).js
 
 **执行手册** —— 仍有未完成项的在办工作。
 
-[Channel platform delivery plan](docs/CHANNEL_PLATFORM_DELIVERY_PLAN.md) · [Space direct CLI plan](docs/SPACE_DIRECT_CLI_PLAN.md) · [Trigger Platform delivery handoff](docs/TRIGGER_PLATFORM_DELIVERY_HANDOFF.md)
+[Channel platform delivery plan](docs/CHANNEL_PLATFORM_DELIVERY_PLAN.md) · [Space direct CLI plan](docs/SPACE_DIRECT_CLI_PLAN.md)
 
 **历史记录** —— 已冻结，不随现状回改。
 
-[Team completion delivery](docs/EXECUTION_SPACE_COMPLETION.md) · [Execution space delivery plan](docs/EXECUTION_SPACE_DELIVERY_PLAN.md) · [Execution space implementation through Phase 5](docs/EXECUTION_SPACE_IMPLEMENTATION.md) · [Execution space activation and migration](docs/EXECUTION_SPACE_PHASE6.md)
+[Execution space delivery plan](docs/EXECUTION_SPACE_DELIVERY_PLAN.md) · [Execution space implementation through Phase 5](docs/EXECUTION_SPACE_IMPLEMENTATION.md) · [Execution space activation and migration](docs/EXECUTION_SPACE_PHASE6.md)
 
 **归档** —— 已被取代，仅作溯源保留。
 

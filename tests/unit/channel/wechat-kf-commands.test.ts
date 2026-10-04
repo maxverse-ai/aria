@@ -46,7 +46,7 @@ describe('wxkf commands', () => {
       '/new 开启新会话',
       '/stop 停止当前查询',
     ].join('\n'));
-    expect(`${WECHAT_KF_WELCOME_TEXT}\n${renderWechatKfHelp()}`).not.toContain('***REMOVED***');
+    expect(`${WECHAT_KF_WELCOME_TEXT}\n${renderWechatKfHelp()}`).not.toContain('DemoBox');
   });
 
   it('renders injected product copy while retaining the shared command table', () => {

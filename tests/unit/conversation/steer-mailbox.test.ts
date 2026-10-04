@@ -30,7 +30,7 @@ afterEach(() => {
 });
 
 function mail(requestId: string, body = `body of ${requestId}`) {
-  return { requestId, body, senderId: 'ou_1', senderName: '***REMOVED***' };
+  return { requestId, body, senderId: 'ou_1', senderName: 'alice' };
 }
 
 describe('putSteerMail / unreadSteerMails', () => {
@@ -149,7 +149,7 @@ describe('prompt formats', () => {
     putSteerMail(inboxDir, SCOPE, mail('im:m1', 'hello <world> "quoted"'));
     const [pulled] = pullSteerMails(inboxDir, SCOPE);
     const out = formatSteerMailsForAgent([pulled!]);
-    expect(out).toContain('<steer_mail request="im:m1" from="***REMOVED***"');
+    expect(out).toContain('<steer_mail request="im:m1" from="alice"');
     expect(out).toContain('hello <world> "quoted"');
     expect(out).toContain('</steer_mail>');
   });

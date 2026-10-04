@@ -127,7 +127,7 @@ The current product boundary is deliberately explicit:
 - multi-person groups require a structured `@bot` for unambiguous addressing;
 - remote freshness history is bounded and fails open when unavailable or
   truncated, so history failure never silently discards a terminal answer;
-- Aria is distributed from private immutable GitHub Releases and is not
+- Aria is distributed from immutable GitHub Releases and is not
   published to npm.
 
 ## Quick Start
@@ -149,7 +149,7 @@ The current product boundary is deliberately explicit:
 
 ### Install
 
-Aria is currently distributed from private, immutable GitHub Releases; the
+Aria is currently distributed from immutable GitHub Releases; the
 Aria package itself is not published to npm. First authenticate GitHub CLI with
 an account that can read `maxverse-ai/aria`, then download the standalone
 installer from the newest complete internal release:
@@ -560,7 +560,7 @@ legacy global command as a rollback baseline; it does not delete it.
 
 ## Documentation
 
-The [docs site](https://ai.***REMOVED***dev.com/docs) publishes this same index:
+This index is also published by the `site/` docs app:
 user guides first, then references, then the engineering specifications.
 [Documentation policy](docs/DOCUMENTATION_POLICY.md) defines the roles and the
 status header every document carries.
@@ -618,11 +618,11 @@ One document per topic, grouped by role.
 
 **Runbooks** — active work that still has open items.
 
-[Channel platform delivery plan](docs/CHANNEL_PLATFORM_DELIVERY_PLAN.md) · [Space direct CLI plan](docs/SPACE_DIRECT_CLI_PLAN.md) · [Trigger Platform delivery handoff](docs/TRIGGER_PLATFORM_DELIVERY_HANDOFF.md)
+[Channel platform delivery plan](docs/CHANNEL_PLATFORM_DELIVERY_PLAN.md) · [Space direct CLI plan](docs/SPACE_DIRECT_CLI_PLAN.md)
 
 **Historical records** — frozen; never edited to match later reality.
 
-[Team completion delivery](docs/EXECUTION_SPACE_COMPLETION.md) · [Execution space delivery plan](docs/EXECUTION_SPACE_DELIVERY_PLAN.md) · [Execution space implementation through Phase 5](docs/EXECUTION_SPACE_IMPLEMENTATION.md) · [Execution space activation and migration](docs/EXECUTION_SPACE_PHASE6.md)
+[Execution space delivery plan](docs/EXECUTION_SPACE_DELIVERY_PLAN.md) · [Execution space implementation through Phase 5](docs/EXECUTION_SPACE_IMPLEMENTATION.md) · [Execution space activation and migration](docs/EXECUTION_SPACE_PHASE6.md)
 
 **Archived** — superseded, kept for provenance.
 

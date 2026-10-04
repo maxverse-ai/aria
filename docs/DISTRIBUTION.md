@@ -4,7 +4,7 @@
 
 > 中文版：[DISTRIBUTION.zh.md](DISTRIBUTION.zh.md)
 
-Aria's current consumer channel is a private GitHub repository. GitHub Releases
+Aria's current consumer channel is a GitHub repository. GitHub Releases
 is the package authority; npm is used only to resolve Aria's public runtime
 dependencies while installing a verified release tarball. The Aria package is
 not published to npm.
@@ -76,7 +76,7 @@ aria update rollback
   restart cannot terminate its own updater. `--foreground` is a recovery-only
   escape hatch.
 - On Linux, the detached transient unit explicitly inherits `GH_CONFIG_DIR`
-  when present so private-release revalidation uses the invoking CLI's isolated
+  when present so release revalidation uses the invoking CLI's isolated
   GitHub identity. Token environment variables are deliberately not copied into
   systemd unit metadata or process arguments.
 - `status` without an id reads the latest journaled operation. Every command

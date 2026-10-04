@@ -240,7 +240,7 @@ Claude Code 的 stream-json transport 其实**能**在 mid-turn 从 stdin
 ```text
 [***REMOVED*** inbox notice:
 Inbox update: 1 unread messages total; 1 changed targets
-dm:@***REMOVED***  pending: 1 messages ...]
+dm:@alice  pending: 1 messages ...]
 ```
 
 ……同时 agent 的 system prompt 定义了契约（从二进制里

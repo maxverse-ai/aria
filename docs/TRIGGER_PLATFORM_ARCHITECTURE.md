@@ -1,10 +1,9 @@
 # Trigger platform architecture
 
-> Status: current — stages 0 through 11 are implemented and integrated into `origin/main` behind the `ARIA_TRIGGER_RUNTIME=enabled` rollout switch, which is off by default; live release deployment and host acceptance are tracked in the [delivery handoff](TRIGGER_PLATFORM_DELIVERY_HANDOFF.md).
+> Status: current — stages 0 through 11 are implemented and integrated into `origin/main` behind the `ARIA_TRIGGER_RUNTIME=enabled` rollout switch, which is off by default.
 
 Implementation status: Stages 0 through 11 are implemented and integrated into
-`origin/main`; live release deployment and host acceptance are tracked in the
-[Trigger Platform delivery handoff](TRIGGER_PLATFORM_DELIVERY_HANDOFF.md).
+`origin/main` behind the `ARIA_TRIGGER_RUNTIME=enabled` rollout switch.
 Existing conversation
 starts pass through the runtime-validated `RunIntent` boundary. The Trigger
 Provider ABI now defines provider manifests, capabilities, serializable source

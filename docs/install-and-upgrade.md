@@ -10,7 +10,7 @@ follows installation, see the [Quickstart](QUICKSTART.md).
 
 ## Install
 
-Aria is distributed from private, immutable GitHub Releases and is not
+Aria is distributed from immutable GitHub Releases and is not
 published to npm. The copy-paste bootstrap commands live in the
 [README](../README.md#install) and the [Quickstart](QUICKSTART.md); they:
 

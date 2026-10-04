@@ -4,7 +4,7 @@
 
 > 本文是 [`DISTRIBUTION.md`](DISTRIBUTION.md) 的中文版。
 
-Aria 当前的消费者渠道是一个私有 GitHub 仓库。GitHub Releases 是包权威；
+Aria 当前的消费者渠道是一个GitHub 仓库。GitHub Releases 是包权威；
 npm 只用于在安装已验证的 Release tarball 时解析 Aria 的公共运行时依赖。
 Aria 包本身不发布到 npm。
 
@@ -68,7 +68,7 @@ aria update rollback
 - `apply` 和 `rollback` 默认使用脱离 daemon 生命周期的系统执行器，服务
   重启不会杀掉自己的更新进程。`--foreground` 仅是恢复时的逃生舱。
 - 在 Linux 上，detached 瞬态 unit 在 `GH_CONFIG_DIR` 存在时显式继承它，
-  使私有 Release 的重新验证使用调用方 CLI 的隔离 GitHub 身份。token 类
+  使Release 的重新验证使用调用方 CLI 的隔离 GitHub 身份。token 类
   环境变量被有意不复制进 systemd unit 元数据或进程参数。
 - 不带 id 的 `status` 读取最近一次记入 journal 的操作。每个命令都支持
   `--json` 以便自动化。

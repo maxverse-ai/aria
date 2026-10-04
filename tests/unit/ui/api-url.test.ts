@@ -12,17 +12,17 @@ describe("resolveApiUrl", () => {
     expect(
       resolveApiUrl(
         "/api/config?profile=aria",
-        "https://***REMOVED***.example/admin-api/aria-console/",
+        "https://console.example/admin-api/aria-console/",
       ),
-    ).toBe("https://***REMOVED***.example/admin-api/aria-console/api/config?profile=aria");
+    ).toBe("https://console.example/admin-api/aria-console/api/config?profile=aria");
   });
 
   it("uses the containing directory when index.html is requested explicitly", () => {
     expect(
       resolveApiUrl(
         "/api/profiles",
-        "https://***REMOVED***.example/admin-api/aria-console/index.html",
+        "https://console.example/admin-api/aria-console/index.html",
       ),
-    ).toBe("https://***REMOVED***.example/admin-api/aria-console/api/profiles");
+    ).toBe("https://console.example/admin-api/aria-console/api/profiles");
   });
 });

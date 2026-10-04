@@ -6,7 +6,7 @@ import {
 
 describe('renderWechatKfPlainText', () => {
   it('keeps ordinary text readable and normalizes outer whitespace', () => {
-    expect(renderWechatKfPlainText('  ***REMOVED*** S3 支持 HDR。\n')).toBe('***REMOVED*** S3 支持 HDR。');
+    expect(renderWechatKfPlainText('  DemoBox S3 支持 HDR。\n')).toBe('DemoBox S3 支持 HDR。');
     expect(renderWechatKfPlainText('')).toBe('');
   });
 
@@ -117,11 +117,11 @@ describe('renderWechatKfPlainText', () => {
 
   it('keeps visible HTML text without executing or exposing tags', () => {
     expect(renderWechatKfPlainText([
-      '<div>***REMOVED*** <b>S3</b></div>',
+      '<div>DemoBox <b>S3</b></div>',
       '<script>alert("secret")</script>',
       'Tom &amp; Jerry &#x1F642;',
     ].join('\n'))).toBe([
-      '***REMOVED*** S3',
+      'DemoBox S3',
       '',
       'Tom & Jerry 🙂',
     ].join('\n'));

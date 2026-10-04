@@ -1,6 +1,6 @@
 # Execution space delivery plan
 
-> Status: historical — implementation complete through E5.3 for the explicitly prepared space path. Default/personal and unmigrated team profiles retain their legacy path. Phase 6 primitives and an isolated ***REMOVED*** native rehearsal have landed. The managed production switch and remaining consumer/tool work are tracked in [Team completion](EXECUTION_SPACE_COMPLETION.md); existing users are not yet activated. See [implementation evidence](EXECUTION_SPACE_IMPLEMENTATION.md).
+> Status: historical — implementation complete through E5.3 for the explicitly prepared space path. Default/personal and unmigrated team profiles retain their legacy path; existing users are not yet activated. See [implementation evidence](EXECUTION_SPACE_IMPLEMENTATION.md).
 
 >
 > Design baseline: local main `d8cd9a1fb242d6bfaaa0e89c290e02c53e7f0b83`.
