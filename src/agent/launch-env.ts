@@ -34,7 +34,7 @@ function isBridgeOnlyEnvKey(key: string): boolean {
     || normalized.startsWith('LARKSUITE_')
     || normalized.startsWith('FEISHU_')
     || /^(?:BRIDGE|SEND)(?:_|$)/.test(normalized)
-    || /^(?:ARIA|ARIA)_.*(?:FEISHU|LARK|BRIDGE|SEND)(?:_|$)/.test(normalized)
+    || /^ARIA_.*(?:FEISHU|LARK|BRIDGE|SEND)(?:_|$)/.test(normalized)
     || /(?:FEISHU|LARK|BRIDGE|SEND).*(?:TOKEN|SECRET|KEY|AUTH|CREDENTIAL|PASSWORD)/.test(
       normalized,
     );
