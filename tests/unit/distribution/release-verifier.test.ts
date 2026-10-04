@@ -28,9 +28,9 @@ async function createFixture() {
   const digest = createHash('sha256').update(bytes).digest('hex');
   const commit = 'a'.repeat(40);
   const release: ReleaseDescriptor = {
-    channel: 'internal',
+    channel: 'stable',
     repository: 'maxverse-ai/aria',
-    tag: 'internal-v0.2.0',
+    tag: 'v0.2.0',
     version: '0.2.0',
     commit,
     publishedAt: '2026-08-29T00:00:00.000Z',
@@ -39,7 +39,7 @@ async function createFixture() {
   };
   const releaseManifest = {
     schemaVersion: 1,
-    channel: 'internal',
+    channel: 'stable',
     repository: release.repository,
     tag: release.tag,
     version: release.version,

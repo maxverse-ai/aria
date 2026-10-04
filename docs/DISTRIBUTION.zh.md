@@ -16,7 +16,7 @@ Aria 包本身不发布到 npm。
 [README](../README.zh.md#install) 中，它们执行三个有意分开的步骤：
 
 1. 用已认证的 `gh` 客户端选出最新的完整、已发布、不可变的
-   `internal-v*` 预发布版本；
+   `v*` 正式版本；
 2. 只下载该 Release 的独立 `aria-install.mjs` 引导器；
 3. 由引导器独立完成解析、下载、校验、暂存、冒烟测试和激活该 Release 包。
 
@@ -115,8 +115,8 @@ profile 状态和可执行文件状态有意不共享根目录：
 
 ## Release 契约
 
-一个可消费的 Release 必须是已发布、不可变的 GitHub 预发布版本，tag 形如
-`internal-v<stable-semver>`。它必须恰好包含契约要求的资产，包括：
+一个可消费的 Release 必须是已发布、不可变的 GitHub 正式 Release，tag 形如
+`v<stable-semver>`。它必须恰好包含契约要求的资产，包括：
 
 - 包 tarball；
 - `manifest.json`（精确构建 commit 与包清单）；
@@ -138,7 +138,7 @@ source 适配器只通过运行 `gh` 获取凭证。它从不向 `gh` 索要 tok
 
 ## 安装与更新事务
 
-1. `check` 列出不可变的内部 Release 并比较稳定 SemVer。
+1. `check` 列出不可变的稳定 Release 并比较稳定 SemVer。
 2. `plan` 选定一个精确 Release，下载、校验，快照当前 active 摘要和受影响
    的服务，然后写入一个会过期的 plan。
 3. `apply` 重新获取 Release 与服务事实，检查 plan 期望的 active 摘要，

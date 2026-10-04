@@ -100,9 +100,9 @@ async function createFixture(options: { failFirstHealthCheck?: boolean } = {}) {
   const now = () => new Date('2026-08-29T00:00:00.000Z');
   const store = new DistributionStore(paths, now);
   const release: ReleaseDescriptor = {
-    channel: 'internal',
+    channel: 'stable',
     repository: 'maxverse-ai/aria',
-    tag: 'internal-v0.2.0',
+    tag: 'v0.2.0',
     version: '0.2.0',
     commit: 'a'.repeat(40),
     publishedAt: now().toISOString(),
@@ -113,7 +113,7 @@ async function createFixture(options: { failFirstHealthCheck?: boolean } = {}) {
     descriptor: release,
     manifest: {
       schemaVersion: 1,
-      channel: 'internal',
+      channel: 'stable',
       repository: release.repository,
       tag: release.tag,
       version: release.version,

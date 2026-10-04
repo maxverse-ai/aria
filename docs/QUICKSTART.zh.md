@@ -12,36 +12,26 @@ Aria 是一个本地优先（local-first）的编程 agent 控制平面：聊天
 ## 1. 前置条件
 
 - Node.js `>=24.0.0` —— 下限见 `package.json#engines.node`；CI 运行时固定在
-  `.node-version`。
+  `.node-version`。pnpm 10（`corepack enable` 即可提供）。
 - 本机至少安装并登录一个 agent CLI：Claude Code（`claude`）、Codex CLI
   （`codex`）、Grok Build（`grok`）、OpenCode（`opencode`）、Devin
   （`devin`）、DeepSeek Harness（`dsh`）、Kimi Code（`kimi`）、MiMo Code
   （`mimo`）或 Pi（`pi`）。
 - 一个飞书 / Lark **PersonalAgent** 应用 —— 也可以让首次启动的扫码向导
   帮你创建并绑定。
-- 已用有权读取 `maxverse-ai/aria` 的账号登录 GitHub CLI（`gh`）。Aria 通过
-  私有的不可变 GitHub Release 分发，不发布到 npm。
 
 ## 2. 安装
 
-Linux / macOS：
+Aria 从源码构建运行：
 
 ```bash
-gh auth status
-ARIA_REPOSITORY=maxverse-ai/aria
-ARIA_TAG="$(gh api "repos/$ARIA_REPOSITORY/releases?per_page=100" --jq 'map(select(.draft == false and .prerelease == true and .immutable == true and (.tag_name | startswith("internal-v")))) | sort_by(.tag_name | ltrimstr("internal-v") | split(".") | map(tonumber)) | last.tag_name')"
-ARIA_INSTALL_TMP="$(mktemp -d)"
-gh release download "$ARIA_TAG" --repo "$ARIA_REPOSITORY" --pattern aria-install.mjs --dir "$ARIA_INSTALL_TMP"
-node "$ARIA_INSTALL_TMP/aria-install.mjs"
+git clone https://github.com/maxverse-ai/aria.git
+cd aria
+pnpm install
+pnpm build
+pnpm link --global
 ```
 
-Windows 下在 PowerShell 中执行同一流程；精确的 PowerShell 变体维护在
-[README](../README.zh.md#install) 中。如需固定安装某个不可变版本，在安装器
-命令后加 `--version <x.y.z>`。
-
-安装器把鉴权完全交给 `gh` —— Aria 不读取也不保存 GitHub token —— 把版本
-包安装到独立的平台数据目录，并写入稳定的 `aria` 启动器（Linux/macOS 通常
-为 `~/.local/bin/aria`）。如果该目录不在 `PATH`，按安装器提示加入，然后
 验证：
 
 ```bash
@@ -49,7 +39,8 @@ command -v aria
 aria --version
 ```
 
-升级、回滚与安装状态的契约见 [CLI 分发架构](DISTRIBUTION.md)。
+升级用 `git pull` 后重新构建。安装状态与分发架构见
+[CLI 分发架构](DISTRIBUTION.md)。
 
 ## 3. 首次启动 —— 连接聊天渠道
 

@@ -28,7 +28,7 @@ to GitHub Pro" for a private repository on this plan, and the required-status
 check list is empty, so a failing check cannot refuse anything. The durable
 record is therefore the release commit itself: a release that advances the
 release line must carry `Authorized-Release-Line: <new line>` in its exact
-commit message, and the internal release fails closed without it. A statement
+commit message, and the release workflow fails closed without it. A statement
 copied from chat is not a durable authorization record.
 
 If the repository is ever moved to a plan with protected environments, approval
@@ -87,8 +87,8 @@ Agents must not set that variable to manufacture authorization.
 
 Both read the same rule. `ci.yml` compares against the previous commit and can
 only redden a run, so it reports an unauthorized line change;
-`.github/workflows/internal-release.yml` runs the action that produces an
-immutable public artifact, so it refuses to perform one.
+`.github/workflows/release.yml` runs the action that produces a
+published artifact, so it refuses to perform one.
 
 ## Publishing architecture
 
@@ -103,59 +103,38 @@ changes to `.release-policy.json` and for the environment used by MINOR, MAJOR,
 and stable-promotion releases. On the current plan neither is available, so the
 recorded release line is the only durable authorization signal.
 
-## Private internal GitHub snapshots
+## Retired internal channel
 
-Internal snapshots are private repository records, not npm publications. They
-use the package version already reviewed on `main`, an `internal-v<VERSION>` tag,
-and an immutable GitHub prerelease with a verified tarball, artifact manifest,
-checksum file, release contract, and standalone installer.
+Aria previously shipped private snapshots as immutable GitHub prereleases
+tagged `internal-v<VERSION>`. That channel has been retired and its releases
+deleted; public distribution uses `v*` GitHub Releases through the workflow
+described below. The `internal-v*` tag prefix is no longer produced and
+existing installations on that channel receive no further updates.
 
-`.github/workflows/internal-release.yml` is the only supported entry point. It
-accepts only the exact current `origin/main` commit, reruns all gates, builds and
-verifies the candidate, creates a draft release, verifies all assets, and only
-then publishes it as a prerelease. It has no npm credentials or OIDC permission
-and never invokes `npm publish`.
+## Trusted GitHub Release workflow
 
-Repository-level Release immutability is mandatory. The workflow verifies the
-published release's `immutable` API field and fails closed when the protection
-is not enabled. Consumers ignore drafts, mutable releases, incomplete asset
-sets, and tags outside `internal-v*`.
-
-Internal tags deliberately do not match `v*`, so they remain outside the npm
-tag/registry consistency checks. Internal versions are immutable: corrections
-advance the package PATCH version and create a new internal snapshot rather than
-overwriting a tag or release.
-
-## Trusted npm release workflow
-
-`.github/workflows/release.yml` is the only supported npm publication entry point.
+`.github/workflows/release.yml` is the only supported publication entry point.
 It exposes two explicit operations:
 
-- `prepare_patch` queries Git tags and npm, calculates exactly one PATCH, updates
-  only `package.json`, and opens an auto-merge release pull request. For the
-  first publication it keeps the already committed version and reports that it
-  is ready instead of inventing another version.
-- `publish_current` runs in the protected `npm-production` environment. It
+- `prepare_patch` queries Git tags and GitHub Releases, calculates exactly one
+  PATCH, updates only `package.json`, and opens an auto-merge release pull
+  request. For the first publication it keeps the already committed version and
+  reports that it is ready instead of inventing another version.
+- `publish_current` runs in the protected `release-production` environment. It
   accepts only the exact `origin/main` commit, reruns every gate, builds and
-  verifies the candidate, rejects tag or registry collisions, publishes with
-  npm trusted publishing, verifies the registry result, and finally creates the
-  matching annotated Git tag. It refuses the first-ever package publication
-  because npm cannot configure a trusted publisher until the package exists.
+  verifies the candidate, prepares the release contract assets (tarball,
+  `manifest.json`, `SHA256SUMS`, `release.json`, `aria-install.mjs`), rejects
+  tag or release collisions, and publishes a `v<VERSION>` GitHub release whose
+  notes come from `docs/releases/v<VERSION>.md`. It then verifies the published
+  release is non-draft, non-prerelease, complete, and marked `immutable`.
 
-The first publication is a one-time bootstrap. A human maintainer must run the
-release gate against the exact `origin/main` artifact, publish that tarball
-interactively with 2FA, verify it in the registry, and create the matching
-annotated tag. Only then should the maintainer configure trusted publishing and
-enable `publish_current`. Do not store a bootstrap token in GitHub Actions.
-
-The npm trusted publisher must be configured for repository
-`maxverse-ai/aria`, workflow filename `release.yml`, environment
-`npm-production`, and the `npm publish` action. The environment should require
-review for the initial publication and any human-authorized release-line
-change. After trusted publishing works, revoke legacy automation publish tokens.
+Repository-level Release immutability is mandatory: the workflow verifies the
+published release's `immutable` API field and fails closed when the protection
+is not enabled. Consumers ignore drafts, prereleases, incomplete asset sets,
+and tags outside `v*`.
 
 The workflow uses a single non-cancelling concurrency group. Local
-`npm publish` is rejected by `prepublishOnly`; the release command additionally
-checks the repository, branch, workflow identity, protected-job marker, and
-GitHub OIDC availability. These checks are defense in depth—the registry's OIDC
-trust policy remains the actual credential boundary.
+`npm publish` is rejected by `prepublishOnly`; the publish command additionally
+checks the repository, branch, workflow identity, and protected-job marker.
+These checks are defense in depth—the `release-production` environment and the
+recorded release line remain the actual authorization boundary.

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { execFileSync } from "node:child_process";
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -114,9 +114,6 @@ export function validatePublishContext(env) {
     failures.push("publishing workflow must be .github/workflows/release.yml from main");
   }
   if (env.ARIA_RELEASE_PUBLISH !== "true") failures.push("ARIA_RELEASE_PUBLISH must be enabled by the protected publish job");
-  if (!env.ACTIONS_ID_TOKEN_REQUEST_URL || !env.ACTIONS_ID_TOKEN_REQUEST_TOKEN) {
-    failures.push("GitHub OIDC token access is unavailable");
-  }
   return { ok: failures.length === 0, failures };
 }
 
@@ -139,15 +136,26 @@ function taggedVersions() {
     });
 }
 
-function publishedVersions(packageName) {
+// The public distribution registry is GitHub Releases: a published `v*` tag
+// owns a non-draft, non-prerelease release in the repository.
+function publishedVersions() {
+  let value;
   try {
-    const value = JSON.parse(run(command("npm"), ["view", packageName, "versions", "--json"]));
-    return Array.isArray(value) ? value : value ? [value] : [];
-  } catch (error) {
-    const detail = `${error?.stderr ?? ""}${error?.stdout ?? ""}`;
-    if (/E404|Not Found/i.test(detail)) return [];
-    throw new Error("could not query npm registry versions");
+    value = run(command("gh"), ["api", `repos/${expectedRepository}/releases?per_page=100`]);
+  } catch {
+    throw new Error("could not query GitHub releases (gh authentication required)");
   }
+  let releases;
+  try {
+    releases = JSON.parse(value);
+  } catch {
+    throw new Error("GitHub releases API returned invalid JSON");
+  }
+  if (!Array.isArray(releases)) throw new Error("GitHub releases API returned a non-array response");
+  return releases
+    .filter((release) => release.draft === false && release.prerelease === false && typeof release.tag_name === "string")
+    .map((release) => release.tag_name.replace(/^v/, ""))
+    .filter((version) => /^\d+\.\d+\.\d+$/.test(version));
 }
 
 function releasePlan() {
@@ -160,7 +168,7 @@ function releasePlan() {
       packageVersion: packageJson.version,
       policy,
       taggedVersions: taggedVersions(),
-      publishedVersions: publishedVersions(packageJson.name),
+      publishedVersions: publishedVersions(),
     }),
   };
 }
@@ -218,7 +226,7 @@ function verifyReleaseArtifact() {
   const tarballPath = resolve(root, "artifacts", manifest.tarball);
   if (sha256File(tarballPath) !== manifest.sha256) throw new Error("release artifact digest mismatch");
   if (taggedVersions().includes(plan.target)) throw new Error(`tag v${plan.target} already exists`);
-  if (publishedVersions(plan.packageName).includes(plan.target)) throw new Error(`${plan.packageName}@${plan.target} is already published`);
+  if (publishedVersions().includes(plan.target)) throw new Error(`v${plan.target} is already published`);
   return { ...plan, commit, manifest: "artifacts/manifest.json", tarball: `artifacts/${basename(manifest.tarball)}`, sha256: manifest.sha256 };
 }
 
@@ -226,18 +234,34 @@ function publishRelease() {
   const context = validatePublishContext(process.env);
   if (!context.ok) throw new Error(context.failures.join("; "));
   const result = verifyReleaseArtifact();
-  if (result.kind === "initial") {
-    throw new Error("npm trusted publishing requires an existing package; bootstrap the initial version interactively with 2FA, then configure the trusted publisher");
+  const tag = `v${result.target}`;
+  const notesPath = `docs/releases/v${result.target}.md`;
+  if (!existsSync(resolve(root, notesPath))) throw new Error(`release notes ${notesPath} are missing`);
+  const assets = [
+    result.tarball,
+    "artifacts/manifest.json",
+    "artifacts/SHA256SUMS",
+    "artifacts/release.json",
+    "artifacts/aria-install.mjs",
+  ];
+  for (const asset of assets) {
+    if (!existsSync(resolve(root, asset))) {
+      throw new Error(`release asset ${asset} is missing; run github-release:prepare first`);
+    }
   }
-  const npmVersion = run(command("npm"), ["--version"]);
-  if (compareVersions(npmVersion, "11.5.1") < 0) throw new Error("trusted publishing requires npm 11.5.1 or newer");
-  run(command("npm"), ["publish", result.tarball, "--access", "public", "--ignore-scripts"], { capture: false });
-  if (!publishedVersions(result.packageName).includes(result.target)) {
-    throw new Error("registry verification did not find the published version");
+  run(command("gh"), [
+    "release", "create", tag, ...assets,
+    "--repo", expectedRepository,
+    "--target", result.commit,
+    "--title", `Aria ${tag}`,
+    "--notes-file", notesPath,
+    "--latest",
+  ], { capture: false });
+  run(command("git"), ["fetch", "origin", tag], { capture: false });
+  if (!publishedVersions().includes(result.target)) {
+    throw new Error("GitHub release verification did not find the published version");
   }
-  run(command("git"), ["tag", "-a", `v${result.target}`, result.commit, "-m", `Release v${result.target}`]);
-  run(command("git"), ["push", "origin", `v${result.target}`], { capture: false });
-  return { ...result, published: true, tag: `v${result.target}` };
+  return { ...result, published: true, tag };
 }
 
 function print(value) {

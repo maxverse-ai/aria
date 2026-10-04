@@ -49,7 +49,7 @@ export class DistributionService {
   async check(): Promise<UpdateCheckResult> {
     const state = await this.store.readState();
     const current = state.current ?? this.legacyCurrent;
-    const latest = newestRelease(await this.source.list('internal')) ?? null;
+    const latest = newestRelease(await this.source.list('stable')) ?? null;
     if (!latest) return { current, latest, updateAvailable: false, reason: 'no-release' };
     if (!current) return { current, latest, updateAvailable: true, reason: 'not-installed' };
     const comparison = compareStableVersions(latest.version, current.version);
@@ -61,13 +61,13 @@ export class DistributionService {
   }
 
   async createPlan(options: CreateUpdatePlanOptions = {}): Promise<UpdatePlanV1> {
-    const releases = await this.source.list('internal');
+    const releases = await this.source.list('stable');
     const target = options.version
       ? releases.find((release) => release.version === options.version)
       : newestRelease(releases);
     if (!target) {
       const suffix = options.version ? ` for version ${options.version}` : '';
-      throw new Error(`no complete immutable internal release is available${suffix}`);
+      throw new Error(`no complete immutable stable release is available${suffix}`);
     }
     const state = await this.store.readState({ repository: target.repository });
     const current = state.current ?? this.legacyCurrent;
@@ -89,7 +89,7 @@ export class DistributionService {
       id: planId,
       createdAt: createdAt.toISOString(),
       expiresAt: new Date(createdAt.getTime() + (options.ttlMs ?? 60 * 60 * 1000)).toISOString(),
-      channel: 'internal',
+      channel: 'stable',
       repository: target.repository,
       expectedCurrentSha256: current?.sha256 ?? null,
       current,
@@ -322,7 +322,7 @@ export class DistributionService {
   }
 
   private async resolveExactRelease(expected: ReleaseDescriptor): Promise<ReleaseDescriptor> {
-    const release = (await this.source.list('internal')).find((candidate) => candidate.tag === expected.tag);
+    const release = (await this.source.list('stable')).find((candidate) => candidate.tag === expected.tag);
     if (!release) throw new Error(`release is no longer available: ${expected.tag}`);
     if (release.repository !== expected.repository || release.version !== expected.version
       || release.commit !== expected.commit || release.publishedAt !== expected.publishedAt

@@ -789,7 +789,7 @@ const update = program
 
 update
   .command('check')
-  .description('Check the newest complete immutable internal release')
+  .description('Check the newest complete immutable stable release')
   .option('--json', 'print machine-readable JSON')
   .action(async (opts: { json?: boolean }) => {
     await runUpdateCheck(opts);

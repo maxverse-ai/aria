@@ -3,7 +3,7 @@ import {
   type ReleaseDescriptor,
   type ReleaseManifestV1,
 } from './types';
-import { parseStableVersion, versionFromInternalTag } from './semver';
+import { parseStableVersion, versionFromTag } from './semver';
 
 const GIT_SHA = /^[0-9a-f]{40}$/;
 const SHA256 = /^[0-9a-f]{64}$/;
@@ -18,11 +18,11 @@ export function validateReleaseManifest(
   if (manifest.schemaVersion !== RELEASE_MANIFEST_SCHEMA_VERSION) {
     throw new Error('unsupported release manifest schemaVersion');
   }
-  if (manifest.channel !== 'internal') throw new Error('unsupported release channel');
+  if (manifest.channel !== 'stable') throw new Error('unsupported release channel');
   const repository = requiredString(manifest.repository, 'repository');
   const tag = requiredString(manifest.tag, 'tag');
   const version = parseStableVersion(requiredString(manifest.version, 'version')).raw;
-  if (versionFromInternalTag(tag) !== version) throw new Error('release tag does not match version');
+  if (versionFromTag(tag) !== version) throw new Error('release tag does not match version');
   const commit = requiredString(manifest.commit, 'commit');
   if (!GIT_SHA.test(commit)) throw new Error('release commit must be a full Git SHA');
   const packageName = requiredString(manifest.packageName, 'packageName');
@@ -40,7 +40,7 @@ export function validateReleaseManifest(
   const createdAt = requiredIsoDate(manifest.createdAt, 'createdAt');
   const result: ReleaseManifestV1 = {
     schemaVersion: 1,
-    channel: 'internal',
+    channel: 'stable',
     repository,
     tag,
     version,

@@ -3,12 +3,12 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import {
-  createInternalReleasePlan,
+  createGitHubReleasePlan,
   createReleaseManifest,
-  internalTagForVersion,
+  tagForVersion,
   releaseLineAuthorization,
-  validateInternalReleaseContext,
-} from "../../../tools/internal-release.mjs";
+  validateReleaseContext,
+} from "../../../tools/github-release.mjs";
 
 const policy = {
   schemaVersion: 1,
@@ -26,14 +26,14 @@ const policy = {
 const commit = "a".repeat(40);
 const digest = "b".repeat(64);
 
-describe("internal GitHub release planning", () => {
-  it("uses a namespace that cannot collide with formal v* package tags", () => {
-    expect(internalTagForVersion("0.1.2")).toBe("internal-v0.1.2");
-    expect(() => internalTagForVersion("0.1.2-rc.1")).toThrow(/stable package version/);
+describe("GitHub release planning", () => {
+  it("uses the public v* tag namespace", () => {
+    expect(tagForVersion("0.1.2")).toBe("v0.1.2");
+    expect(() => tagForVersion("0.1.2-rc.1")).toThrow(/stable package version/);
   });
 
   it("accepts an exact verified artifact on the authorized line", () => {
-    expect(createInternalReleasePlan({
+    expect(createGitHubReleasePlan({
       packageJson: { name: "@maxverse-ai/aria", version: "0.1.2" },
       policy,
       manifest: {
@@ -45,12 +45,12 @@ describe("internal GitHub release planning", () => {
       },
       commit,
       digest,
-      notes: "# Aria Internal v0.1.2",
+      notes: "# Aria v0.1.2",
     })).toMatchObject({
       ok: true,
       version: "0.1.2",
-      tag: "internal-v0.1.2",
-      title: "Aria Internal v0.1.2",
+      tag: "v0.1.2",
+      title: "Aria v0.1.2",
     });
   });
 
@@ -59,7 +59,7 @@ describe("internal GitHub release planning", () => {
     const manifest = { tarball: "maxverse-ai-aria-0.1.2.tgz" };
     const plan = {
       ok: true,
-      tag: "internal-v0.1.2",
+      tag: "v0.1.2",
       version: "0.1.2",
       commit,
     };
@@ -71,7 +71,7 @@ describe("internal GitHub release planning", () => {
       createdAt: "2026-08-29T00:00:00.000Z",
     })).toMatchObject({
       schemaVersion: 1,
-      channel: "internal",
+      channel: "stable",
       tag: plan.tag,
       commit,
       sha256: digest,
@@ -81,7 +81,7 @@ describe("internal GitHub release planning", () => {
   });
 
   it("fails closed on artifact, policy, or release-note drift", () => {
-    const result = createInternalReleasePlan({
+    const result = createGitHubReleasePlan({
       packageJson: { name: "@maxverse-ai/aria", version: "0.1.2" },
       policy: { ...policy, frozen: true },
       manifest: {
@@ -103,43 +103,40 @@ describe("internal GitHub release planning", () => {
       "artifact version does not match package.json",
       "artifact commit does not match the exact main commit",
       "artifact digest does not match its manifest",
-      "internal release notes are empty",
+      "GitHub release notes are empty",
     ]));
   });
 });
 
-describe("internal release workflow boundary", () => {
+describe("GitHub release workflow boundary", () => {
   const valid = {
     GITHUB_ACTIONS: "true",
     GITHUB_REPOSITORY: "maxverse-ai/aria",
     GITHUB_REF: "refs/heads/main",
-    GITHUB_WORKFLOW_REF: "maxverse-ai/aria/.github/workflows/internal-release.yml@refs/heads/main",
-    ARIA_INTERNAL_RELEASE: "true",
+    GITHUB_WORKFLOW_REF: "maxverse-ai/aria/.github/workflows/release.yml@refs/heads/main",
+    ARIA_GITHUB_RELEASE: "true",
   };
 
   it("accepts only the dedicated main-branch workflow", () => {
-    expect(validateInternalReleaseContext(valid)).toEqual({ ok: true, failures: [] });
-    expect(validateInternalReleaseContext({ ...valid, GITHUB_REF: "refs/heads/feature" }).ok).toBe(false);
-    expect(validateInternalReleaseContext({ ...valid, GITHUB_WORKFLOW_REF: "release.yml" }).ok).toBe(false);
+    expect(validateReleaseContext(valid)).toEqual({ ok: true, failures: [] });
+    expect(validateReleaseContext({ ...valid, GITHUB_REF: "refs/heads/feature" }).ok).toBe(false);
+    expect(validateReleaseContext({ ...valid, GITHUB_WORKFLOW_REF: "release.yml" }).ok).toBe(false);
   });
 
-  it("is GitHub-only, single-writer, draft-first, and has durable notes", () => {
-    const workflow = readFileSync(new URL("../../../.github/workflows/internal-release.yml", import.meta.url), "utf8");
+  it("is single-writer, environment-protected, and immutable-verified", () => {
+    const workflow = readFileSync(new URL("../../../.github/workflows/release.yml", import.meta.url), "utf8");
     const notes = readFileSync(new URL("../../../docs/releases/v0.1.2.md", import.meta.url), "utf8");
-    expect(workflow).toContain("group: aria-internal-release");
+    expect(workflow).toContain("group: aria-release");
     expect(workflow).toContain("cancel-in-progress: false");
-    expect(workflow).toContain("--draft");
-    expect(workflow).toContain("--prerelease=true");
-    expect(workflow).toContain("--latest=false");
-    expect(workflow).toContain("steps.internal.outputs.checksums");
-    expect(workflow).toContain("steps.internal.outputs.releaseManifest");
-    expect(workflow).toContain("steps.internal.outputs.installer");
+    expect(workflow).toContain("environment: release-production");
+    expect(workflow).toContain("pnpm github-release:gate");
+    expect(workflow).toContain("pnpm github-release:prepare");
+    expect(workflow).toContain("pnpm release:publish");
     expect(workflow).toContain(".immutable");
     expect(workflow).not.toContain("npm publish");
     expect(workflow).not.toContain("id-token: write");
     expect(workflow).not.toContain("NODE_AUTH_TOKEN");
-    expect(notes).toMatch(/not\r?\npublished to npm/);
-    expect(notes).toContain("Physical state migration");
+    expect(notes).toContain("# Aria");
   });
 });
 

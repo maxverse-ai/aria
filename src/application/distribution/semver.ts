@@ -24,9 +24,9 @@ export function compareStableVersions(left: string, right: string): number {
   return a.major - b.major || a.minor - b.minor || a.patch - b.patch;
 }
 
-export function versionFromInternalTag(tag: string): string {
-  const prefix = 'internal-v';
-  if (!tag.startsWith(prefix)) throw new Error(`unsupported internal release tag: ${tag}`);
+export function versionFromTag(tag: string): string {
+  const prefix = 'v';
+  if (!tag.startsWith(prefix)) throw new Error(`unsupported release tag: ${tag}`);
   return parseStableVersion(tag.slice(prefix.length)).raw;
 }
 

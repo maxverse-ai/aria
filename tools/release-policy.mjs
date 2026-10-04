@@ -167,16 +167,11 @@ function readRepositoryState() {
 }
 
 /**
- * The newest published release tag.
- *
- * Internal snapshots are tagged `internal-v*`, so a `v*` pattern finds nothing
- * in this repository and the plan baseline silently fell back to the working
- * copy. The npm path would add `v*` tags if it is ever bootstrapped, so accept
- * both namespaces and take the highest parsed version.
+ * The newest published release tag. Public releases are tagged `v*`.
  */
 export function latestReleaseTagVersion() {
   try {
-    const output = execFileSync("git", ["tag", "--list", "internal-v*", "v*"], {
+    const output = execFileSync("git", ["tag", "--list", "v*"], {
       cwd: root,
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
@@ -184,7 +179,7 @@ export function latestReleaseTagVersion() {
     let newest = null;
     for (const tag of output.split("\n").filter(Boolean)) {
       try {
-        const version = parseVersion(tag.replace(/^internal-v/, "").replace(/^v/, ""));
+        const version = parseVersion(tag.replace(/^v/, ""));
         if (!newest || comparesAfter(version, newest)) newest = version;
       } catch {
         // Ignore non-SemVer tags and continue to the next candidate.

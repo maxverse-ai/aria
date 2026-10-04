@@ -20,7 +20,7 @@ export { releaseLineAuthorization };
 
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const expectedRepository = "maxverse-ai/aria";
-const workflowSuffix = "/.github/workflows/internal-release.yml@refs/heads/main";
+const workflowSuffix = "/.github/workflows/release.yml@refs/heads/main";
 
 function run(executable, args) {
   return execFileSync(executable, args, {
@@ -34,34 +34,34 @@ function readJson(relativePath) {
   return JSON.parse(readFileSync(resolve(root, relativePath), "utf8"));
 }
 
-export function internalTagForVersion(version) {
+export function tagForVersion(version) {
   const parsed = parseVersion(version);
-  if (parsed.prerelease) throw new Error("internal snapshots require a stable package version");
-  return `internal-v${parsed.raw}`;
+  if (parsed.prerelease) throw new Error("releases require a stable package version");
+  return `v${parsed.raw}`;
 }
 
-export function validateInternalReleaseContext(env) {
+export function validateReleaseContext(env) {
   const failures = [];
-  if (env.GITHUB_ACTIONS !== "true") failures.push("internal releases are restricted to GitHub Actions");
+  if (env.GITHUB_ACTIONS !== "true") failures.push("GitHub releases are restricted to GitHub Actions");
   if (env.GITHUB_REPOSITORY !== expectedRepository) {
-    failures.push(`internal release repository must be ${expectedRepository}`);
+    failures.push(`GitHub release repository must be ${expectedRepository}`);
   }
-  if (env.GITHUB_REF !== "refs/heads/main") failures.push("internal releases must run from main");
+  if (env.GITHUB_REF !== "refs/heads/main") failures.push("GitHub releases must run from main");
   if (!String(env.GITHUB_WORKFLOW_REF ?? "").endsWith(workflowSuffix)) {
-    failures.push("internal releases must use .github/workflows/internal-release.yml from main");
+    failures.push("GitHub releases must use .github/workflows/release.yml from main");
   }
-  if (env.ARIA_INTERNAL_RELEASE !== "true") failures.push("ARIA_INTERNAL_RELEASE must be enabled");
+  if (env.ARIA_GITHUB_RELEASE !== "true") failures.push("ARIA_GITHUB_RELEASE must be enabled");
   return { ok: failures.length === 0, failures };
 }
 
-export function createInternalReleasePlan({ packageJson, policy, manifest, commit, digest, notes }) {
+export function createGitHubReleasePlan({ packageJson, policy, manifest, commit, digest, notes }) {
   validatePolicy(policy);
   const version = parseVersion(packageJson.version);
   const failures = [];
   const stableLine = `${version.major}.${version.minor}`;
 
   if (policy.frozen) failures.push("release policy is frozen");
-  if (version.prerelease) failures.push("internal snapshots require a stable package version");
+  if (version.prerelease) failures.push("releases require a stable package version");
   if (stableLine !== policy.stableLine) {
     failures.push(`package version ${version.raw} is outside authorized release line ${policy.stableLine}`);
   }
@@ -70,9 +70,9 @@ export function createInternalReleasePlan({ packageJson, policy, manifest, commi
   if (manifest.version !== version.raw) failures.push("artifact version does not match package.json");
   if (manifest.commit !== commit) failures.push("artifact commit does not match the exact main commit");
   if (manifest.sha256 !== digest) failures.push("artifact digest does not match its manifest");
-  if (!notes.trim()) failures.push("internal release notes are empty");
-  if (!notes.includes(`# Aria Internal v${version.raw}`)) {
-    failures.push("internal release notes do not match the package version");
+  if (!notes.trim()) failures.push("GitHub release notes are empty");
+  if (!notes.includes(`# Aria v${version.raw}`)) {
+    failures.push("GitHub release notes do not match the package version");
   }
 
   return {
@@ -80,21 +80,21 @@ export function createInternalReleasePlan({ packageJson, policy, manifest, commi
     failures,
     packageName: packageJson.name,
     version: version.raw,
-    tag: internalTagForVersion(version.raw),
-    title: `Aria Internal v${version.raw}`,
+    tag: tagForVersion(version.raw),
+    title: `Aria v${version.raw}`,
     commit,
   };
 }
 
 export function createReleaseManifest({ packageJson, plan, manifest, digest, createdAt }) {
-  if (!plan.ok) throw new Error("cannot create release metadata from an invalid internal release plan");
+  if (!plan.ok) throw new Error("cannot create release metadata from an invalid GitHub release plan");
   const nodeRange = packageJson.engines?.node;
   if (typeof nodeRange !== "string" || !/^>=\d+\.\d+\.\d+$/.test(nodeRange)) {
     throw new Error("package engines.node must be a simple >=x.y.z range");
   }
   return {
     schemaVersion: 1,
-    channel: "internal",
+    channel: "stable",
     repository: expectedRepository,
     tag: plan.tag,
     version: plan.version,
@@ -113,14 +113,14 @@ export function createReleaseManifest({ packageJson, plan, manifest, digest, cre
 
 function assertCleanWorktree() {
   if (run("git", ["status", "--porcelain", "--untracked-files=normal"])) {
-    throw new Error("internal release requires a clean worktree");
+    throw new Error("GitHub release requires a clean worktree");
   }
 }
 
 function assertExactMain() {
   const head = run("git", ["rev-parse", "HEAD"]);
   const remoteMain = run("git", ["rev-parse", "origin/main"]);
-  if (head !== remoteMain) throw new Error("internal release commit must be the exact origin/main commit");
+  if (head !== remoteMain) throw new Error("GitHub release commit must be the exact origin/main commit");
   if (process.env.GITHUB_SHA && process.env.GITHUB_SHA !== head) {
     throw new Error("workflow commit does not match the checked-out main commit");
   }
@@ -134,7 +134,7 @@ function writeGitHubOutput(values) {
   writeFileSync(path, `${lines.join("\n")}\n`, { encoding: "utf8", flag: "a" });
 }
 
-function prepareInternalRelease() {
+function prepareGitHubRelease() {
   assertCleanWorktree();
   const commit = assertExactMain();
   const packageJson = readJson("package.json");
@@ -152,7 +152,7 @@ function prepareInternalRelease() {
   const notes = `docs/releases/v${packageJson.version}.md`;
   const notesContent = readFileSync(resolve(root, notes), "utf8");
   const digest = sha256File(tarball);
-  const plan = createInternalReleasePlan({
+  const plan = createGitHubReleasePlan({
     packageJson,
     policy,
     manifest,
@@ -161,7 +161,7 @@ function prepareInternalRelease() {
     notes: notesContent,
   });
   if (!plan.ok) throw new Error(plan.failures.join("; "));
-  if (run("git", ["tag", "--list", plan.tag])) throw new Error(`internal release tag ${plan.tag} already exists`);
+  if (run("git", ["tag", "--list", plan.tag])) throw new Error(`GitHub release tag ${plan.tag} already exists`);
 
   const checksumPath = resolve(root, "artifacts", "SHA256SUMS");
   writeFileSync(checksumPath, `${digest}  ${basename(tarball)}\n`, "utf8");
@@ -198,20 +198,20 @@ function print(value) {
 function main() {
   const operation = process.argv[2];
   if (operation === "context-gate") {
-    const result = validateInternalReleaseContext(process.env);
+    const result = validateReleaseContext(process.env);
     print(result);
     if (!result.ok) process.exitCode = 1;
     return;
   }
-  if (operation === "prepare") return print(prepareInternalRelease());
-  throw new Error("internal release command must be context-gate or prepare");
+  if (operation === "prepare") return print(prepareGitHubRelease());
+  throw new Error("GitHub release command must be context-gate or prepare");
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
     main();
   } catch (error) {
-    process.stderr.write(`internal release error: ${error instanceof Error ? error.message : String(error)}\n`);
+    process.stderr.write(`GitHub release error: ${error instanceof Error ? error.message : String(error)}\n`);
     process.exitCode = 1;
   }
 }

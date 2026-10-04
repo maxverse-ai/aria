@@ -4,7 +4,7 @@ async function main(): Promise<void> {
   const args = process.argv.slice(2);
   if (args.includes('--help') || args.includes('-h')) {
     console.log('Usage: node aria-install.mjs [--version x.y.z] [--force]');
-    console.log('Installs Aria from a complete immutable private GitHub Release using gh authentication.');
+    console.log('Installs Aria from a complete immutable GitHub Release using gh authentication.');
     return;
   }
   const versionIndex = args.indexOf('--version');
@@ -13,7 +13,7 @@ async function main(): Promise<void> {
   // Adopt a legacy npm/pnpm global command when present so existing services
   // can be rewritten to the stable launcher and still roll back safely.
   const { service, paths } = await createDistributionRuntime({ includeLegacyCurrent: true });
-  console.log('Resolving and verifying the private Aria release...');
+  console.log('Resolving and verifying the Aria release...');
   const plan = await service.createPlan({ version, force: args.includes('--force') });
   console.log(`Installing Aria ${plan.target.version}...`);
   await service.apply(plan.id);

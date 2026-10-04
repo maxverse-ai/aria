@@ -3,9 +3,9 @@ import { validateReleaseManifest } from '../../../src/application/distribution/r
 
 const manifest = {
   schemaVersion: 1,
-  channel: 'internal',
+  channel: 'stable',
   repository: 'maxverse-ai/aria',
-  tag: 'internal-v0.2.0',
+  tag: 'v0.2.0',
   version: '0.2.0',
   commit: 'a'.repeat(40),
   packageName: '@maxverse-ai/aria',
@@ -22,7 +22,7 @@ const manifest = {
 describe('release manifest trust boundary', () => {
   it('accepts a release that agrees with the independently resolved descriptor', () => {
     expect(validateReleaseManifest(manifest, {
-      channel: 'internal',
+      channel: 'stable',
       repository: manifest.repository,
       tag: manifest.tag,
       version: manifest.version,
@@ -36,7 +36,7 @@ describe('release manifest trust boundary', () => {
   it('rejects path traversal and descriptor mismatches', () => {
     expect(() => validateReleaseManifest({ ...manifest, tarball: '../aria.tgz' })).toThrow('must be a basename');
     expect(() => validateReleaseManifest(manifest, {
-      channel: 'internal',
+      channel: 'stable',
       repository: manifest.repository,
       tag: manifest.tag,
       version: manifest.version,

@@ -33,12 +33,12 @@ export class DistributionStore {
     ]);
   }
 
-  async readState(defaults: { channel?: 'internal'; repository?: string } = {}): Promise<InstallStateV1> {
+  async readState(defaults: { channel?: 'stable'; repository?: string } = {}): Promise<InstallStateV1> {
     const value = await readJsonIfExists(this.paths.stateFile);
     if (value === undefined) {
       return {
         schemaVersion: INSTALL_STATE_SCHEMA_VERSION,
-        channel: defaults.channel ?? 'internal',
+        channel: defaults.channel ?? 'stable',
         repository: defaults.repository ?? 'maxverse-ai/aria',
         current: null,
         previous: null,

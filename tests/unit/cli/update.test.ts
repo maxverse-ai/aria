@@ -32,9 +32,9 @@ vi.mock('../../../src/composition/distribution', () => ({
 }));
 
 const release = {
-  channel: 'internal' as const,
+  channel: 'stable' as const,
   repository: 'maxverse-ai/aria',
-  tag: 'internal-v0.4.0',
+  tag: 'v0.4.0',
   version: '0.4.0',
   commit: 'c40d5e7add279d8e67271d4c6a52f3c732feb214',
   sha256: 'c09d52ad8448c7992db57e733c8dc33b56ae2813f00627d6c35cbab1a5f6b379',
@@ -89,7 +89,7 @@ describe('aria update', () => {
 
     await runUpdateCheck();
 
-    expect(output.join('\n')).toContain('No complete, immutable internal release is available.');
+    expect(output.join('\n')).toContain('No complete, immutable release is available.');
   });
 
   it('forwards an exact target version into the plan', async () => {

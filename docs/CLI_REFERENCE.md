@@ -719,7 +719,7 @@ Check, plan, apply, and roll back versioned Aria installations
 
 ### `aria update check`
 
-Check the newest complete immutable internal release
+Check the newest complete immutable stable release
 
 | Option | Description |
 | --- | --- |

@@ -15,7 +15,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: aria-npm-release
+  group: aria-release
   cancel-in-progress: false
 
 jobs:
@@ -66,17 +66,16 @@ jobs:
           git add package.json
           git commit -m "chore(release): v${TARGET_VERSION}"
           git push origin "$branch"
-          gh pr create --base main --head "$branch" --title "chore(release): v${TARGET_VERSION}" --body "Automated PATCH release preparation for v${TARGET_VERSION}. Publishing remains restricted to the protected npm-production environment."
+          gh pr create --base main --head "$branch" --title "chore(release): v${TARGET_VERSION}" --body "Automated PATCH release preparation for v${TARGET_VERSION}. Publishing remains restricted to the protected release-production environment."
           gh pr merge "$branch" --auto --squash
 
   publish:
     name: Publish current main
     if: inputs.operation == 'publish_current'
     runs-on: ubuntu-latest
-    environment: npm-production
+    environment: release-production
     permissions:
       contents: write
-      id-token: write
     steps:
       - name: Checkout exact main
         uses: actions/checkout@v6
@@ -88,19 +87,21 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version-file: .node-version
-          registry-url: https://registry.npmjs.org
           package-manager-cache: false
 
-      - name: Enable pinned package tools
-        run: |
-          corepack enable
-          npm install --global npm@11.5.1
+      - name: Enable pnpm
+        run: corepack enable
 
-      - name: Install without release cache
+      - name: Install
         run: pnpm install --frozen-lockfile
 
       - name: Fetch release state
         run: git fetch origin main --tags --force
+
+      - name: Verify trusted GitHub-release context
+        env:
+          ARIA_GITHUB_RELEASE: "true"
+        run: pnpm github-release:gate
 
       - name: Run exact-commit gates
         run: pnpm ci:local
@@ -110,10 +111,27 @@ jobs:
           pnpm artifact:build
           pnpm artifact:verify
 
+      - name: Prepare release assets
+        id: release
+        env:
+          ARIA_GITHUB_RELEASE: "true"
+        run: pnpm github-release:prepare
+
       - name: Verify release boundary
         run: pnpm release:gate
 
-      - name: Publish with npm trusted publishing
+      - name: Publish GitHub release
         env:
+          GH_TOKEN: ${{ github.token }}
           ARIA_RELEASE_PUBLISH: "true"
         run: pnpm release:publish
+
+      - name: Verify published release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          test "$(gh release view "$TAG" --json isDraft --jq '.isDraft')" = "false"
+          test "$(gh release view "$TAG" --json isPrerelease --jq '.isPrerelease')" = "false"
+          test "$(gh release view "$TAG" --json assets --jq '.assets | length')" = "5"
+          test "$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" --jq '.immutable')" = "true"

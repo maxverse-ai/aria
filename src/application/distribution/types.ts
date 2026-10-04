@@ -3,7 +3,7 @@ export const INSTALL_STATE_SCHEMA_VERSION = 1 as const;
 export const UPDATE_PLAN_SCHEMA_VERSION = 1 as const;
 export const UPDATE_OPERATION_SCHEMA_VERSION = 1 as const;
 
-export type DistributionChannel = 'internal';
+export type DistributionChannel = 'stable';
 
 export interface ReleaseDescriptor {
   channel: DistributionChannel;
@@ -148,7 +148,7 @@ export interface DetachedUpdateExecutor {
 }
 
 export interface DistributionRepository {
-  readState(defaults?: { channel?: 'internal'; repository?: string }): Promise<InstallStateV1>;
+  readState(defaults?: { channel?: 'stable'; repository?: string }): Promise<InstallStateV1>;
   writeState(state: InstallStateV1): Promise<void>;
   newId(prefix: 'plan' | 'op'): string;
   downloadPath(id: string): string;

@@ -10,88 +10,57 @@ follows installation, see the [Quickstart](QUICKSTART.md).
 
 ## Install
 
-Aria is distributed from immutable GitHub Releases and is not
-published to npm. The copy-paste bootstrap commands live in the
-[README](../README.md#install) and the [Quickstart](QUICKSTART.md); they:
+Aria is currently installed from source; the package is not yet published to
+npm. Requires Node.js `>=24` and pnpm 10:
 
-1. use an already authenticated `gh` client to select the newest complete,
-   published, immutable `internal-v*` prerelease;
-2. download only that release's standalone `aria-install.mjs` bootstrapper;
-3. let the bootstrapper independently resolve, download, verify, stage, smoke
-   test, and activate the release package.
+```bash
+git clone https://github.com/maxverse-ai/aria.git
+cd aria
+pnpm install
+pnpm build
+pnpm link --global
+```
 
-The installer delegates credentials to `gh` — Aria never reads or stores a
-GitHub token. To pin an exact immutable release, add `--version <x.y.z>`; use
-`--force` only for an intentional downgrade or when overriding an active-run
-safety check.
-
-After installation, verify that the stable launcher wins command resolution:
+`pnpm link --global` exposes a stable `aria` command that resolves to the
+checkout's `bin/aria.mjs`. Verify that it wins command resolution:
 
 ```bash
 command -v aria
 aria --version
 ```
 
-On PowerShell, use `Get-Command aria`. If an older npm/pnpm global command
-still wins, move the installer-reported command directory ahead of that global
-bin directory in `PATH` and open a new shell. The installer retains an adopted
-legacy version as a rollback baseline; it does not delete legacy files.
+On PowerShell, use `Get-Command aria`. If an older global command still wins,
+move the pnpm global bin directory ahead of it in `PATH` and open a new shell.
 
-### Where things land
+### Where state lives
 
-Executable state is machine-level and separate from profile state:
-
-| Platform | Install root | Stable command |
-| --- | --- | --- |
-| Linux | `${XDG_DATA_HOME:-~/.local/share}/aria/cli` | `${XDG_BIN_HOME:-~/.local/bin}/aria` |
-| macOS | `~/Library/Application Support/Aria/cli` | `${XDG_BIN_HOME:-~/.local/bin}/aria` |
-| Windows | `%LOCALAPPDATA%\Aria\cli` | `%LOCALAPPDATA%\Aria\cli\bin\aria.cmd` |
-
-Within the install root, `install.json` is the atomic active/previous pointer
-and `versions/` holds commit-qualified installations. Override these roots
-only with `ARIA_INSTALL_HOME` and `ARIA_BIN_HOME`; `ARIA_HOME` stays reserved
-for profile and runtime state (`~/.aria` by default), so profiles and
-encrypted credentials survive a CLI rollback.
+The working copy itself is the installation. Profile and runtime state is
+kept separately under the profile root — `~/.aria` by default, or `$ARIA_HOME`
+when set — so profiles and encrypted credentials survive a checkout reset or
+a `pnpm unlink`.
 
 ## Upgrade
 
-The lifecycle is deliberately two-phase: `plan` resolves and verifies an exact
-target, `apply` revalidates the expiring plan immediately before switching.
-
 ```bash
-aria update check                    # is there a newer complete release?
-aria update plan                     # download, verify, persist an expiring plan
-aria update apply <plan-id>          # switch using a detached OS executor
-aria update status [operation-id]    # inspect the journaled operation
+cd aria           # the clone
+git pull
+pnpm install && pnpm build
 ```
 
-- `aria update plan --target-version <x.y.z>` selects an exact release.
-  `--force` allows an older target.
-- `apply` and `rollback` use a detached OS executor by default so a daemon
-  restart cannot kill its own updater; `--foreground` is a recovery-only
-  escape hatch.
-- Each apply rechecks live activity, release metadata, and package bytes.
-  Failed health checks restore the previous version and service definitions.
-- Every transition is journaled; `status` without an id reads the latest
-  operation. All commands accept `--json` for automation.
+The daemon installed by `aria start` points at the linked launcher, so the
+running service picks up the new build on its next restart
+(`aria stop` / `aria start`). See
+[Operate the bridge](operate-the-bridge.md) for the service commands.
 
 ## Roll back
 
 ```bash
-aria update rollback
+cd aria
+git checkout <previous-commit-or-tag>
+pnpm install && pnpm build
 ```
 
-Rollback switches to the recorded previous installed version — it does not
-query a mutable "previous release" alias. `--force` proceeds when live
-activity cannot be proven safe.
-
-## The OS service and upgrades
-
-The daemon definition installed by `aria start` points at the stable launcher,
-while the active version is selected through the atomically written
-`install.json`. Service definitions therefore stay valid across upgrades and
-rollbacks — no reinstallation needed. See
-[Operate the bridge](operate-the-bridge.md) for the service commands.
+The profile state root is untouched; restart the service afterwards.
 
 ## Uninstall
 
@@ -102,13 +71,19 @@ aria stop          # stop the daemon (repeat with --profile <name> / --web-ui pe
 aria unregister    # remove the OS service registration (same scoping)
 ```
 
-Then delete the two independent roots:
+Then:
 
-- the install root and stable command from the table above;
-- the profile state root — `~/.aria` by default, or `$ARIA_HOME` when set.
+- `pnpm unlink --global` (or `pnpm unlink --global @maxverse-ai/aria`) and
+  delete the clone;
+- delete the profile state root — `~/.aria` by default, or `$ARIA_HOME` when
+  set.
 
-## Internals
+## Update lifecycle
 
-The release contract, verification chain, detached executors, and transaction
-journal are specified in the
-[CLI distribution architecture](DISTRIBUTION.md).
+The `aria update` commands and the release machinery behind them are designed
+for a versioned release channel. The earlier internal `internal-v*` GitHub
+Release channel has been retired; once the first public `v*` release ships,
+`aria update` manages upgrades and rollbacks against published immutable
+GitHub Releases. Until then it reports no available releases. The release
+contract, verification chain, detached executors, and transaction journal are
+specified in the [CLI distribution architecture](DISTRIBUTION.md).

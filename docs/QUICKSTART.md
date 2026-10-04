@@ -13,45 +13,35 @@ guide walks from a clean machine to a working agent session over chat.
 ## 1. Prerequisites
 
 - Node.js `>=24.0.0` — the floor declared in `package.json#engines.node`;
-  `.node-version` pins the CI runtime.
+  `.node-version` pins the CI runtime. pnpm 10 (`corepack enable` provides it).
 - At least one local agent CLI installed and logged in: Claude Code
   (`claude`), Codex CLI (`codex`), Grok Build (`grok`), OpenCode (`opencode`),
   Devin (`devin`), DeepSeek Harness (`dsh`), Kimi Code (`kimi`),
   MiMo Code (`mimo`), or Pi (`pi`).
 - A Feishu / Lark **PersonalAgent** app — or let the first-run QR wizard
   create and bind one for you.
-- The GitHub CLI (`gh`) authenticated with an account that can read
-  `maxverse-ai/aria`. Aria is distributed from private immutable GitHub
-  Releases and is not published to npm.
 
 ## 2. Install
 
-Linux / macOS:
+Aria is built and run from source:
 
 ```bash
-gh auth status
-ARIA_REPOSITORY=maxverse-ai/aria
-ARIA_TAG="$(gh api "repos/$ARIA_REPOSITORY/releases?per_page=100" --jq 'map(select(.draft == false and .prerelease == true and .immutable == true and (.tag_name | startswith("internal-v")))) | sort_by(.tag_name | ltrimstr("internal-v") | split(".") | map(tonumber)) | last.tag_name')"
-ARIA_INSTALL_TMP="$(mktemp -d)"
-gh release download "$ARIA_TAG" --repo "$ARIA_REPOSITORY" --pattern aria-install.mjs --dir "$ARIA_INSTALL_TMP"
-node "$ARIA_INSTALL_TMP/aria-install.mjs"
+git clone https://github.com/maxverse-ai/aria.git
+cd aria
+pnpm install
+pnpm build
+pnpm link --global
 ```
 
-On Windows, run the same flow in PowerShell; the exact variant is maintained
-in the [README](../README.md#install). To pin an exact immutable release, add
-`--version <x.y.z>` to the installer command.
-
-The installer delegates credentials to `gh` — Aria never reads or stores a
-GitHub token — installs versioned packages under a platform data directory,
-and writes a stable `aria` launcher (normally `~/.local/bin/aria` on Linux and
-macOS). Add the printed command directory to `PATH` if needed, then verify:
+Verify:
 
 ```bash
 command -v aria
 aria --version
 ```
 
-For the update, rollback, and install-state contract, see the
+To upgrade, `git pull` and rebuild. The install-state and distribution
+architecture is described in
 [CLI distribution architecture](DISTRIBUTION.md).
 
 ## 3. First run — connect the chat channel

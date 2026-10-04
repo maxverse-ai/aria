@@ -144,62 +144,26 @@ Aria 的通用“加速开关”：只有 Codex App Server 为所选模型上报
 
 ### 安装
 
-Aria 现阶段只通过不可变的 GitHub Release 分发，Aria 包本身不发布到
-npm。先用有权读取 `maxverse-ai/aria` 的 GitHub 账号登录 `gh`，再从最新的
-完整内部版本下载独立安装器：
-
-Linux / macOS：
+Aria 从源码构建运行。需要 Node.js `>=24` 和 pnpm 10：
 
 ```bash
-gh auth status
-ARIA_REPOSITORY=maxverse-ai/aria
-ARIA_TAG="$(gh api "repos/$ARIA_REPOSITORY/releases?per_page=100" --jq 'map(select(.draft == false and .prerelease == true and .immutable == true and (.tag_name | startswith("internal-v")))) | sort_by(.tag_name | ltrimstr("internal-v") | split(".") | map(tonumber)) | last.tag_name')"
-ARIA_INSTALL_TMP="$(mktemp -d)"
-gh release download "$ARIA_TAG" --repo "$ARIA_REPOSITORY" --pattern aria-install.mjs --dir "$ARIA_INSTALL_TMP"
-node "$ARIA_INSTALL_TMP/aria-install.mjs"
+git clone https://github.com/maxverse-ai/aria.git
+cd aria
+pnpm install
+pnpm build
+pnpm link --global   # 暴露 `aria` 启动器
 ```
 
-<details>
-<summary>Windows PowerShell</summary>
-
-```powershell
-gh auth status
-$AriaRepository = "maxverse-ai/aria"
-$AriaTag = gh api "repos/$AriaRepository/releases?per_page=100" --jq 'map(select(.draft == false and .prerelease == true and .immutable == true and (.tag_name | startswith("internal-v")))) | sort_by(.tag_name | ltrimstr("internal-v") | split(".") | map(tonumber)) | last.tag_name'
-$AriaInstallTmp = Join-Path ([System.IO.Path]::GetTempPath()) ("aria-install-" + [guid]::NewGuid())
-New-Item -ItemType Directory -Path $AriaInstallTmp | Out-Null
-gh release download $AriaTag --repo $AriaRepository --pattern aria-install.mjs --dir $AriaInstallTmp
-node (Join-Path $AriaInstallTmp "aria-install.mjs")
-```
-
-</details>
-
-安装器把鉴权完全交给 `gh`，Aria 不读取也不保存 GitHub token。版本包安装在
-独立的平台数据目录，稳定的 `aria` 启动器通常写到 Linux/macOS 的
-`~/.local/bin/aria`；若该目录不在 `PATH`，按安装器提示加入，然后验证当前
-命中的 launcher 和版本：
+验证：
 
 ```bash
 command -v aria
 aria --version
 ```
 
-若要固定安装某个不可变版本，在安装器命令后加 `--version <x.y.z>`。只有明确
-降级，或有意覆盖活跃任务安全检查时才使用 `--force`。
-
-后续升级和回滚使用：
-
-```bash
-aria update check
-aria update plan
-aria update apply <plan-id>
-aria update status <operation-id>
-aria update rollback
-```
-
-`apply` 和 `rollback` 默认交给脱离 daemon 生命周期的系统执行器，避免服务重启
-时杀掉自己的更新进程。执行阶段会重新检查活跃任务、Release 元数据与包字节；
-健康检查失败时自动恢复旧版本和旧服务状态。
+后续升级：`git pull` 后重新构建（`pnpm install && pnpm build`）。
+首个公开发布后 `aria update` 管理升级；发布流程见
+[docs/RELEASE_POLICY.md](docs/RELEASE_POLICY.md)。
 
 ### 首次启动
 

@@ -1,6 +1,6 @@
 import type { ReleasePolicy } from "./release-policy.mjs";
 
-export interface InternalReleasePlan {
+export interface GitHubReleasePlan {
   ok: boolean;
   failures: string[];
   packageName: string;
@@ -10,8 +10,8 @@ export interface InternalReleasePlan {
   commit: string;
 }
 
-export function internalTagForVersion(version: string): string;
-export function validateInternalReleaseContext(env: Record<string, string | undefined>): {
+export function tagForVersion(version: string): string;
+export function validateReleaseContext(env: Record<string, string | undefined>): {
   ok: boolean;
   failures: string[];
 };
@@ -26,7 +26,7 @@ export function releaseLineAuthorization(input: {
   commitMessage: string;
   humanAuthorized?: boolean;
 }): { ok: boolean; required: string | null; failures: string[] };
-export function createInternalReleasePlan(input: {
+export function createGitHubReleasePlan(input: {
   packageJson: { name: string; version: string };
   policy: ReleasePolicy;
   manifest: {
@@ -39,11 +39,11 @@ export function createInternalReleasePlan(input: {
   commit: string;
   digest: string;
   notes: string;
-}): InternalReleasePlan;
+}): GitHubReleasePlan;
 
-export interface InternalReleaseManifest {
+export interface GitHubReleaseManifest {
   schemaVersion: 1;
-  channel: "internal";
+  channel: "stable";
   repository: string;
   tag: string;
   version: string;
@@ -61,8 +61,8 @@ export interface InternalReleaseManifest {
 
 export function createReleaseManifest(input: {
   packageJson: { name: string; version: string; engines?: { node?: string } };
-  plan: Pick<InternalReleasePlan, "ok" | "tag" | "version" | "commit">;
+  plan: Pick<GitHubReleasePlan, "ok" | "tag" | "version" | "commit">;
   manifest: { tarball: string };
   digest: string;
   createdAt: string;
-}): InternalReleaseManifest;
+}): GitHubReleaseManifest;

@@ -3,10 +3,10 @@ import {
   compareStableVersions,
   newestRelease,
   parseStableVersion,
-  versionFromInternalTag,
+  versionFromTag,
 } from '../../../src/application/distribution/semver.js';
 
-describe('internal distribution semver policy', () => {
+describe('distribution semver policy', () => {
   it('accepts only stable canonical versions', () => {
     expect(parseStableVersion('1.20.3')).toMatchObject({ major: 1, minor: 20, patch: 3 });
     expect(() => parseStableVersion('01.2.3')).toThrow('invalid stable version');
@@ -19,8 +19,8 @@ describe('internal distribution semver policy', () => {
     expect(compareStableVersions('2.0.0', '1.99.99')).toBeGreaterThan(0);
   });
 
-  it('requires the private internal tag namespace', () => {
-    expect(versionFromInternalTag('internal-v0.1.2')).toBe('0.1.2');
-    expect(() => versionFromInternalTag('v0.1.2')).toThrow('unsupported internal release tag');
+  it('requires the public v tag namespace', () => {
+    expect(versionFromTag('v0.1.2')).toBe('0.1.2');
+    expect(() => versionFromTag('internal-v0.1.2')).toThrow('unsupported release tag');
   });
 });

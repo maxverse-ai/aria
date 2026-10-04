@@ -9,7 +9,7 @@ export async function runUpdateCheck(options: UpdateOutputOptions = {}): Promise
   const result = await service.check();
   if (options.json) return printJson(result);
   if (!result.latest) {
-    console.log('No complete, immutable internal release is available.');
+    console.log('No complete, immutable release is available.');
     return;
   }
   const current = result.current ? `${result.current.version} (${shortSha(result.current.commit)})` : 'unmanaged';

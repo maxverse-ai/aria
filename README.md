@@ -149,66 +149,26 @@ The current product boundary is deliberately explicit:
 
 ### Install
 
-Aria is currently distributed from immutable GitHub Releases; the
-Aria package itself is not published to npm. First authenticate GitHub CLI with
-an account that can read `maxverse-ai/aria`, then download the standalone
-installer from the newest complete internal release:
-
-Linux / macOS:
+Aria is built and run from source. Requires Node.js `>=24` and pnpm 10:
 
 ```bash
-gh auth status
-ARIA_REPOSITORY=maxverse-ai/aria
-ARIA_TAG="$(gh api "repos/$ARIA_REPOSITORY/releases?per_page=100" --jq 'map(select(.draft == false and .prerelease == true and .immutable == true and (.tag_name | startswith("internal-v")))) | sort_by(.tag_name | ltrimstr("internal-v") | split(".") | map(tonumber)) | last.tag_name')"
-ARIA_INSTALL_TMP="$(mktemp -d)"
-gh release download "$ARIA_TAG" --repo "$ARIA_REPOSITORY" --pattern aria-install.mjs --dir "$ARIA_INSTALL_TMP"
-node "$ARIA_INSTALL_TMP/aria-install.mjs"
+git clone https://github.com/maxverse-ai/aria.git
+cd aria
+pnpm install
+pnpm build
+pnpm link --global   # exposes the `aria` launcher
 ```
 
-<details>
-<summary>Windows PowerShell</summary>
-
-```powershell
-gh auth status
-$AriaRepository = "maxverse-ai/aria"
-$AriaTag = gh api "repos/$AriaRepository/releases?per_page=100" --jq 'map(select(.draft == false and .prerelease == true and .immutable == true and (.tag_name | startswith("internal-v")))) | sort_by(.tag_name | ltrimstr("internal-v") | split(".") | map(tonumber)) | last.tag_name'
-$AriaInstallTmp = Join-Path ([System.IO.Path]::GetTempPath()) ("aria-install-" + [guid]::NewGuid())
-New-Item -ItemType Directory -Path $AriaInstallTmp | Out-Null
-gh release download $AriaTag --repo $AriaRepository --pattern aria-install.mjs --dir $AriaInstallTmp
-node (Join-Path $AriaInstallTmp "aria-install.mjs")
-```
-
-</details>
-
-The installer delegates credentials to `gh`; Aria never reads or stores a
-GitHub token. It installs versioned packages under a platform data directory
-and writes a stable `aria` launcher (normally `~/.local/bin/aria` on Linux and
-macOS). Add the printed command directory to `PATH` if needed, then verify the
-selected launcher and version:
+Verify:
 
 ```bash
 command -v aria
 aria --version
 ```
 
-To pin an exact immutable release, add `--version <x.y.z>` to the installer
-command. Use `--force` only for an intentional downgrade or when overriding an
-active-run safety check.
-
-To upgrade or roll back later:
-
-```bash
-aria update check
-aria update plan
-aria update apply <plan-id>
-aria update status <operation-id>
-aria update rollback
-```
-
-`apply` and `rollback` use an OS-detached executor by default, so updating a
-running daemon cannot kill its own updater. Each apply rechecks live activity,
-release metadata, and package bytes; failed health checks restore the previous
-version and service definitions.
+To upgrade later, `git pull` and rebuild (`pnpm install && pnpm build`).
+Once the first public release ships, `aria update` manages upgrades; see
+[docs/RELEASE_POLICY.md](docs/RELEASE_POLICY.md) for the release workflow.
 
 ### First run
 

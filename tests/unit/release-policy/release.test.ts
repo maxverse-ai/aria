@@ -83,24 +83,22 @@ describe("publish context", () => {
     GITHUB_REF: "refs/heads/main",
     GITHUB_WORKFLOW_REF: "maxverse-ai/aria/.github/workflows/release.yml@refs/heads/main",
     ARIA_RELEASE_PUBLISH: "true",
-    ACTIONS_ID_TOKEN_REQUEST_URL: "https://token.actions.githubusercontent.com",
-    ACTIONS_ID_TOKEN_REQUEST_TOKEN: "present",
   };
 
-  it("accepts only the protected main release workflow with OIDC", () => {
+  it("accepts only the protected main release workflow", () => {
     expect(validatePublishContext(valid)).toEqual({ ok: true, failures: [] });
     expect(validatePublishContext({ ...valid, GITHUB_REF: "refs/heads/feature" }).ok).toBe(false);
-    expect(validatePublishContext({ ...valid, ACTIONS_ID_TOKEN_REQUEST_TOKEN: undefined }).ok).toBe(false);
+    expect(validatePublishContext({ ...valid, ARIA_RELEASE_PUBLISH: undefined }).ok).toBe(false);
   });
 
-  it("keeps the workflow single-writer, protected, OIDC-only, and pinned", () => {
+  it("keeps the workflow single-writer, protected, and GitHub-Release-based", () => {
     const workflow = readFileSync(new URL("../../../.github/workflows/release.yml", import.meta.url), "utf8");
     const packageJson = JSON.parse(readFileSync(new URL("../../../package.json", import.meta.url), "utf8"));
-    expect(workflow).toContain("group: aria-npm-release");
+    expect(workflow).toContain("group: aria-release");
     expect(workflow).toContain("cancel-in-progress: false");
-    expect(workflow).toContain("environment: npm-production");
-    expect(workflow).toContain("id-token: write");
-    expect(workflow).toContain("npm install --global npm@11.5.1");
+    expect(workflow).toContain("environment: release-production");
+    expect(workflow).not.toContain("id-token: write");
+    expect(workflow).not.toContain("npm publish");
     expect(workflow).not.toContain("NODE_AUTH_TOKEN");
     expect(packageJson.scripts.prepublishOnly).toContain("publish-gate");
   });

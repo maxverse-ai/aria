@@ -54,8 +54,9 @@
     "release:prepare": "node tools/release.mjs prepare-patch",
     "release:gate": "node tools/release.mjs verify",
     "release:publish": "node tools/release.mjs publish",
-    "internal-release:gate": "node tools/internal-release.mjs context-gate",
-    "internal-release:prepare": "node tools/internal-release.mjs prepare",
+    "github-release:gate": "node tools/github-release.mjs context-gate",
+    "github-release:prepare": "node tools/github-release.mjs prepare",
+
     "ci:local": "git diff --check && pnpm infra:doctor && pnpm release:check -- --base-ref origin/main && pnpm test && pnpm typecheck && pnpm build",
     "ci:platform": "pnpm infra:doctor && pnpm release:check && pnpm test && pnpm typecheck && pnpm build",
     "prepare": "pnpm build",

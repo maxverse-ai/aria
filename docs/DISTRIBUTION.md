@@ -4,8 +4,8 @@
 
 > 中文版：[DISTRIBUTION.zh.md](DISTRIBUTION.zh.md)
 
-Aria's current consumer channel is a GitHub repository. GitHub Releases
-is the package authority; npm is used only to resolve Aria's public runtime
+Aria's consumer channel is a public GitHub repository. GitHub Releases is
+the package authority; npm is used only to resolve Aria's public runtime
 dependencies while installing a verified release tarball. The Aria package is
 not published to npm.
 
@@ -16,8 +16,8 @@ not published to npm.
 The copy-paste bootstrap commands live in the bilingual
 [README](../README.md#install). They perform three intentional steps:
 
-1. use an already authenticated `gh` client to select the newest complete,
-   published, immutable `internal-v*` prerelease;
+1. use a `gh` client to select the newest complete, published, immutable
+   `v*` release;
 2. download only that release's standalone `aria-install.mjs` bootstrapper;
 3. let the bootstrapper independently resolve, download, verify, stage, smoke
    test, and activate the release package.
@@ -126,8 +126,8 @@ without copying updater policy into the chat or engine layers.
 
 ## Release contract
 
-A consumable release must be a published, immutable GitHub prerelease whose tag
-is `internal-v<stable-semver>`. It must contain exactly the required contract
+A consumable release must be a published, immutable GitHub release whose tag
+is `v<stable-semver>`. Prereleases and drafts are not consumable. It must contain exactly the required contract
 assets, including:
 
 - the package tarball;
@@ -151,7 +151,7 @@ tarball bytes. A mismatch fails closed before npm or a service manager runs.
 
 ## Install and update transaction
 
-1. `check` lists immutable internal releases and compares stable SemVer.
+1. `check` lists immutable stable releases and compares stable SemVer.
 2. `plan` selects an exact release, downloads it, verifies it, snapshots the
    active digest and affected services, then writes an expiring plan.
 3. `apply` reacquires the release and service facts, checks the plan's expected

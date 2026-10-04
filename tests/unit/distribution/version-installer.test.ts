@@ -33,9 +33,9 @@ describe('NpmTarballVersionInstaller', () => {
 
 function release(root: string): VerifiedRelease {
   const descriptor = {
-    channel: 'internal' as const,
+    channel: 'stable' as const,
     repository: 'maxverse-ai/aria',
-    tag: 'internal-v0.2.0',
+    tag: 'v0.2.0',
     version: '0.2.0',
     commit: 'a'.repeat(40),
     publishedAt: '2026-08-29T00:00:00Z',
@@ -46,7 +46,7 @@ function release(root: string): VerifiedRelease {
     descriptor,
     manifest: {
       schemaVersion: 1,
-      channel: 'internal',
+      channel: 'stable',
       repository: descriptor.repository,
       tag: descriptor.tag,
       version: descriptor.version,
