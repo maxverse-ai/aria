@@ -781,7 +781,7 @@ program
     await runServiceUnregister(opts);
   });
 
-// === distribution commands (private immutable GitHub Releases) ===
+// === distribution commands (immutable GitHub Releases) ===
 
 const update = program
   .command('update')
