@@ -270,7 +270,9 @@ function main() {
   for (const [name, text] of outputs) {
     const target = path.join(docsDir, name);
     const content = text.endsWith('\n') ? text : `${text}\n`;
-    const existing = fs.existsSync(target) ? fs.readFileSync(target, 'utf8') : null;
+    const existing = fs.existsSync(target)
+      ? fs.readFileSync(target, 'utf8').replace(/\r\n/g, '\n')
+      : null;
     if (check) {
       if (existing !== content) {
         console.error(`gen-cli-reference: ${name} is stale — run node site/scripts/gen-cli-reference.mjs`);

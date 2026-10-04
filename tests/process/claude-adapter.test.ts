@@ -171,6 +171,7 @@ describe('ClaudeAdapter process contract', () => {
         lines: [],
         stderr: 'missing command\n',
         exitCode: 1,
+        exitAfterFirstMessage: true,
       });
       cleanup.push(fake.dir);
       run = new ClaudeAdapter({ binary: fake.path }).run({
