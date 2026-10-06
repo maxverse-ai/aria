@@ -9,15 +9,16 @@
 [![CI](https://img.shields.io/github/actions/workflow/status/maxverse-ai/aria/ci.yml?branch=main&style=flat-square&label=CI&labelColor=171717&color=00D6B9)](https://github.com/maxverse-ai/aria/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-MIT-7C5CFC?style=flat-square&labelColor=171717)](LICENSE)
 
-**A local-first control plane for coding agents. Chat is the remote control, not
-the compute plane.**
+**A local-first control plane for coding agents. Chat is the remote control,
+not the compute plane.**
 
-Aria turns a chat surface into the interaction surface for coding agents that
-run on your own machine. The engine, tools, files, and credentials stay local;
-Aria owns message addressing, access control, profiles, sessions, workspaces,
-streaming delivery, turn coordination, background services, and safe version
-lifecycle operations. Channels are pluggable: Lark / Feishu ships built in, and
-the channel plugin ABI is the extension boundary.
+Aria runs your CLI coding agents — Claude Code, Codex, Grok Build, Devin,
+OpenCode, Kimi, MiMo, DeepSeek Harness, Pi — on your own machine and makes
+them reachable from Feishu / Lark (and other channels through plugins). DM a
+single agent, or run a whole roster in one group: messages get addressed to
+the right agent and workspace, eligible follow-ups steer a live run instead
+of queueing blindly, and the terminal reply publishes only while it is still
+fresh. Code, tools, files, and credentials never leave the host.
 
 The sharp product contract is:
 
@@ -25,10 +26,47 @@ The sharp product contract is:
 > workspace, incorporate eligible follow-ups without losing queued input, and
 > publish the terminal answer only while it is still fresh.
 
-[Why Aria](#why-aria) | [Product contract](#product-contract) |
-[Runtime flow](#runtime-flow) | [Supported scope](#supported-scope) |
+[Why Aria](#why-aria) | [What you can do](#what-you-can-do) |
+[Product contract](#product-contract) | [Runtime flow](#runtime-flow) |
 [Quick start](#quick-start) | [Commands](#commands) |
 [Documentation](#documentation)
+
+## What you can do
+
+```text
+# DM your claude bot — the same chat you already live in
+you:   the payments webhook test is flaky — reproduce and fix the race
+aria:  ▣ running tests…  ▣ found it: mock clock races the retry timer
+       ✔ fixed in src/payments/webhook.ts — suite green
+
+you:   actually use fake timers instead of patching Date
+       → accepted as a live steer inside the same run, no restart
+
+# or run a roster in a group — one profile per bot, addressed by @
+you:   @claude-bot implement the schema change
+       @codex-bot review the diff above
+/task refactor the billing retry policy
+       → the message becomes claimable work: claimed, executed,
+         handed off with evidence, and reviewed before it lands
+```
+
+- **Drive one agent from a DM** — text, images, and files in; a streaming
+  card and an optional COT process message out; sessions persist per chat,
+  topic, or doc-comment thread.
+- **Run several agents as a team** — multiple profiles and channel accounts
+  side by side; structured `@bot` addressing, bot-at-bot mentions, trust
+  registry, and agent steering mailboxes so agents can hand off work.
+- **Promote messages into work** — `/task` turns a request into a tracked
+  task with participants, rounds, and a reviewable outcome.
+- **Steer without restarting** — native `turn/steer` on Codex, ACP inject on
+  supported engines, or a notice+pull mailbox; whatever can't be delivered
+  is swept into the next turn, never silently dropped.
+- **Meet it where you already are** — `@bot` in a cloud-doc comment, `/meeting`
+  joins a Feishu call, `/remind` schedules anchored tasks, `/loop` re-runs a
+  job until it sticks.
+- **Operate it like software, not a script** — OS daemons, a browser console,
+  `doctor`/`preflight` diagnostics, and `aria update` over immutable GitHub
+  Releases with transactional rollback.
 
 ## Why Aria
 
@@ -129,8 +167,8 @@ The current product boundary is deliberately explicit:
 - multi-person groups require a structured `@bot` for unambiguous addressing;
 - remote freshness history is bounded and fails open when unavailable or
   truncated, so history failure never silently discards a terminal answer;
-- Aria is installed from source today and is not published to npm; versioned
-  immutable `v*` GitHub Releases are the planned distribution channel.
+- Aria is distributed through immutable `v*` GitHub Releases or built from
+  source; it is not published to npm.
 
 ## Quick Start
 
@@ -151,7 +189,20 @@ The current product boundary is deliberately explicit:
 
 ### Install
 
-Aria is built and run from source. Requires Node.js `>=24` and pnpm
+**Option A — release installer (recommended).** Download the standalone
+bootstrapper from the newest immutable release and let it resolve, verify,
+and activate the package:
+
+```bash
+gh release download --repo maxverse-ai/aria --pattern aria-install.mjs --clobber
+node aria-install.mjs
+```
+
+Once installed, `aria update check` / `plan` / `apply` manages upgrades with
+transactional rollback; see [docs/DISTRIBUTION.md](docs/DISTRIBUTION.md) for
+the release contract.
+
+**Option B — from source.** Requires Node.js `>=24` and pnpm
 (`packageManager` pins `pnpm@12.0.0`; `corepack enable` provides it):
 
 ```bash
@@ -162,16 +213,15 @@ pnpm build
 pnpm link --global   # exposes the `aria` launcher
 ```
 
-Verify:
+To upgrade later, `git pull` and rebuild (`pnpm install && pnpm build`), and
+restart any running service.
+
+Either way, verify:
 
 ```bash
 command -v aria
 aria --version
 ```
-
-To upgrade later, `git pull` and rebuild (`pnpm install && pnpm build`).
-Once the first public release ships, `aria update` manages upgrades; see
-[docs/RELEASE_POLICY.md](docs/RELEASE_POLICY.md) for the release workflow.
 
 ### First run
 
@@ -642,22 +692,29 @@ Aria was forked from
 
 ### How Aria differs from lark-channel-bridge
 
-lark-channel-bridge is a lightweight bridge: it forwards Feishu / Lark
-messages to one local agent and streams the reply back on a card. Aria kept
-that core flow and grew into a control plane for running several agents as a
-team.
+Aria forked from lark-channel-bridge and keeps its DNA — streaming cards,
+COT process messages, per-scope sessions with `/resume`, workspaces, the
+private-by-default access model, per-profile daemons, the web console,
+cloud-doc comments, and `/meeting`. What changed is the altitude:
 
-| | lark-channel-bridge | Aria |
+lark-channel-bridge is a lightweight **bridge**: it forwards Feishu / Lark
+messages to one local agent and streams the reply back. Aria is a **control
+plane**: it runs a coordinated roster of agents across engines and channels,
+with durable work state and a managed software lifecycle.
+
+| Area | lark-channel-bridge | Aria |
 | --- | --- | --- |
 | Scope | Message bridge: chat in, reply out | Agent control plane: address, coordinate, and operate agents |
-| Engines | Claude Code or Codex CLI | Claude Code, Codex App Server, Grok Build, Devin, plus an adapter contract for more |
-| Channels | Feishu / Lark only | Feishu / Lark built in, WeChat ilink and WeChat Customer Service as plugins, external channels through the Channel Plugin ABI |
-| Mid-turn steering | Not supported; new input queues for the next turn | Engine-aware: native `turn/steer`, ACP inject, or a notice+pull mailbox, with swept fallback so nothing is silently dropped |
-| Work items | None — chat is the only unit | `/task` commands turn messages into claimable, reviewable work with a persisted state machine |
-| Multi-account | One PersonalAgent app per profile | Multiple profiles and multiple channel accounts run side by side with partitioned state |
-| Agent collaboration | Single bot per deployment | Bot-at-bot mentions, trust registry, personal agent groups, and steering mailboxes between agents |
-| Operations | Foreground run plus an OS service | Full lifecycle: daemon services, doctor/preflight diagnostics, versioned install-update-rollback over immutable GitHub Releases, console web UI |
-| Execution | Runs in the profile working directory | Prepared execution spaces with a backend registry (native, Podman, …) and recorded plans |
+| Engines | Claude Code or Codex CLI, pinned per profile | 9 built-in engines (Claude, Codex, Grok, Devin, OpenCode, Kimi, MiMo, DeepSeek Harness, Pi), `/agent` switches in place, adapter contract for more |
+| Channels | Feishu / Lark only | Feishu / Lark built in; WeChat ilink and WeChat Customer Service as plugins; external channels via the Channel Plugin ABI |
+| Mid-turn input | Queues to the next turn | Engine-aware steering: native `turn/steer`, ACP inject, or a notice+pull mailbox — undeliverable input is swept into the next turn, never dropped |
+| Work items | None — the message is the only unit | `/task` promotes a message into claimable, reviewable work with participants, rounds, and evidence handoff |
+| Agent collaboration | One bot per deployment | Bot-at-bot `@` mentions, trust registry, agent groups, and steering mailboxes between agents |
+| Proactive actions | None | `/remind`, `/loop`, and a trigger platform for scheduled runs and result routing |
+| Accounts | Multiple profiles, one PersonalAgent app each | Profiles plus multiple channel instances per profile, state partitioned per instance |
+| Execution | Local subprocess in the profile workspace | Prepared execution spaces with a backend registry (native, Podman, …) and recorded plans |
+| Distribution | `npm i -g`, reinstall to upgrade | Immutable `v*` GitHub Releases; `aria update plan/apply/rollback` with byte verification and a stable launcher |
+| CLI surface | `run`, services, `profile`, `secrets` | Everything upstream plus `update`, `space`, `channel`, `trigger`, `worker`, `control`, `doctor`/`preflight` |
 
 If you only need a single-agent Feishu bot, lark-channel-bridge remains the
 smaller choice. Aria is for running a coordinated roster of agents across

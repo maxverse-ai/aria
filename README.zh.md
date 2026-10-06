@@ -11,20 +11,57 @@
 
 **本地优先的编码 Agent 控制平面。聊天是遥控器，不是算力。**
 
-Aria 把聊天入口变成本机编码 Agent 的交互面。引擎、工具、文件和凭据
-留在本机；Aria 负责消息寻址、访问控制、profile、会话、工作空间、流式展示、
-轮次协调、后台服务，以及安全的版本生命周期。渠道是可插拔的：飞书 / Lark
-内建，Channel Plugin ABI 是扩展边界。
+Aria 让你的 CLI 编码 Agent——Claude Code、Codex、Grok Build、Devin、
+OpenCode、Kimi、MiMo、DeepSeek Harness、Pi——跑在你自己的机器上，并从
+飞书 / Lark（以及通过插件接入的其他渠道）触达。可以给单个 Agent 发
+私聊，也可以在一个群里养一队 bot：消息会寻址到正确的 Agent 和工作
+空间，合格的追问直接注入运行中的会话而不是盲目排队，最终回复只在
+仍然新鲜时才会发布。代码、工具、文件和凭据都不离开主机。
 
 它的核心产品契约是：
 
 > 从聊天入口发出一项明确指向 Agent 的任务，把它路由到正确的本地 Agent
 > 与工作空间；运行中的追问不丢失、不重复，最终答案只在仍然新鲜时发布。
 
-[为什么选择 Aria](#why-aria) | [产品契约](#product-contract) |
-[运行流程](#runtime-flow) | [支持范围](#supported-scope) |
+[为什么选择 Aria](#why-aria) | [你能用它做什么](#what-you-can-do) |
+[产品契约](#product-contract) | [运行流程](#runtime-flow) |
 [快速开始](#quick-start) | [命令速查](#命令速查) |
 [文档导航](#documentation)
+
+<a id="what-you-can-do"></a>
+
+## 你能用它做什么
+
+```text
+# 私聊你的 claude bot——就在你天天用的聊天里
+你:    payments webhook 那个测试不稳定——复现一下并修掉竞态
+aria:  ▣ 正在跑测试…  ▣ 找到了：mock clock 和重试计时器撞车
+       ✔ 已修复 src/payments/webhook.ts——测试全绿
+
+你:    其实应该用 fake timers，别 patch Date
+       → 作为实时 steer 注入同一次运行，不用重启
+
+# 或者在群里养一队——每个 profile 一个 bot，用 @ 寻址
+你:    @claude-bot 实现这个 schema 变更
+       @codex-bot review 上面的 diff
+/task 重构 billing 重试策略
+       → 消息变成可认领的工作：认领、执行、带证据交接、评审后落地
+```
+
+- **私聊驱动单个 Agent**——文本、图片、文件进来；流式卡片和可选 COT
+  过程消息出去；会话按聊天、话题或文档评论线程各自持久。
+- **把多个 Agent 组成团队**——多 profile、多渠道账号并行；结构化
+  `@bot` 寻址、bot-at-bot 提及、信任注册表和 Agent 间 steering 信箱，
+  让 Agent 之间能交接工作。
+- **把消息提升为工作**——`/task` 把一条需求变成有参与方、轮次和可
+  评审结果的跟踪任务。
+- **不重启地纠偏**——Codex 原生 `turn/steer`、支持引擎的 ACP inject、
+  或 notice+pull 信箱；送不达的输入会被扫进下一轮，绝不静默丢弃。
+- **在你已经在的地方遇见它**——云文档评论里 `@bot`、`/meeting` 进飞书
+  会议、`/remind` 排定锚定任务、`/loop` 把一个任务反复跑到成。
+- **像运营软件一样运营它**——系统守护服务、浏览器控制台、`doctor`/
+  `preflight` 诊断，以及基于不可变 GitHub Release 的 `aria update`
+  事务化升级与回滚。
 
 <a id="why-aria"></a>
 
@@ -121,7 +158,7 @@ Aria 的通用“加速开关”：只有 Codex App Server 为所选模型上报
 - 多人群必须结构化 `@bot` 才能完成明确寻址；
 - 远端 freshness 历史查询有界；不可用或截断时 fail-open，不会因为历史故障
   静默丢掉最终答案；
-- Aria 目前从源码安装，不发布到 npm；版本化不可变 `v*` GitHub Release 是规划中的分发通道。
+- Aria 通过不可变 `v*` GitHub Release 分发，或从源码构建；不发布到 npm。
 
 <a id="quick-start"></a>
 
@@ -146,7 +183,19 @@ Aria 的通用“加速开关”：只有 Codex App Server 为所选模型上报
 
 ### 安装
 
-Aria 从源码构建运行。需要 Node.js `>=24` 和 pnpm（`packageManager` 固定 `pnpm@12.0.0`，`corepack enable` 即可）：
+**方式 A —— 发布安装器（推荐）。** 从最新的不可变 Release 下载独立的
+bootstrapper，由它完成解析、校验和激活：
+
+```bash
+gh release download --repo maxverse-ai/aria --pattern aria-install.mjs --clobber
+node aria-install.mjs
+```
+
+装好后由 `aria update check` / `plan` / `apply` 管理升级，支持事务化
+回滚；Release 契约见 [docs/DISTRIBUTION.md](docs/DISTRIBUTION.md)。
+
+**方式 B —— 源码构建。** 需要 Node.js `>=24` 和 pnpm（`packageManager`
+固定 `pnpm@12.0.0`，`corepack enable` 即可）：
 
 ```bash
 git clone https://github.com/maxverse-ai/aria.git
@@ -156,16 +205,15 @@ pnpm build
 pnpm link --global   # 暴露 `aria` 启动器
 ```
 
-验证：
+后续升级：`git pull` 后重新构建（`pnpm install && pnpm build`），并
+重启运行中的服务。
+
+任一方式装完后验证：
 
 ```bash
 command -v aria
 aria --version
 ```
-
-后续升级：`git pull` 后重新构建（`pnpm install && pnpm build`）。
-首个公开发布后 `aria update` 管理升级；发布流程见
-[docs/RELEASE_POLICY.md](docs/RELEASE_POLICY.md)。
 
 ### 首次启动
 
@@ -624,21 +672,28 @@ Aria fork 自
 
 ### Aria 与 lark-channel-bridge 的区别
 
-lark-channel-bridge 是一个轻量桥：把飞书 / Lark 消息转发给一个本地
-Agent，再把回复流式写回卡片。Aria 保留了这条核心链路，并长成了让多个
-Agent 协同工作的控制平面。
+Aria fork 自 lark-channel-bridge，继承了它的核心体验——流式卡片、
+COT 过程消息、按 scope 隔离的会话与 `/resume`、工作空间、默认私有的
+访问模型、按 profile 的守护服务、Web 控制台、云文档评论和 `/meeting`。
+变化在于高度：
 
-| | lark-channel-bridge | Aria |
+lark-channel-bridge 是一个轻量**桥**：把飞书 / Lark 消息转发给一个
+本地 Agent，把回复流式写回。Aria 是一个**控制平面**：跨引擎、跨渠道
+运营一队协同的 Agent，带持久工作状态和受管的软件生命周期。
+
+| 维度 | lark-channel-bridge | Aria |
 | --- | --- | --- |
 | 定位 | 消息桥：聊天进来，回复出去 | Agent 控制平面：寻址、协调、运营一组 Agent |
-| 引擎 | Claude Code 或 Codex CLI | Claude Code、Codex App Server、Grok Build、Devin，另有 adapter 契约可扩展 |
-| 渠道 | 仅飞书 / Lark | 飞书 / Lark 内建，微信 ilink 与微信客服走插件，外部渠道走 Channel Plugin ABI |
-| 轮中 steering | 不支持；新输入排队到下一轮 | 按引擎能力分发：`turn/steer`、ACP inject 或 notice+pull 信箱，兜底清扫保证不静默丢弃 |
-| 工作项 | 无——消息即全部 | `/task` 把消息提升为可认领、可评审的工作项，带持久化状态机 |
-| 多账号 | 每个 profile 一个 PersonalAgent 应用 | 多 profile 与多渠道账号并行运行，状态按实例隔离 |
-| Agent 协作 | 每次部署一个 bot | bot-at-bot 提及、信任注册表、个人 Agent 组、Agent 间 steering 信箱 |
-| 运维 | 前台运行 + 系统服务 | 全生命周期：守护服务、doctor/preflight 诊断、基于不可变 GitHub Release 的安装-升级-回滚、控制台 Web UI |
-| 执行位置 | 在 profile 工作目录中运行 | 受备执行空间，后端注册表（native、Podman 等）与留痕计划 |
+| 引擎 | Claude Code 或 Codex CLI，钉在 profile 上 | 9 个内建引擎（Claude、Codex、Grok、Devin、OpenCode、Kimi、MiMo、DeepSeek Harness、Pi），`/agent` 原地切换，adapter 契约可扩展 |
+| 渠道 | 仅飞书 / Lark | 飞书 / Lark 内建；微信 ilink 与微信客服为插件；外部渠道走 Channel Plugin ABI |
+| 轮中输入 | 排队到下一轮 | 按引擎能力 steering：原生 `turn/steer`、ACP inject 或 notice+pull 信箱——送不达的输入扫进下一轮，不丢失 |
+| 工作项 | 无——消息即全部 | `/task` 把消息提升为可认领、可评审的工作，带参与方、轮次和证据交接 |
+| Agent 协作 | 每次部署一个 bot | bot-at-bot `@` 提及、信任注册表、Agent 组、Agent 间 steering 信箱 |
+| 主动动作 | 无 | `/remind`、`/loop`，以及面向定时运行和结果路由的 trigger 平台 |
+| 账号 | 多 profile，每个一个 PersonalAgent 应用 | profile 之外还有按 profile 的多渠道实例，状态按实例隔离 |
+| 执行位置 | profile 工作空间里的本地子进程 | 受备执行空间，后端注册表（native、Podman 等）与留痕计划 |
+| 分发与升级 | `npm i -g`，升级靠重装 | 不可变 `v*` GitHub Release；`aria update plan/apply/rollback`，带字节校验与稳定 launcher |
+| CLI 面 | `run`、服务、`profile`、`secrets` | 上游全部，外加 `update`、`space`、`channel`、`trigger`、`worker`、`control`、`doctor`/`preflight` |
 
 如果只需要一个单 Agent 飞书 bot，lark-channel-bridge 仍是更小的选择；
 Aria 面向跨引擎、跨渠道、带持久状态的 Agent 团队协同。
