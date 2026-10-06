@@ -103,3 +103,17 @@ describe("publish context", () => {
     expect(packageJson.scripts.prepublishOnly).toContain("publish-gate");
   });
 });
+
+describe("release notes rendering", () => {
+  it("rewrites relative links to absolute blob URLs at the release tag", async () => {
+    const { renderReleaseNotes } = await import("../../../tools/release.mjs");
+    const out = renderReleaseNotes("docs/releases/v0.4.0.md", "v0.4.0");
+    expect(out).toContain(
+      "](https://github.com/maxverse-ai/aria/blob/v0.4.0/docs/releases/v0.4.0.zh.md)",
+    );
+    expect(out).toContain(
+      "](https://github.com/maxverse-ai/aria/blob/v0.4.0/docs/install-and-upgrade.md)",
+    );
+    expect(out).not.toMatch(/\]\((?!https?:)[^)]*\.md\)/);
+  });
+});

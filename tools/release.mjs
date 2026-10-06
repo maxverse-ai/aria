@@ -2,7 +2,7 @@
 
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { basename, resolve } from "node:path";
+import { basename, dirname, posix, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { parseVersion, validatePolicy, verifyTransition } from "./release-policy.mjs";
@@ -230,6 +230,21 @@ function verifyReleaseArtifact() {
   return { ...plan, commit, manifest: "artifacts/manifest.json", tarball: `artifacts/${basename(manifest.tarball)}`, sha256: manifest.sha256 };
 }
 
+// Release bodies render on github.com/<owner>/<repo>/releases, where relative
+// links resolve against the tag root rather than the notes directory. Rewrite
+// them to absolute blob URLs so locale pointers and doc links keep working.
+export function renderReleaseNotes(notesPath, tag) {
+  const notesDir = dirname(notesPath);
+  return readFileSync(resolve(root, notesPath), "utf8").replace(
+    /\]\((?!https?:|#|mailto:)([^)\s]+)\)/g,
+    (_match, target) => {
+      const [filePath, suffix] = target.split(/(?=[#?])/);
+      const resolved = posix.normalize(posix.join(notesDir, filePath));
+      return `](https://github.com/${expectedRepository}/blob/${tag}/${resolved}${suffix ?? ""})`;
+    },
+  );
+}
+
 function publishRelease() {
   const context = validatePublishContext(process.env);
   if (!context.ok) throw new Error(context.failures.join("; "));
@@ -237,6 +252,8 @@ function publishRelease() {
   const tag = `v${result.target}`;
   const notesPath = `docs/releases/v${result.target}.md`;
   if (!existsSync(resolve(root, notesPath))) throw new Error(`release notes ${notesPath} are missing`);
+  const renderedNotesPath = "artifacts/release-notes.md";
+  writeFileSync(resolve(root, renderedNotesPath), renderReleaseNotes(notesPath, tag), "utf8");
   const assets = [
     result.tarball,
     "artifacts/manifest.json",
@@ -254,7 +271,7 @@ function publishRelease() {
     "--repo", expectedRepository,
     "--target", result.commit,
     "--title", `Aria ${tag}`,
-    "--notes-file", notesPath,
+    "--notes-file", renderedNotesPath,
     "--latest",
   ], { capture: false });
   run(command("git"), ["fetch", "origin", tag], { capture: false });
