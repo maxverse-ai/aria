@@ -118,6 +118,8 @@ jobs:
         run: pnpm github-release:prepare
 
       - name: Verify release boundary
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: pnpm release:gate
 
       - name: Publish GitHub release
