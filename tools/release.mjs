@@ -22,7 +22,7 @@ function run(executable, args, options = {}) {
     encoding: "utf8",
     env: options.env ? { ...process.env, ...options.env } : process.env,
     stdio: options.capture === false ? "inherit" : ["ignore", "pipe", "pipe"],
-  }).trim();
+  })?.trim() ?? "";
 }
 
 function compareVersions(leftInput, rightInput) {

@@ -32,7 +32,7 @@ function run(executable, args, options = {}) {
     env: options.env ? { ...process.env, ...options.env } : process.env,
     encoding: "utf8",
     stdio: options.capture === false ? "inherit" : ["ignore", "pipe", "inherit"],
-  }).trim();
+  })?.trim() ?? "";
 }
 
 export function sha256File(path) {
