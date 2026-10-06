@@ -622,6 +622,27 @@ Aria fork 自
 [lark-channel-bridge](https://github.com/zarazhangrui/lark-coding-agent-bridge)
 （MIT），目前在 [maxverse-ai](https://github.com/maxverse-ai) 下独立演化。
 
+### Aria 与 lark-channel-bridge 的区别
+
+lark-channel-bridge 是一个轻量桥：把飞书 / Lark 消息转发给一个本地
+Agent，再把回复流式写回卡片。Aria 保留了这条核心链路，并长成了让多个
+Agent 协同工作的控制平面。
+
+| | lark-channel-bridge | Aria |
+| --- | --- | --- |
+| 定位 | 消息桥：聊天进来，回复出去 | Agent 控制平面：寻址、协调、运营一组 Agent |
+| 引擎 | Claude Code 或 Codex CLI | Claude Code、Codex App Server、Grok Build、Devin，另有 adapter 契约可扩展 |
+| 渠道 | 仅飞书 / Lark | 飞书 / Lark 内建，微信 ilink 与微信客服走插件，外部渠道走 Channel Plugin ABI |
+| 轮中 steering | 不支持；新输入排队到下一轮 | 按引擎能力分发：`turn/steer`、ACP inject 或 notice+pull 信箱，兜底清扫保证不静默丢弃 |
+| 工作项 | 无——消息即全部 | `/task` 把消息提升为可认领、可评审的工作项，带持久化状态机 |
+| 多账号 | 每个 profile 一个 PersonalAgent 应用 | 多 profile 与多渠道账号并行运行，状态按实例隔离 |
+| Agent 协作 | 每次部署一个 bot | bot-at-bot 提及、信任注册表、个人 Agent 组、Agent 间 steering 信箱 |
+| 运维 | 前台运行 + 系统服务 | 全生命周期：守护服务、doctor/preflight 诊断、基于不可变 GitHub Release 的安装-升级-回滚、控制台 Web UI |
+| 执行位置 | 在 profile 工作目录中运行 | 受备执行空间，后端注册表（native、Podman 等）与留痕计划 |
+
+如果只需要一个单 Agent 飞书 bot，lark-channel-bridge 仍是更小的选择；
+Aria 面向跨引擎、跨渠道、带持久状态的 Agent 团队协同。
+
 ## 参与贡献
 
 贡献流程见 [CONTRIBUTING.md](CONTRIBUTING.md)，社区规范见

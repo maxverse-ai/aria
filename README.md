@@ -640,6 +640,29 @@ Aria was forked from
 (MIT) and now evolves independently under
 [maxverse-ai](https://github.com/maxverse-ai).
 
+### How Aria differs from lark-channel-bridge
+
+lark-channel-bridge is a lightweight bridge: it forwards Feishu / Lark
+messages to one local agent and streams the reply back on a card. Aria kept
+that core flow and grew into a control plane for running several agents as a
+team.
+
+| | lark-channel-bridge | Aria |
+| --- | --- | --- |
+| Scope | Message bridge: chat in, reply out | Agent control plane: address, coordinate, and operate agents |
+| Engines | Claude Code or Codex CLI | Claude Code, Codex App Server, Grok Build, Devin, plus an adapter contract for more |
+| Channels | Feishu / Lark only | Feishu / Lark built in, WeChat ilink and WeChat Customer Service as plugins, external channels through the Channel Plugin ABI |
+| Mid-turn steering | Not supported; new input queues for the next turn | Engine-aware: native `turn/steer`, ACP inject, or a notice+pull mailbox, with swept fallback so nothing is silently dropped |
+| Work items | None — chat is the only unit | `/task` commands turn messages into claimable, reviewable work with a persisted state machine |
+| Multi-account | One PersonalAgent app per profile | Multiple profiles and multiple channel accounts run side by side with partitioned state |
+| Agent collaboration | Single bot per deployment | Bot-at-bot mentions, trust registry, personal agent groups, and steering mailboxes between agents |
+| Operations | Foreground run plus an OS service | Full lifecycle: daemon services, doctor/preflight diagnostics, versioned install-update-rollback over immutable GitHub Releases, console web UI |
+| Execution | Runs in the profile working directory | Prepared execution spaces with a backend registry (native, Podman, …) and recorded plans |
+
+If you only need a single-agent Feishu bot, lark-channel-bridge remains the
+smaller choice. Aria is for running a coordinated roster of agents across
+engines and channels with durable state.
+
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the workflow and
