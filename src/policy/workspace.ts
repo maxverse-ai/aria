@@ -24,7 +24,6 @@ export type WorkingDirectoryResolveResult =
     };
 
 const fallbackReasons: WorkingDirectoryRejectReason[] = [
-  'empty-requested-cwd',
   'path-inaccessible',
   'not-directory',
 ];

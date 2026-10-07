@@ -80,9 +80,8 @@ describe('working directory resolver with home fallback', () => {
       cwdRealpath: home,
     });
     await expect(resolveWorkingDirectoryWithFallback('')).resolves.toMatchObject({
-      ok: true,
-      requestedCwd: '',
-      cwdRealpath: home,
+      ok: false,
+      reason: 'empty-requested-cwd',
     });
   });
 
