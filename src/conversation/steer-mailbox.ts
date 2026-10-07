@@ -156,7 +156,7 @@ function escapeAttr(value: string): string {
   return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
 }
 
-/** The command prefix that re-runs this Aria CLI (`aria-bun`, or `node cli.js`). */
+/** The command prefix that re-runs this Aria CLI (`aria`, or `node cli.js`). */
 export function selfCommandPrefix(): string {
   const entry = runtimeEntryPath();
   return entry ? `${currentRuntime.execPath} ${entry}` : currentRuntime.execPath;

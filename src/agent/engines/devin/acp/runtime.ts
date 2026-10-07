@@ -183,6 +183,7 @@ export class DevinAcpRuntime implements EngineRuntime {
       command: this.options.binary,
       binaryPath: this.options.binary,
       args: ['version'],
+      timeoutMs: 15_000,
     });
   }
 

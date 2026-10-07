@@ -646,6 +646,8 @@ export async function startChannel(deps: StartChannelDeps): Promise<BridgeChanne
         } else flushTerminal = await runBatch();
       } catch (err) {
         log.fail('flush', err);
+        const errorSummary = err instanceof Error ? err.message : String(err);
+        void channel.send(firstMsg.chatId, { markdown: `运行失败：${errorSummary}` }, { replyTo: firstMsg.messageId }).catch((sendErr) => log.warn('flush', 'notify-failed', { scope, err: String(sendErr) }));
       } finally {
         pending.unblock(scope);
         // `/loop` continuation: a `done` run queues the next iteration as an
