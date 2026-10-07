@@ -1,6 +1,6 @@
 {
   "name": "@maxverse-ai/aria",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "A local-first control plane for running your CLI coding agents as a team in chat",
   "type": "module",
   "packageManager": "pnpm@12.0.0",
@@ -56,7 +56,6 @@
     "release:publish": "node tools/release.mjs publish",
     "github-release:gate": "node tools/github-release.mjs context-gate",
     "github-release:prepare": "node tools/github-release.mjs prepare",
-
     "ci:local": "git diff --check && pnpm infra:doctor && pnpm release:check -- --base-ref origin/main && pnpm test && pnpm typecheck && pnpm build",
     "ci:platform": "pnpm infra:doctor && pnpm release:check && pnpm test && pnpm typecheck && pnpm build",
     "prepare": "pnpm build",
