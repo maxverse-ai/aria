@@ -21,3 +21,4 @@ export function validatePublishContext(env: Record<string, string | undefined>):
   ok: boolean;
   failures: string[];
 };
+export function renderReleaseNotes(notesPath: string, tag: string): string;
