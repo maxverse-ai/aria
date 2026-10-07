@@ -1,4 +1,4 @@
-import { realpath, stat } from 'node:fs/promises';
+import { mkdir, realpath, stat } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, resolve } from 'node:path';
 
@@ -27,25 +27,34 @@ export async function resolveWorkingDirectory(
   requestedCwd: string,
 ): Promise<WorkingDirectoryResolveResult> {
   const trimmed = requestedCwd.trim();
-  if (!trimmed) {
-    return reject('empty-requested-cwd', requestedCwd, '未指定工作目录。');
+  let resolved: string | undefined;
+  let usedFallback = false;
+
+  if (trimmed) {
+    try {
+      const maybeResolved = await realpath(trimmed);
+      const info = await stat(maybeResolved).catch(() => undefined);
+      if (info?.isDirectory()) {
+        resolved = maybeResolved;
+      }
+    } catch {
+      // keep resolved undefined to trigger fallback
+    }
   }
 
-  let resolved: string;
-  try {
-    resolved = await realpath(trimmed);
-  } catch {
-    return reject('path-inaccessible', requestedCwd, `工作目录不存在或不可访问：${requestedCwd}`);
-  }
-
-  const info = await stat(resolved).catch(() => undefined);
-  if (!info?.isDirectory()) {
-    return reject('not-directory', requestedCwd, `路径不是目录：${resolved}`);
+  if (!resolved) {
+    usedFallback = true;
+    const home = await realpath(homedir()).catch(() => resolve(homedir()));
+    // Ensure the home directory exists (e.g. container/NAS edge cases) and use it as fallback.
+    try {
+      await mkdir(home, { recursive: true });
+    } catch { /* ignore EEXIST/permission */ }
+    resolved = home;
   }
 
   const tempRealpath = await realpath(tmpdir()).catch(() => resolve(tmpdir()));
   const homeRealpath = await realpath(homedir()).catch(() => resolve(homedir()));
-  const broad = classifyHighRiskWorkingDirectory(resolved, requestedCwd, tempRealpath, homeRealpath);
+  const broad = classifyHighRiskWorkingDirectory(resolved, requestedCwd, tempRealpath, homeRealpath, usedFallback);
   if (broad) return broad;
 
   return {
@@ -68,13 +77,14 @@ function classifyHighRiskWorkingDirectory(
   requestedCwd: string,
   tempRealpath: string,
   homeRealpath: string,
+  allowHomeRoot: boolean = false,
 ): WorkingDirectoryResolveResult | undefined {
   if (real === dirname(real)) {
     return reject('filesystem-root', requestedCwd, '不能把文件系统根目录设为工作目录。');
   }
 
   const home = homeRealpath;
-  if (real === home) {
+  if (!allowHomeRoot && real === home) {
     return reject('home-root', requestedCwd, '不能把 Home 根目录设为工作目录，请选择更具体的子目录。');
   }
   if (real === dirname(home)) {
