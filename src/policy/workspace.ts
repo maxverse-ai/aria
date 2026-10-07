@@ -23,44 +23,67 @@ export type WorkingDirectoryResolveResult =
       userVisible: string;
     };
 
+const fallbackReasons: WorkingDirectoryRejectReason[] = [
+  'empty-requested-cwd',
+  'path-inaccessible',
+  'not-directory',
+];
+
 export async function resolveWorkingDirectory(
   requestedCwd: string,
 ): Promise<WorkingDirectoryResolveResult> {
   const trimmed = requestedCwd.trim();
-  let resolved: string | undefined;
-  let usedFallback = false;
-
-  if (trimmed) {
-    try {
-      const maybeResolved = await realpath(trimmed);
-      const info = await stat(maybeResolved).catch(() => undefined);
-      if (info?.isDirectory()) {
-        resolved = maybeResolved;
-      }
-    } catch {
-      // keep resolved undefined to trigger fallback
-    }
+  if (!trimmed) {
+    return reject('empty-requested-cwd', requestedCwd, '未指定工作目录。');
   }
 
-  if (!resolved) {
-    usedFallback = true;
-    const home = await realpath(homedir()).catch(() => resolve(homedir()));
-    // Ensure the home directory exists (e.g. container/NAS edge cases) and use it as fallback.
-    try {
-      await mkdir(home, { recursive: true });
-    } catch { /* ignore EEXIST/permission */ }
-    resolved = home;
+  let resolved: string;
+  try {
+    resolved = await realpath(trimmed);
+  } catch {
+    return reject('path-inaccessible', requestedCwd, `工作目录不存在或不可访问：${requestedCwd}`);
+  }
+
+  const info = await stat(resolved).catch(() => undefined);
+  if (!info?.isDirectory()) {
+    return reject('not-directory', requestedCwd, `路径不是目录：${resolved}`);
   }
 
   const tempRealpath = await realpath(tmpdir()).catch(() => resolve(tmpdir()));
   const homeRealpath = await realpath(homedir()).catch(() => resolve(homedir()));
-  const broad = classifyHighRiskWorkingDirectory(resolved, requestedCwd, tempRealpath, homeRealpath, usedFallback);
+  const broad = classifyHighRiskWorkingDirectory(resolved, requestedCwd, tempRealpath, homeRealpath);
   if (broad) return broad;
 
   return {
     ok: true,
     requestedCwd,
     cwdRealpath: resolved,
+  };
+}
+
+export async function resolveWorkingDirectoryWithFallback(
+  requestedCwd: string,
+): Promise<WorkingDirectoryResolveResult> {
+  const result = await resolveWorkingDirectory(requestedCwd);
+  if (result.ok || !fallbackReasons.includes(result.reason)) {
+    return result;
+  }
+
+  const home = await realpath(homedir()).catch(() => resolve(homedir()));
+  // Ensure the home directory exists (e.g. container/NAS edge cases) and use it as fallback.
+  try {
+    await mkdir(home, { recursive: true });
+  } catch { /* ignore EEXIST/permission */ }
+
+  const tempRealpath = await realpath(tmpdir()).catch(() => resolve(tmpdir()));
+  const homeRealpath = await realpath(homedir()).catch(() => resolve(homedir()));
+  const broad = classifyHighRiskWorkingDirectory(home, requestedCwd, tempRealpath, homeRealpath, true);
+  if (broad) return broad;
+
+  return {
+    ok: true,
+    requestedCwd,
+    cwdRealpath: home,
   };
 }
 

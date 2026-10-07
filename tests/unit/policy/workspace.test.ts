@@ -2,7 +2,10 @@ import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { resolveWorkingDirectory } from '../../../src/policy/workspace';
+import {
+  resolveWorkingDirectory,
+  resolveWorkingDirectoryWithFallback,
+} from '../../../src/policy/workspace';
 
 const cleanups: string[] = [];
 
@@ -24,26 +27,22 @@ describe('working directory resolver', () => {
     });
   });
 
-  it('falls back to home for missing, file, or empty cwd', async () => {
+  it('rejects missing paths, files, and empty cwd', async () => {
     const base = await makeTmp();
     const file = join(base, 'file.txt');
     await writeFile(file, 'not a directory', 'utf8');
-    const home = await realpath(homedir());
 
     await expect(resolveWorkingDirectory(join(base, 'missing'))).resolves.toMatchObject({
-      ok: true,
-      requestedCwd: join(base, 'missing'),
-      cwdRealpath: home,
+      ok: false,
+      reason: 'path-inaccessible',
     });
     await expect(resolveWorkingDirectory(file)).resolves.toMatchObject({
-      ok: true,
-      requestedCwd: file,
-      cwdRealpath: home,
+      ok: false,
+      reason: 'not-directory',
     });
     await expect(resolveWorkingDirectory('')).resolves.toMatchObject({
-      ok: true,
-      requestedCwd: '',
-      cwdRealpath: home,
+      ok: false,
+      reason: 'empty-requested-cwd',
     });
   });
 
@@ -57,6 +56,46 @@ describe('working directory resolver', () => {
       reason: 'home-root',
     });
     await expect(resolveWorkingDirectory(tmpdir())).resolves.toMatchObject({
+      ok: false,
+      reason: 'temp-root',
+    });
+  });
+});
+
+describe('working directory resolver with home fallback', () => {
+  it('falls back to home for missing, file, or empty cwd', async () => {
+    const base = await makeTmp();
+    const file = join(base, 'file.txt');
+    await writeFile(file, 'not a directory', 'utf8');
+    const home = await realpath(homedir());
+
+    await expect(resolveWorkingDirectoryWithFallback(join(base, 'missing'))).resolves.toMatchObject({
+      ok: true,
+      requestedCwd: join(base, 'missing'),
+      cwdRealpath: home,
+    });
+    await expect(resolveWorkingDirectoryWithFallback(file)).resolves.toMatchObject({
+      ok: true,
+      requestedCwd: file,
+      cwdRealpath: home,
+    });
+    await expect(resolveWorkingDirectoryWithFallback('')).resolves.toMatchObject({
+      ok: true,
+      requestedCwd: '',
+      cwdRealpath: home,
+    });
+  });
+
+  it('still rejects explicitly requested high-risk roots', async () => {
+    await expect(resolveWorkingDirectoryWithFallback('/')).resolves.toMatchObject({
+      ok: false,
+      reason: 'filesystem-root',
+    });
+    await expect(resolveWorkingDirectoryWithFallback(homedir())).resolves.toMatchObject({
+      ok: false,
+      reason: 'home-root',
+    });
+    await expect(resolveWorkingDirectoryWithFallback(tmpdir())).resolves.toMatchObject({
       ok: false,
       reason: 'temp-root',
     });

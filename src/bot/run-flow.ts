@@ -14,7 +14,7 @@ import {
 } from '../policy/run-policy';
 import { recordRunPolicyDecision } from '../policy/run-policy-audit';
 import {
-  resolveWorkingDirectory,
+  resolveWorkingDirectoryWithFallback,
   type WorkingDirectoryRejectReason,
   type WorkingDirectoryResolveResult,
 } from '../policy/workspace';
@@ -131,7 +131,7 @@ export async function startRunIntentFlow(
   const requestedCwd = input.intent.workspaceRef.kind === 'scope'
     ? input.workspaces.cwdFor(input.intent.workspaceRef.ref) ?? input.profileConfig.workspaces.default ?? ''
     : input.profileConfig.workspaces.default ?? '';
-  const workspace = await resolveWorkingDirectory(requestedCwd);
+  const workspace = await resolveWorkingDirectoryWithFallback(requestedCwd);
   if (!workspace.ok) {
     return {
       ok: false,
