@@ -24,18 +24,26 @@ describe('working directory resolver', () => {
     });
   });
 
-  it('rejects missing paths and files', async () => {
+  it('falls back to home for missing, file, or empty cwd', async () => {
     const base = await makeTmp();
     const file = join(base, 'file.txt');
     await writeFile(file, 'not a directory', 'utf8');
+    const home = await realpath(homedir());
 
     await expect(resolveWorkingDirectory(join(base, 'missing'))).resolves.toMatchObject({
-      ok: false,
-      reason: 'path-inaccessible',
+      ok: true,
+      requestedCwd: join(base, 'missing'),
+      cwdRealpath: home,
     });
     await expect(resolveWorkingDirectory(file)).resolves.toMatchObject({
-      ok: false,
-      reason: 'not-directory',
+      ok: true,
+      requestedCwd: file,
+      cwdRealpath: home,
+    });
+    await expect(resolveWorkingDirectory('')).resolves.toMatchObject({
+      ok: true,
+      requestedCwd: '',
+      cwdRealpath: home,
     });
   });
 
