@@ -78,18 +78,20 @@ describe('initializeManagedWorkspace', () => {
     const target = join(parent, 'target');
     const workspace = join(parent, 'default');
     await mkdir(target);
-    await symlink(target, workspace, 'dir');
+    await symlink(target, workspace, process.platform === 'win32' ? 'junction' : 'dir');
 
     await expect(initializeManagedWorkspace(workspace)).rejects.toThrow(/not a safe directory/);
   });
 
-  it('fails closed on a scaffold-file symbolic link', async () => {
+  it('fails closed on a symbolic link at a scaffold-file path', async () => {
     const parent = await tempRoot();
     const workspace = join(parent, 'default');
     const target = join(parent, 'instructions');
     await mkdir(workspace);
-    await writeFile(target, MANAGED_WORKSPACE_AGENTS, 'utf8');
-    await symlink(target, join(workspace, 'AGENTS.md'));
+    // Windows junctions exercise the lstat link guard without symlink privileges.
+    if (process.platform === 'win32') await mkdir(target);
+    else await writeFile(target, MANAGED_WORKSPACE_AGENTS, 'utf8');
+    await symlink(target, join(workspace, 'AGENTS.md'), process.platform === 'win32' ? 'junction' : 'file');
 
     await expect(initializeManagedWorkspace(workspace)).rejects.toThrow(/unsafe symbolic link/);
   });
@@ -99,7 +101,7 @@ describe('initializeManagedWorkspace', () => {
     const target = join(parent, 'target-profile');
     const linkedProfile = join(parent, 'linked-profile');
     await mkdir(target);
-    await symlink(target, linkedProfile, 'dir');
+    await symlink(target, linkedProfile, process.platform === 'win32' ? 'junction' : 'dir');
 
     await expect(initializeManagedWorkspace(join(linkedProfile, 'default'))).rejects.toThrow(
       /parent is not a safe directory/,

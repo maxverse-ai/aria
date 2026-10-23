@@ -1,10 +1,7 @@
 import { resolve } from 'node:path';
-import pkg from '../../../package.json';
-import { createProfileConversationHost } from '../../conversation/profile-host';
-import { configureLogger } from '../../core/logger';
+import { createAriaWorker } from '../../worker/embed';
 import { assertIsolatedWorkerEnvironment } from '../../worker/isolation';
 import { resolveWorkerProductIdentity } from '../../worker/identity';
-import { AriaWorkerServer } from '../../worker/server';
 
 export interface RunWorkerOptions {
   config?: string;
@@ -30,23 +27,17 @@ export async function runWorker(options: RunWorkerOptions): Promise<void> {
       : undefined,
   );
   const stateDirectory = resolve(options.stateDir);
-  configureLogger({ logsDir: resolve(stateDirectory, 'logs') });
 
   // stdout is the protocol transport. Aria's human-readable runtime log lines
   // must never corrupt it when a managed run starts or completes.
   console.log = (...args: unknown[]) => console.error(...args);
 
-  const host = await createProfileConversationHost({
+  const server = await createAriaWorker({
     configPath: resolve(options.config),
     profile: options.profile,
     stateDirectory,
-  });
-  const server = new AriaWorkerServer({
     input: process.stdin,
     output: process.stdout,
-    host,
-    profile: options.profile,
-    workerVersion: pkg.version,
     productIdentity,
   });
   const shutdown = (): void => { void server.stop(); };

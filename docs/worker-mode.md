@@ -70,6 +70,31 @@ const server = new AriaWorkerServer({
 await server.serve();
 ```
 
+For a standalone engine profile, `createAriaWorker` composes the same host and
+server without depending on the CLI entry or importing private modules:
+
+```ts
+import { createAriaWorker } from '@maxverse-ai/aria/worker';
+
+const worker = await createAriaWorker({
+  configPath: '/product/config.json',
+  profile: 'local',
+  stateDirectory: '/product/state',
+  input,
+  output,
+  productIdentity: { id: 'riff-computer', displayName: 'Riff Computer' },
+});
+await worker.serve();
+```
+
+Calling this factory checks environment isolation, configures logging under
+the explicit state directory, and constructs Aria's profile host. Run it in a
+dedicated process: logging configuration is process-wide. The embedding entry
+must direct human-readable console output away from the protocol output. The
+factory does not install signals, services, updates or CLI argument handlers.
+Credentials and engine data isolation still depend on the deployment's
+explicit profile configuration; stateDirectory alone does not isolate them.
+
 Importing this entry does not parse CLI arguments, register process signals,
 replace console methods, configure logging, or open a listener. The embedding
 process owns those concerns and must keep its logs separate from protocol

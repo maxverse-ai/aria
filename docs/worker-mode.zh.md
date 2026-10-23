@@ -67,6 +67,28 @@ const server = new AriaWorkerServer({
 await server.serve();
 ```
 
+独立引擎 profile 可用 `createAriaWorker` 组合相同的 host 和 server，无需依赖 CLI
+入口或导入内部模块：
+
+```ts
+import { createAriaWorker } from '@maxverse-ai/aria/worker';
+
+const worker = await createAriaWorker({
+  configPath: '/product/config.json',
+  profile: 'local',
+  stateDirectory: '/product/state',
+  input,
+  output,
+  productIdentity: { id: 'riff-computer', displayName: 'Riff Computer' },
+});
+await worker.serve();
+```
+
+调用此工厂时会检查环境隔离、将日志目录设置到显式状态目录，并构造 Aria profile
+host。应在独立进程中调用，因为日志设置是进程级的。嵌入入口必须将人可读 console
+输出与协议输出分离。工厂不会安装信号处理、服务、更新或 CLI 参数处理器。
+凭据和引擎数据隔离仍依赖部署方的显式 profile 配置，单独指定 stateDirectory 不足以隔离它们。
+
 导入此入口不会解析 CLI 参数、注册进程信号、替换 console 方法、配置日志或打开监听。
 这些由嵌入进程管理，日志不得混入协议输出。部署方必须在构造 host 前建立环境隔离；
 导出的 `assertIsolatedWorkerEnvironment` 可执行与 CLI 相同的检查。嵌入宿主是受信任的
