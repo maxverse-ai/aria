@@ -100,6 +100,12 @@ Codex, Claude Code and DSH commands without starting them. Its trusted-host
 result contains `id`, `displayName`, `status` (`installed`, `notInstalled`, or
 `unavailable`) and an optional `binaryPath`. Do not forward paths to a renderer.
 Discovery establishes neither version compatibility nor login/account access.
+On Windows an installation must resolve to a native `.exe`: Codex's known npm
+optional-platform and legacy vendor payloads are resolved without executing the
+launcher. Missing native payloads and unsupported script-only launchers are
+`unavailable`, not runnable installations. Native Claude Code and DSH executables
+are supported; their npm/script-only launchers are not currently supported by
+this embedded discovery surface.
 Use separate worker profiles and state directories for each selected engine.
 Profiles may select `claude.binaryPath`; Codex can reuse the user's configuration
 with `codex.inheritCodexHome: true`. DSH can opt in with

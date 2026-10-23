@@ -125,6 +125,10 @@ Claude Code 和 DSH 命令，不启动 Agent。返回 `id`、`displayName`、
 `status`（`installed`、`notInstalled` 或 `unavailable`）及可选的
 `binaryPath`。路径仅供可信 Host 使用，不应转发给 renderer；发现安装不代表
 版本兼容或登录有效。每个引擎应使用独立的 worker profile 和状态目录。
+Windows 下必须解析到原生 `.exe`：Codex 的 npm 可选平台包和旧版 vendor
+目录通过固定布局解析，不执行启动脚本。缺少原生 payload 或仅有不支持的脚本
+启动器时返回 `unavailable`。Claude Code 和 DSH 的原生程序可用，其 npm/脚本
+启动器暂不属于此嵌入式发现接口的支持范围。
 可以通过 `claude.binaryPath` 指定发现的 Claude Code 程序；Codex 使用
 `codex.inheritCodexHome: true` 复用用户配置；DSH 使用
 `dsh.inheritDshHome: true` 显式复用，否则维持原有的 profile 隔离默认行为。

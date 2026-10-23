@@ -3,6 +3,7 @@ import { discoverInstalledAgents } from '../../../src/worker/installed-agents';
 import { resolveExecutablePath } from '../../../src/platform/executable';
 
 vi.mock('../../../src/platform/executable', () => ({ resolveExecutablePath: vi.fn() }));
+vi.mock('../../../src/worker/native-agent-path', () => ({ resolveWindowsAgentBinary: vi.fn(async (_id: string, path: string) => path) }));
 afterEach(() => vi.resetAllMocks());
 
 describe('discoverInstalledAgents', () => {
