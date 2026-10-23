@@ -18,7 +18,7 @@ export const dshRuntimeFactory = defineEngineRuntimeFactory(
     return {
       binary: dsh.binaryPath,
       profileStateDir: context.state.directory,
-      dshHome: dsh.dshHome ?? join(context.state.directory, 'dsh-home'),
+      dshHome: dsh.dshHome ?? (dsh.inheritDshHome === true ? undefined : join(context.state.directory, 'dsh-home')),
       ariaChannel: context.launch.legacyChannel,
     };
   },

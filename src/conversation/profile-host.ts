@@ -33,6 +33,8 @@ import type { MessageConversationKind } from '../runtime/message-resource';
 import type { RunExecution } from '../runtime/run-executor';
 import { ConversationRuntime } from './runtime';
 import { ProfileConversationRuntimeOwner } from './profile-runtime-owner';
+import { ModelCatalogService } from '../agent/model-catalog/service';
+import type { ModelCatalogSnapshot } from '../agent/model-catalog/types';
 
 export interface ProfileConversationNativeReadOptions {
   /** Independent provider identity exposed to Native Read consumers. */
@@ -60,6 +62,7 @@ export interface ProfileTextConversationInput {
   scopeId: string;
   actorId: string;
   prompt: string;
+  model?: string;
   /** Deployment-owned authorization decision made before the agent is started. */
   authorized: boolean;
   source?: `channel:${string}`;
@@ -88,6 +91,7 @@ export interface ProfileConversationHost {
   readonly requiresSpaceAuthorization?: boolean;
   /** Explicit engine capabilities exposed to channel-neutral controllers. */
   readonly descriptor: EngineRuntimeDescriptor;
+  listModels?(): Promise<ModelCatalogSnapshot>;
   run(input: ProfileConversationInput): Promise<ProfileTextConversationResult>;
   runText(input: ProfileTextConversationInput): Promise<ProfileTextConversationResult>;
   /** Stop the run currently owned by this scope, if one exists. */
@@ -186,6 +190,7 @@ export async function createProfileConversationHost(
     resolved.profileConfig,
   );
   const runtimeProvider = new ProfileRuntimeSlot(engine);
+  const models = new ModelCatalogService();
   const conversationRuntime = composeProfileExecution({
     ...(options.spaces ? { spaces: options.spaces } : {}),
     profileId: options.profile,
@@ -241,6 +246,16 @@ export async function createProfileConversationHost(
   const host: ProfileConversationHost = {
     requiresSpaceAuthorization: Boolean(options.spaces),
     descriptor: engine.descriptor,
+    async listModels() {
+      if (closed) throw new Error('profile conversation host is closed');
+      return models.list({
+        profileId: options.profile,
+        engineId: engine.engineId,
+        profileConfig: resolved.profileConfig,
+        mergeStaticModels: false,
+        runtimeModels: (signal) => runtimeProvider.listModels(signal),
+      });
+    },
     async run(input) {
       if (closed) throw new Error('profile conversation host is closed');
       const stores = await scopedInput(input.scopeId, input.spaceContext);
@@ -286,6 +301,7 @@ export async function createProfileConversationHost(
             actorKind: input.actorKind === 'service' ? 'system' : input.actorKind ?? 'user',
           },
           prompt: input.prompt,
+          ...(input.model === undefined ? {} : { model: input.model }),
           attachments: input.attachments,
           access,
           capability,

@@ -97,6 +97,12 @@ export interface DshConfig {
   mode?: number;
   /** DSH_HOME override for per-profile isolation (sessions, profiles, plugins). */
   dshHome?: string;
+  /** Opt in to the user's DSH_HOME/default home instead of profile isolation. */
+  inheritDshHome?: boolean;
+}
+
+export interface ClaudeConfig {
+  binaryPath: string;
 }
 
 export interface KimiConfig {
@@ -289,6 +295,7 @@ export interface ProfileConfig {
   permissions: PermissionConfig;
   permissionSource?: PermissionSource;
   codex?: CodexConfig;
+  claude?: ClaudeConfig;
   grok?: GrokConfig;
   opencode?: OpencodeConfig;
   dsh?: DshConfig;
@@ -341,6 +348,7 @@ export interface CreateDefaultProfileConfigInput {
   access?: Partial<ProfileAccess>;
   permissions?: Partial<PermissionConfig>;
   codex?: CodexConfig;
+  claude?: ClaudeConfig;
   grok?: GrokConfig;
   opencode?: OpencodeConfig;
   dsh?: DshConfig;
@@ -393,6 +401,7 @@ export function normalizeEngineProfileConfig(input: unknown): EngineProfileConfi
     };
     permissions?: Partial<PermissionConfig>;
     codex?: CodexConfig & { flags?: unknown };
+    claude?: ClaudeConfig;
     grok?: GrokConfig;
     opencode?: OpencodeConfig;
     dsh?: DshConfig;
@@ -457,6 +466,7 @@ export function normalizeEngineProfileConfig(input: unknown): EngineProfileConfi
     permissions,
     permissionSource,
     ...(raw.codex ? { codex: normalizeCodex(raw.codex) } : {}),
+    ...(raw.claude && typeof raw.claude.binaryPath === 'string' ? { claude: { binaryPath: raw.claude.binaryPath } } : {}),
     ...(raw.grok ? { grok: normalizeGrok(raw.grok) } : {}),
     ...(raw.opencode ? { opencode: normalizeOpencode(raw.opencode) } : {}),
     ...(raw.dsh ? { dsh: normalizeDsh(raw.dsh) } : {}),
@@ -741,6 +751,7 @@ function normalizeDsh(input: DshConfig): DshConfig {
     ...(typeof input.owner === 'number' ? { owner: input.owner } : {}),
     ...(typeof input.mode === 'number' ? { mode: input.mode } : {}),
     ...(typeof input.dshHome === 'string' ? { dshHome: input.dshHome } : {}),
+    ...(input.inheritDshHome === true ? { inheritDshHome: true } : {}),
   };
 }
 

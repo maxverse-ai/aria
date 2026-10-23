@@ -50,6 +50,8 @@ export interface StartRunFlowInput {
   executor: RunExecutor;
   governanceAudit?: GovernanceAuditSink;
   now: number;
+  /** Per-turn selection; omitted means the profile's preference. */
+  model?: string;
   /** Pre-validated engine-native effort; null explicitly means omit it. */
   reasoningEffort?: string | null;
   /** Pre-validated service tier; null explicitly selects the standard tier. */
@@ -224,7 +226,7 @@ export async function startRunIntentFlow(
       threadId,
       model: resolveModelArg(
         input.profileConfig.agentKind,
-        input.profileConfig.preferences.model,
+        input.model ?? input.profileConfig.preferences.model,
       ),
       reasoningEffort:
         input.reasoningEffort === null

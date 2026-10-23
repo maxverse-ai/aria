@@ -152,12 +152,13 @@ describe('profile schema', () => {
       schemaVersion: 2,
       agentKind: 'dsh',
       accounts: { app },
-      dsh: { binaryPath: '/usr/local/bin/dsh', dshHome: '/tmp/dsh-home' },
+      dsh: { binaryPath: '/usr/local/bin/dsh', dshHome: '/tmp/dsh-home', inheritDshHome: true },
     });
 
     expect(cfg.dsh).toMatchObject({
       binaryPath: '/usr/local/bin/dsh',
       dshHome: '/tmp/dsh-home',
+      inheritDshHome: true,
     });
   });
 

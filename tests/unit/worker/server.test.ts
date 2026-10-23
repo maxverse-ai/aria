@@ -8,6 +8,32 @@ import type {
 import { AriaWorkerServer } from '../../../src/worker/server';
 
 describe('AriaWorkerServer', () => {
+  it('lists provenance-bearing models without starting a turn', async () => {
+    const run = vi.fn();
+    const snapshot = { profileId: 'codex-dev', engineId: 'codex', models: [{ value: 'live-model', label: 'Live' }], source: 'runtime' as const, stale: false, refreshing: false, revision: 1 };
+    const fixture = createFixture({ run, listModels: async () => snapshot });
+    fixture.send({ jsonrpc: '2.0', id: 1, method: 'runtime.models' });
+    await fixture.waitForMessages(1);
+    expect(fixture.messages[0]).toEqual({ jsonrpc: '2.0', id: 1, result: snapshot });
+    expect(run).not.toHaveBeenCalled();
+    await fixture.stop();
+  });
+
+  it('forwards the per-turn model and rejects malformed model values', async () => {
+    const run = vi.fn(async () => ({ ok: true as const, runId: 'run', content: 'done' }));
+    const fixture = createFixture({ run });
+    const params = { operationId: 'model-turn', scopeRef: 'scope', actorRef: 'actor', prompt: 'test', authorization: { decision: 'allow', reference: 'grant' }, model: 'account/model' };
+    fixture.send({ jsonrpc: '2.0', id: 1, method: 'run.start', params });
+    await fixture.waitForMessages(2);
+    expect(run).toHaveBeenCalledWith(expect.objectContaining({ model: 'account/model' }));
+    for (const model of ['', 3, 'bad\nmodel']) {
+      fixture.send({ jsonrpc: '2.0', id: 2, method: 'run.start', params: { ...params, model } });
+    }
+    await fixture.waitForMessages(5);
+    expect(fixture.messages.slice(2).every(message => (message.error as { code: number }).code === -32602)).toBe(true);
+    expect(run).toHaveBeenCalledOnce();
+    await fixture.stop();
+  });
   it('handshakes with an explicit protocol version and engine descriptor', async () => {
     const fixture = createFixture();
     fixture.send({ jsonrpc: '2.0', id: 1, method: 'runtime.handshake' });

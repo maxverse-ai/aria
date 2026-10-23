@@ -93,6 +93,7 @@ describe('createProfileConversationHost', () => {
       scopeId: 'wechat-kf:kf:user-hash',
       actorId: 'user-hash',
       prompt: '你好',
+      model: 'runtime/model',
       authorized: true,
       source: 'channel:wechat-kf',
     })).resolves.toEqual({ ok: true, runId: expect.any(String), content: '微信最终回复' });
@@ -114,6 +115,8 @@ describe('createProfileConversationHost', () => {
     expect(seen).toHaveLength(2);
     expect(seen.every(run => run.identity?.subjectId === 'support' && run.identity?.providerId === 'wechat-kf')).toBe(true);
     expect(seen[0]?.prompt).toBe('你好');
+    expect(seen[0]?.model).toBe('runtime/model');
+    expect(profileConfig.preferences.model).not.toBe('runtime/model');
     expect(seen[1]?.images).toEqual([join(root, 'image.png')]);
     await host.close();
   });

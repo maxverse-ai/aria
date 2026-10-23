@@ -8,6 +8,7 @@ export const ARIA_WORKER_PROTOCOL_VERSION = 1 as const;
 export const ARIA_WORKER_METHODS = [
   'runtime.handshake',
   'runtime.health',
+  'runtime.models',
   'run.start',
   'run.interrupt',
   'session.reset',
@@ -69,6 +70,8 @@ export interface RunStartParams {
   scopeRef: string;
   actorRef: string;
   prompt: string;
+  /** Engine-native model id; `default` leaves selection to the user's agent. */
+  model?: string;
   authorization: {
     decision: 'allow' | 'deny';
     reference: string;
@@ -139,6 +142,9 @@ export function parseRunStartParams(value: unknown): RunStartParams {
   const operationId = requiredString(value.operationId, 'operationId');
   const scopeRef = requiredString(value.scopeRef, 'scopeRef');
   const actorRef = requiredString(value.actorRef, 'actorRef');
+  if (value.model !== undefined && (typeof value.model !== 'string' || !value.model.trim() || value.model.length > 512 || /[\r\n\0]/.test(value.model))) {
+    throw invalidParams('model must be a nonempty model id');
+  }
   if (typeof value.prompt !== 'string') throw invalidParams('prompt must be a string');
   if (!value.prompt.trim() && !hasAcceptedAttachment(value.attachments)) {
     throw invalidParams('prompt or an accepted attachment is required');
@@ -165,6 +171,7 @@ export function parseRunStartParams(value: unknown): RunStartParams {
     operationId,
     scopeRef,
     actorRef,
+    ...(value.model === undefined ? {} : { model: value.model as string }),
     prompt: value.prompt,
     authorization: { decision: value.authorization.decision, reference },
     ...(value.source === undefined ? {} : { source: value.source as `channel:${string}` }),

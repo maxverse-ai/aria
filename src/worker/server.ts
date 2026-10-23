@@ -151,6 +151,9 @@ export class AriaWorkerServer {
           completedOperations: this.completed.size,
         },
       };
+    case 'runtime.models':
+      if (!this.options.host.listModels) throw new WorkerProtocolError(-32601, 'model discovery unavailable');
+      return { result: await this.options.host.listModels() };
     case 'run.start':
       return this.prepareRun(params);
     case 'run.interrupt': {
@@ -218,6 +221,7 @@ export class AriaWorkerServer {
         scopeId: input.scopeRef,
         actorId: input.actorRef,
         prompt: input.prompt,
+        ...(input.model === undefined ? {} : { model: input.model }),
         authorized: input.authorization.decision === 'allow',
         attachments: input.attachments ?? [],
         ...(input.source ? { source: input.source } : {}),

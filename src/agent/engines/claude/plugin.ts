@@ -9,7 +9,7 @@ import { createAdapterRuntime } from '../../runtime/adapter-runtime';
 
 export const claudeRuntimeFactory = defineEngineRuntimeFactory(
   'claude',
-  (context) => ({ binary: 'claude', ariaChannel: context.launch.legacyChannel }),
+  (context, profile) => ({ binary: profile.claude?.binaryPath ?? 'claude', ariaChannel: context.launch.legacyChannel }),
   (options) => createAdapterRuntime(new ClaudeAdapter(options)),
 );
 

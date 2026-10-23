@@ -13,6 +13,16 @@ let sequence = 0;
 afterEach(() => vi.useRealTimers());
 
 describe('ModelCatalogService', () => {
+  it('keeps an authoritative runtime catalog distinct from the static fallback', async () => {
+    const engineId = registerFakeEngine();
+    const profileConfig = createDefaultProfileConfig({ agentKind: engineId, accounts: { app } });
+    const snapshot = await new ModelCatalogService().refresh({
+      profileId: 'embedded', engineId, profileConfig, mergeStaticModels: false,
+      runtimeModels: async () => [{ value: 'runtime/model', label: 'Live' }],
+    });
+    expect(snapshot.source).toBe('runtime');
+    expect(snapshot.models).toEqual([{ value: 'runtime/model', label: 'Live' }]);
+  });
   it('prefers the live runtime and coalesces concurrent refreshes', async () => {
     const engineId = registerFakeEngine();
     const profileConfig = createDefaultProfileConfig({ agentKind: engineId, accounts: { app } });

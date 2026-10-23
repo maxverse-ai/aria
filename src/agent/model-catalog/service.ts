@@ -113,7 +113,9 @@ export class ModelCatalogService {
         });
         return this.getSnapshot(query);
       }
-      const merged = mergeModelOptions(models, staticModelOptions(query.engineId));
+      const merged = query.mergeStaticModels === false && models.length
+        ? models
+        : mergeModelOptions(models, staticModelOptions(query.engineId));
       this.cache.set(key, {
         models: merged,
         source,
@@ -198,7 +200,7 @@ function catalogKey(query: ModelCatalogQuery): string {
     .update(JSON.stringify(modelProviderConfig(query)))
     .digest('hex')
     .slice(0, 16);
-  return [query.profileId, query.engineId, query.runtimeGeneration ?? 0, fingerprint, query.runtimeOnly ? 'owned' : 'legacy', query.cacheScope ?? ''].join('\u0000');
+  return [query.profileId, query.engineId, query.runtimeGeneration ?? 0, fingerprint, query.runtimeOnly ? 'owned' : 'legacy', query.cacheScope ?? '', query.mergeStaticModels === false ? 'authoritative' : 'merged'].join('\u0000');
 }
 
 export const modelCatalog = new ModelCatalogService();

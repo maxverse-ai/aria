@@ -95,6 +95,20 @@ factory does not install signals, services, updates or CLI argument handlers.
 Credentials and engine data isolation still depend on the deployment's
 explicit profile configuration; stateDirectory alone does not isolate them.
 
+`discoverInstalledAgents()` from the same entry inspects PATH for the built-in
+Codex, Claude Code and DSH commands without starting them. Its trusted-host
+result contains `id`, `displayName`, `status` (`installed`, `notInstalled`, or
+`unavailable`) and an optional `binaryPath`. Do not forward paths to a renderer.
+Discovery establishes neither version compatibility nor login/account access.
+Use separate worker profiles and state directories for each selected engine.
+Profiles may select `claude.binaryPath`; Codex can reuse the user's configuration
+with `codex.inheritCodexHome: true`. DSH can opt in with
+`dsh.inheritDshHome: true`; otherwise it retains its existing profile-isolated
+home. An explicit `dsh.dshHome` takes precedence over inheritance. Inheritance
+preserves the user's agent environment, default configuration and login; it does
+not copy credentials. Worker session state remains independent, but the native
+agent's own history/cache may be shared.
+
 Importing this entry does not parse CLI arguments, register process signals,
 replace console methods, configure logging, or open a listener. The embedding
 process owns those concerns and must keep its logs separate from protocol
@@ -122,6 +136,7 @@ Protocol version 1, newline-delimited JSON-RPC 2.0:
 | --- | --- |
 | `runtime.handshake` | Protocol/worker version, product and implementation identities, profile, engine descriptor, method list |
 | `runtime.health` | Readiness and active/completed operation counts |
+| `runtime.models` | Profile-scoped model catalog with explicit provenance and freshness |
 | `run.start` | Start an agent run under a `scopeRef` |
 | `run.interrupt` | Interrupt the run for a `scopeRef` |
 | `session.reset` | Reset the session for a `scopeRef` |
@@ -130,6 +145,21 @@ Protocol version 1, newline-delimited JSON-RPC 2.0:
 Streamed agent events arrive as notifications while a run is active. A wrong
 method name returns `-32601 method not found`; malformed input returns a parse
 error.
+
+`runtime.models` returns `profileId`, `engineId`, `models`, `source`, `stale`,
+`refreshing`, `revision`, and optional `fetchedAt`/`error`. Each model carries
+`value`, `label`, and optional engine-proven capabilities. Sources are `runtime`,
+`plugin`, `cache`, or `static`; static catalogs do not verify account access.
+Live catalogs are authoritative and do not append unverified static model ids.
+Discovery has bounded provider timeouts and can fall back to a static catalog.
+If there are no known models, the embedding UI should still offer the native
+agent default. This metadata query does not submit a model/tool turn.
+
+`run.start` accepts an optional nonempty `model` id (maximum 512 characters,
+without line breaks or NUL). It is forwarded per turn without rewriting profile
+preferences. `default` explicitly omits the native model flag; an omitted field
+uses the profile preference. Model availability is ultimately decided by the
+agent, never silently substituted by the worker.
 
 ## What can go wrong
 

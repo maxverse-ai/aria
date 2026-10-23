@@ -1,5 +1,7 @@
 // Composition API only: the embedding process owns streams and signals.
 export { createAriaWorker } from './embed';
+export { discoverInstalledAgents } from './installed-agents';
+export type { InstalledAgent } from './installed-agents';
 export type { CreateAriaWorkerOptions } from './embed';
 export { AriaWorkerServer } from './server';
 export type { AriaWorkerServerOptions } from './server';
