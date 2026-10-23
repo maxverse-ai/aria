@@ -1,6 +1,7 @@
 import type { EngineRuntimeDescriptor } from '../agent/runtime/types';
 import type { AgentEvent } from '../agent/types';
 import type { AgentAttachment } from '../policy/run-policy';
+import type { WorkerImplementationIdentity, WorkerProductIdentity } from './identity';
 
 export const ARIA_WORKER_PROTOCOL_VERSION = 1 as const;
 
@@ -47,6 +48,10 @@ export interface JsonRpcNotification {
 
 export interface WorkerHandshakeResult {
   protocolVersion: typeof ARIA_WORKER_PROTOCOL_VERSION;
+  /** Host-selected product branding; does not grant identity or authority. */
+  product: Readonly<WorkerProductIdentity>;
+  /** The implementation remains Aria even when embedded by another product. */
+  implementation: WorkerImplementationIdentity;
   workerVersion: string;
   profile: string;
   engine: EngineRuntimeDescriptor;

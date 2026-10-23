@@ -18,6 +18,8 @@ describe('AriaWorkerServer', () => {
       id: 1,
       result: {
         protocolVersion: 1,
+        product: { id: 'aria', displayName: 'Aria' },
+        implementation: { id: 'aria', displayName: 'Aria', version: 'test-version' },
         workerVersion: 'test-version',
         profile: 'codex-dev',
         engine: {
@@ -29,6 +31,34 @@ describe('AriaWorkerServer', () => {
       },
     });
     await fixture.stop();
+  });
+
+  it('reports a host-selected product name without replacing the Aria implementation identity', async () => {
+    const fixture = createFixture({}, { id: 'riff-computer', displayName: 'Riff Computer' });
+    fixture.send({ jsonrpc: '2.0', id: 1, method: 'runtime.handshake' });
+
+    await fixture.waitForMessages(1);
+    expect(fixture.messages[0]).toMatchObject({
+      result: {
+        product: { id: 'riff-computer', displayName: 'Riff Computer' },
+        implementation: { id: 'aria', displayName: 'Aria', version: 'test-version' },
+      },
+    });
+    await fixture.stop();
+  });
+
+  it('rejects an invalid product id instead of publishing an unstable identity', () => {
+    const input = new PassThrough();
+    const output = new PassThrough();
+    const host = createFixtureHost();
+    expect(() => new AriaWorkerServer({
+      input,
+      output,
+      host,
+      profile: 'codex-dev',
+      workerVersion: 'test-version',
+      productIdentity: { id: '../riff', displayName: 'Riff Computer' },
+    })).toThrow('lowercase kebab-case');
   });
 
   it('accepts before execution, streams events, and deduplicates operation ids', async () => {
@@ -113,7 +143,10 @@ describe('AriaWorkerServer', () => {
   });
 });
 
-function createFixture(overrides: Partial<ProfileConversationHost> = {}) {
+function createFixture(
+  overrides: Partial<ProfileConversationHost> = {},
+  productIdentity?: { id: string; displayName: string },
+) {
   const input = new PassThrough();
   const output = new PassThrough();
   const messages: Array<Record<string, unknown>> = [];
@@ -126,29 +159,14 @@ function createFixture(overrides: Partial<ProfileConversationHost> = {}) {
       if (line) messages.push(JSON.parse(line) as Record<string, unknown>);
     }
   });
-  const host: ProfileConversationHost = {
-    descriptor: defineEngineRuntimeDescriptor({
-      engineId: 'codex',
-      topology: 'session-pool',
-      capabilities: {
-        inputs: ['text', 'image', 'file'],
-        liveInput: { mode: 'direct', inputs: ['text'] },
-        sessions: ['resume', 'list', 'fork'],
-      },
-    }),
-    run: async () => ({ ok: true, runId: 'run-default', content: 'ok' }),
-    runText: async () => ({ ok: true, runId: 'run-default', content: 'ok' }),
-    interrupt: async () => false,
-    reset: async () => ({ interrupted: false, archivedSessionCount: 0 }),
-    close: async () => undefined,
-    ...overrides,
-  };
+  const host = { ...createFixtureHost(), ...overrides };
   const server = new AriaWorkerServer({
     input,
     output,
     host,
     profile: 'codex-dev',
     workerVersion: 'test-version',
+    ...(productIdentity ? { productIdentity } : {}),
   });
   const serving = server.serve();
   return {
@@ -169,5 +187,24 @@ function createFixture(overrides: Partial<ProfileConversationHost> = {}) {
       await server.stop();
       await serving;
     },
+  };
+}
+
+function createFixtureHost(): ProfileConversationHost {
+  return {
+    descriptor: defineEngineRuntimeDescriptor({
+      engineId: 'codex',
+      topology: 'session-pool',
+      capabilities: {
+        inputs: ['text', 'image', 'file'],
+        liveInput: { mode: 'direct', inputs: ['text'] },
+        sessions: ['resume', 'list', 'fork'],
+      },
+    }),
+    run: async () => ({ ok: true, runId: 'run-default', content: 'ok' }),
+    runText: async () => ({ ok: true, runId: 'run-default', content: 'ok' }),
+    interrupt: async () => false,
+    reset: async () => ({ interrupted: false, archivedSessionCount: 0 }),
+    close: async () => undefined,
   };
 }

@@ -682,7 +682,15 @@ worker
   .requiredOption('--config <path>', 'path to the Aria root config')
   .requiredOption('--profile <name>', 'profile whose engine and local policy are used')
   .requiredOption('--state-dir <path>', 'isolated worker session and log state')
-  .action(async (opts: { config?: string; profile?: string; stateDir?: string }) => {
+  .option('--product-id <id>', 'stable host product id (provide with --product-name)')
+  .option('--product-name <name>', 'host product display name (provide with --product-id)')
+  .action(async (opts: {
+    config?: string;
+    profile?: string;
+    stateDir?: string;
+    productId?: string;
+    productName?: string;
+  }) => {
     await runWorker(opts);
   });
 

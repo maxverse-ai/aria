@@ -3,12 +3,15 @@ import pkg from '../../../package.json';
 import { createProfileConversationHost } from '../../conversation/profile-host';
 import { configureLogger } from '../../core/logger';
 import { assertIsolatedWorkerEnvironment } from '../../worker/isolation';
+import { resolveWorkerProductIdentity } from '../../worker/identity';
 import { AriaWorkerServer } from '../../worker/server';
 
 export interface RunWorkerOptions {
   config?: string;
   profile?: string;
   stateDir?: string;
+  productId?: string;
+  productName?: string;
 }
 
 /** Run a headless, channel-free Aria worker on newline-delimited JSON-RPC. */
@@ -17,7 +20,15 @@ export async function runWorker(options: RunWorkerOptions): Promise<void> {
   if (!options.config) throw new Error('--config is required');
   if (!options.profile) throw new Error('--profile is required');
   if (!options.stateDir) throw new Error('--state-dir is required');
+  if ((options.productId !== undefined) !== (options.productName !== undefined)) {
+    throw new Error('--product-id and --product-name must be provided together');
+  }
 
+  const productIdentity = resolveWorkerProductIdentity(
+    options.productId !== undefined && options.productName !== undefined
+      ? { id: options.productId, displayName: options.productName }
+      : undefined,
+  );
   const stateDirectory = resolve(options.stateDir);
   configureLogger({ logsDir: resolve(stateDirectory, 'logs') });
 
@@ -36,6 +47,7 @@ export async function runWorker(options: RunWorkerOptions): Promise<void> {
     host,
     profile: options.profile,
     workerVersion: pkg.version,
+    productIdentity,
   });
   const shutdown = (): void => { void server.stop(); };
   process.once('SIGINT', shutdown);

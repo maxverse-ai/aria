@@ -634,6 +634,8 @@ Serve newline-delimited JSON-RPC over stdin/stdout
 | `--config <path> *(required)*` | path to the Aria root config |
 | `--profile <name> *(required)*` | profile whose engine and local policy are used |
 | `--state-dir <path> *(required)*` | isolated worker session and log state |
+| `--product-id <id>` | stable host product id (provide with --product-name) |
+| `--product-name <name>` | host product display name (provide with --product-id) |
 
 ## `aria preflight`
 

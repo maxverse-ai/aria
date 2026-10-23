@@ -37,12 +37,51 @@ authorized engines.
 aria worker serve \
   --config <path-to-aria-config.json> \
   --profile <name> \
-  --state-dir <isolated-state-directory>
+  --state-dir <isolated-state-directory> \
+  --product-id riff-computer \
+  --product-name "Riff Computer"
 ```
 
 `--state-dir` is required and must be an isolated root: the worker keeps its
 own session and log state there instead of sharing the profile's runtime
 state. stdout is the protocol transport — runtime log lines go to stderr.
+The optional product flags are a deployment-time label for an embedding host;
+provide both or neither. Without them the product identity is `aria` / `Aria`.
+The `runtime.handshake` response reports that product identity separately from
+the implementation identity (`aria` / `Aria`). This label is fixed for the
+worker lifetime and is not an authorization principal, device identity, or
+permission grant. It does not rename the `aria` executable or engine IDs.
+
+## Embedded server API
+
+The package exposes `@maxverse-ai/aria/worker` as a composition-only entry:
+
+```ts
+import { AriaWorkerServer } from '@maxverse-ai/aria/worker';
+
+const server = new AriaWorkerServer({
+  input,
+  output,
+  host, // A deployment-owned ProfileConversationHost.
+  profile: 'local',
+  workerVersion: ariaVersion,
+  productIdentity: { id: 'riff-computer', displayName: 'Riff Computer' },
+});
+await server.serve();
+```
+
+Importing this entry does not parse CLI arguments, register process signals,
+replace console methods, configure logging, or open a listener. The embedding
+process owns those concerns and must keep its logs separate from protocol
+output. It must establish environment isolation before constructing its host;
+`assertIsolatedWorkerEnvironment` is exported for the CLI's checks. An embedding
+host is trusted deployment code, not a sandbox. Team hosts still require an
+authenticated `spaceSession`; branding cannot bypass that check.
+
+This API only separates worker product metadata from implementation metadata.
+Native engine `clientInfo`, service installation, update authority, data-directory
+defaults and cloud/device registration are not renamed by it. The downstream
+product owns its executable/package name and explicit isolated state directory.
 
 The worker **fails closed when it inherits a channel or UI environment**:
 `LARK_*`, `LARKSUITE_*`, `FEISHU_*`, `ARIA_UI_*`, `ARIA_HOME`,
@@ -56,7 +95,7 @@ Protocol version 1, newline-delimited JSON-RPC 2.0:
 
 | Method | Purpose |
 | --- | --- |
-| `runtime.handshake` | Protocol/worker version, profile, engine descriptor, method list |
+| `runtime.handshake` | Protocol/worker version, product and implementation identities, profile, engine descriptor, method list |
 | `runtime.health` | Readiness and active/completed operation counts |
 | `run.start` | Start an agent run under a `scopeRef` |
 | `run.interrupt` | Interrupt the run for a `scopeRef` |

@@ -4,6 +4,10 @@ import { createInterface, type Interface as ReadlineInterface } from 'node:readl
 import type { Readable, Writable } from 'node:stream';
 import type { ProfileConversationHost } from '../conversation/profile-host';
 import {
+  resolveWorkerProductIdentity,
+  type WorkerProductIdentity,
+} from './identity';
+import {
   ARIA_WORKER_METHODS,
   ARIA_WORKER_PROTOCOL_VERSION,
   parseRequest,
@@ -18,6 +22,7 @@ import {
   type WorkerRunCompleted,
   type WorkerRunEvent,
   type WorkerRunFailed,
+  type WorkerHandshakeResult,
 } from './protocol';
 
 export interface AriaWorkerServerOptions {
@@ -28,6 +33,7 @@ export interface AriaWorkerServerOptions {
   host: ProfileConversationHost;
   profile: string;
   workerVersion: string;
+  productIdentity?: WorkerProductIdentity;
 }
 
 interface OperationRecord {
@@ -53,9 +59,11 @@ export class AriaWorkerServer {
   private processing: Promise<void> = Promise.resolve();
   private resolveDone?: () => void;
   private done = new Promise<void>((resolve) => { this.resolveDone = resolve; });
+  private readonly productIdentity: Readonly<WorkerProductIdentity>;
 
   constructor(private readonly options: AriaWorkerServerOptions) {
     if (options.host.requiresSpaceAuthorization && !options.spaceSession) throw new Error('team worker requires an authenticated controller session');
+    this.productIdentity = resolveWorkerProductIdentity(options.productIdentity);
   }
 
   private async authorizeScope(scopeRef: string, actorRef?: string): Promise<SpaceOperation | undefined> {
@@ -115,16 +123,24 @@ export class AriaWorkerServer {
 
   private async dispatch(method: string, params: unknown): Promise<DispatchResult> {
     switch (method) {
-    case 'runtime.handshake':
-      return {
-        result: {
-          protocolVersion: ARIA_WORKER_PROTOCOL_VERSION,
-          workerVersion: this.options.workerVersion,
-          profile: this.options.profile,
-          engine: this.options.host.descriptor,
-          methods: ARIA_WORKER_METHODS,
+    case 'runtime.handshake': {
+      const result: WorkerHandshakeResult = {
+        protocolVersion: ARIA_WORKER_PROTOCOL_VERSION,
+        product: this.productIdentity,
+        implementation: {
+          id: 'aria',
+          displayName: 'Aria',
+          version: this.options.workerVersion,
         },
+        workerVersion: this.options.workerVersion,
+        profile: this.options.profile,
+        engine: this.options.host.descriptor,
+        methods: ARIA_WORKER_METHODS,
       };
+      return {
+        result,
+      };
+    }
     case 'runtime.health':
       return {
         result: {
