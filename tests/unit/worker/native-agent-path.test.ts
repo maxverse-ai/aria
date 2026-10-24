@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -27,14 +27,14 @@ describe('Windows native agent discovery', () => {
     await writeFile(join(platform, 'package.json'), JSON.stringify({ name: '@openai/codex-win32-x64' }));
     const binary = join(platform, 'vendor', 'x86_64-pc-windows-msvc', 'bin', 'codex.exe');
     await executable(binary);
-    expect(await resolveWindowsAgentBinary('codex', shim, 'x64')).toBe(binary);
+    expect(await resolveWindowsAgentBinary('codex', shim, 'x64')).toBe(await realpath(binary));
   });
 
   it('supports the older in-package vendor payload', async () => {
     const { packageRoot, shim } = await fixture();
     const binary = join(packageRoot, 'vendor', 'aarch64-pc-windows-msvc', 'bin', 'codex.exe');
     await executable(binary);
-    expect(await resolveWindowsAgentBinary('codex', shim, 'arm64')).toBe(binary);
+    expect(await resolveWindowsAgentBinary('codex', shim, 'arm64')).toBe(await realpath(binary));
   });
 
   it('rejects an incomplete npm installation and unsupported wrapper engines', async () => {
@@ -49,7 +49,7 @@ describe('Windows native agent discovery', () => {
     const { root } = await fixture();
     const binary = join(root, 'claude.exe');
     await executable(binary);
-    expect(await resolveWindowsAgentBinary('claude', binary)).toBe(binary);
+    expect(await resolveWindowsAgentBinary('claude', binary)).toBe(await realpath(binary));
     const directory = join(root, 'directory.exe');
     await mkdir(directory);
     expect(await resolveWindowsAgentBinary('dsh', directory)).toBeUndefined();

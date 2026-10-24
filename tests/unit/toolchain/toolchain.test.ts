@@ -12,6 +12,7 @@ import {
   verifyStandaloneNodeAsset,
 } from "../../../tools/artifact.mjs";
 import { compareNumericVersions, evaluateToolchain, parseNumericVersion } from "../../../tools/infra-doctor.mjs";
+import { validateWorkerManifest } from "../../../tools/worker-artifact.mjs";
 
 const requiredFiles = [
   "LICENSE",
@@ -112,5 +113,28 @@ describe("candidate artifact metadata", () => {
     expect(verifyStandaloneNodeAsset(standalone)).toContain("Usage: aria");
     expect(() => verifyStandaloneNodeAsset(externalized)).toThrow(/cannot run without repository dependencies/);
     rmSync(directory, { recursive: true, force: true });
+  });
+});
+
+describe("worker release artifact metadata", () => {
+  const valid = {
+    schemaVersion: 1,
+    kind: "aria-worker",
+    repository: "maxverse-ai/aria",
+    version: "0.4.2",
+    commit: "a".repeat(40),
+    protocolVersion: 1,
+    entry: "worker/index.js",
+    tarball: "aria-worker-0.4.2.tgz",
+    sha256: "b".repeat(64),
+  } as const;
+
+  it("accepts an exact worker release identity", () => {
+    expect(validateWorkerManifest(valid, { version: "0.4.2", commit: "a".repeat(40) })).toBe(valid);
+  });
+
+  it("rejects drift and path traversal", () => {
+    expect(() => validateWorkerManifest({ ...valid, tarball: "../worker.tgz" }, { version: "0.4.2", commit: "a".repeat(40) })).toThrow(/manifest/);
+    expect(() => validateWorkerManifest(valid, { version: "0.4.2", commit: "c".repeat(40) })).toThrow(/manifest/);
   });
 });

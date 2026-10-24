@@ -6,6 +6,7 @@ import { basename, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { sha256File, validateManifest, verifyStandaloneNodeAsset } from "./artifact.mjs";
+import { validateWorkerManifest } from "./worker-artifact.mjs";
 import {
   latestReleaseTagVersion,
   parseVersion,
@@ -177,6 +178,20 @@ function prepareGitHubRelease() {
   const installerPath = resolve(root, "artifacts", "aria-install.mjs");
   copyFileSync(resolve(root, "dist", "installer.js"), installerPath);
   verifyStandaloneNodeAsset(installerPath);
+  const workerManifestPath = resolve(root, "artifacts", "aria-worker-manifest.json");
+  const workerChecksumsPath = resolve(root, "artifacts", "aria-worker-SHA256SUMS");
+  const workerManifest = validateWorkerManifest(JSON.parse(readFileSync(workerManifestPath, "utf8")), {
+    version: version.raw,
+    commit,
+  });
+  const workerTarball = resolve(root, "artifacts", workerManifest.tarball);
+  if (sha256File(workerTarball) !== workerManifest.sha256) {
+    throw new Error("worker release asset digest does not match its manifest");
+  }
+  const workerChecksums = readFileSync(workerChecksumsPath, "utf8");
+  if (workerChecksums !== `${workerManifest.sha256}  ${workerManifest.tarball}\n`) {
+    throw new Error("worker release checksum file does not match its manifest");
+  }
   const result = {
     ...plan,
     tarball: `artifacts/${basename(tarball)}`,
@@ -184,6 +199,9 @@ function prepareGitHubRelease() {
     checksums: "artifacts/SHA256SUMS",
     releaseManifest: "artifacts/release.json",
     installer: "artifacts/aria-install.mjs",
+    worker: `artifacts/${workerManifest.tarball}`,
+    workerManifest: "artifacts/aria-worker-manifest.json",
+    workerChecksums: "artifacts/aria-worker-SHA256SUMS",
     notes,
     sha256: digest,
   };
