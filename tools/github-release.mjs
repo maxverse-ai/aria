@@ -181,7 +181,7 @@ function prepareGitHubRelease() {
   const workerManifestPath = resolve(root, "artifacts", "aria-worker-manifest.json");
   const workerChecksumsPath = resolve(root, "artifacts", "aria-worker-SHA256SUMS");
   const workerManifest = validateWorkerManifest(JSON.parse(readFileSync(workerManifestPath, "utf8")), {
-    version: version.raw,
+    version: packageJson.version,
     commit,
   });
   const workerTarball = resolve(root, "artifacts", workerManifest.tarball);
