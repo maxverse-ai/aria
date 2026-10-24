@@ -1,3 +1,4 @@
+import { resolve } from 'node:path';
 import { defineConfig } from 'tsup';
 
 export default defineConfig([
@@ -57,5 +58,12 @@ export default defineConfig([
     sourcemap: false,
     splitting: false,
     dts: true,
+    noExternal: [/.*/],
+    esbuildOptions(options) {
+      options.alias = {
+        ...(options.alias ?? {}),
+        'qrcode-terminal': resolve('src/worker/qrcode-terminal-stub.ts'),
+      };
+    },
   },
 ]);
