@@ -123,7 +123,8 @@ It exposes two explicit operations:
 - `publish_current` runs in the protected `release-production` environment. It
   accepts only the exact `origin/main` commit, reruns every gate, builds and
   verifies the candidate, prepares the release contract assets (tarball,
-  `manifest.json`, `SHA256SUMS`, `release.json`, `aria-install.mjs`), rejects
+  `manifest.json`, `SHA256SUMS`, `release.json`, `aria-install.mjs`, and the
+  standalone worker tarball with its manifest and checksum), rejects
   tag or release collisions, and publishes a `v<VERSION>` GitHub release whose
   notes come from `docs/releases/v<VERSION>.md`. It then verifies the published
   release is non-draft, non-prerelease, complete, and marked `immutable`.

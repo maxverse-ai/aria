@@ -110,6 +110,8 @@ jobs:
         run: |
           pnpm artifact:build
           pnpm artifact:verify
+          pnpm worker:artifact:build
+          pnpm worker:artifact:verify
 
       - name: Prepare release assets
         id: release
@@ -135,5 +137,5 @@ jobs:
         run: |
           test "$(gh release view "$TAG" --json isDraft --jq '.isDraft')" = "false"
           test "$(gh release view "$TAG" --json isPrerelease --jq '.isPrerelease')" = "false"
-          test "$(gh release view "$TAG" --json assets --jq '.assets | length')" = "5"
+          test "$(gh release view "$TAG" --json assets --jq '.assets | length')" = "8"
           test "$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" --jq '.immutable')" = "true"

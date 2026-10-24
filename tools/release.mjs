@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 
 import { parseVersion, validatePolicy, verifyTransition } from "./release-policy.mjs";
 import { sha256File, validateManifest } from "./artifact.mjs";
+import { validateWorkerManifest } from "./worker-artifact.mjs";
 
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const expectedRepository = "maxverse-ai/aria";
@@ -227,7 +228,22 @@ function verifyReleaseArtifact() {
   if (sha256File(tarballPath) !== manifest.sha256) throw new Error("release artifact digest mismatch");
   if (taggedVersions().includes(plan.target)) throw new Error(`tag v${plan.target} already exists`);
   if (publishedVersions().includes(plan.target)) throw new Error(`v${plan.target} is already published`);
-  return { ...plan, commit, manifest: "artifacts/manifest.json", tarball: `artifacts/${basename(manifest.tarball)}`, sha256: manifest.sha256 };
+  const workerManifest = validateWorkerManifest(readJson("artifacts/aria-worker-manifest.json"), {
+    version: plan.target,
+    commit,
+  });
+  const workerTarball = resolve(root, "artifacts", workerManifest.tarball);
+  if (sha256File(workerTarball) !== workerManifest.sha256) {
+    throw new Error("worker release asset digest does not match its manifest");
+  }
+  return {
+    ...plan,
+    commit,
+    manifest: "artifacts/manifest.json",
+    tarball: `artifacts/${basename(manifest.tarball)}`,
+    sha256: manifest.sha256,
+    worker: `artifacts/${workerManifest.tarball}`,
+  };
 }
 
 // Release bodies render on github.com/<owner>/<repo>/releases, where relative
@@ -260,6 +276,9 @@ function publishRelease() {
     "artifacts/SHA256SUMS",
     "artifacts/release.json",
     "artifacts/aria-install.mjs",
+    result.worker,
+    "artifacts/aria-worker-manifest.json",
+    "artifacts/aria-worker-SHA256SUMS",
   ];
   for (const asset of assets) {
     if (!existsSync(resolve(root, asset))) {
