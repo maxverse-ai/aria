@@ -342,6 +342,19 @@ function publishVerifiedRelease() {
     }
   } finally { rmSync(downloaded, { recursive: true, force: true }); }
   if (refreshMain() !== result.commit) throw new Error("main changed before publication; draft retained for inspection");
+  const existingTag = run("git", ["tag", "--list", tag]);
+  if (existingTag && run("git", ["rev-parse", `${tag}^{commit}`]) !== result.commit) {
+    throw new Error("release tag appeared with a different commit; draft retained for inspection");
+  }
+  const draft = JSON.parse(run("gh", ["api", `repos/${expectedRepository}/releases/tags/${tag}`]));
+  if (draft.draft !== true || draft.target_commitish !== result.commit) {
+    throw new Error("draft release target no longer matches the tested commit");
+  }
+  const expectedAssets = assets.map((asset) => basename(asset)).sort();
+  const actualAssets = (draft.assets ?? []).map((asset) => asset.name).sort();
+  if (actualAssets.length !== expectedAssets.length || actualAssets.some((asset, index) => asset !== expectedAssets[index])) {
+    throw new Error("draft release assets no longer match the verified contract");
+  }
   run("gh", ["release", "edit", tag, "--repo", expectedRepository, "--draft=false", "--latest"], { capture: false });
   const published = JSON.parse(run("gh", ["api", `repos/${expectedRepository}/releases/tags/${tag}`]));
   if (published.draft || published.prerelease || published.immutable !== true || published.assets.length !== assets.length) {
