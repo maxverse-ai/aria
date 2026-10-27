@@ -52,7 +52,7 @@ definition instead of copying it.
 | Preferred build runtime | `.node-version` |
 | Supported runtime floor | `package.json#engines.node` |
 | Supported CLI surface | `src/cli/index.ts` (and `aria <command> --help`) |
-| Required validation gates | `package.json` scripts, run locally under `RELEASE_POLICY.md` |
+| Required validation gates | `package.json` scripts, run locally under `docs/RELEASE_POLICY.md` |
 
 When a document must state one of these, state it as a reference — for example
 "the runtime pinned in `.node-version`" — or name the version and note that the
