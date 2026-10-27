@@ -147,6 +147,10 @@ function prepareGitHubRelease() {
   const tarball = resolve(root, "artifacts", manifest.tarball);
   const notes = `docs/releases/v${packageJson.version}.md`;
   const notesContent = readFileSync(resolve(root, notes), "utf8");
+  const translatedNotes = readFileSync(resolve(root, `docs/releases/v${packageJson.version}.zh.md`), "utf8");
+  if (!translatedNotes.trim() || !translatedNotes.includes(`# Aria v${packageJson.version}`)) {
+    throw new Error("Chinese release notes must match the package version");
+  }
   const digest = sha256File(tarball);
   const plan = createGitHubReleasePlan({
     packageJson,
