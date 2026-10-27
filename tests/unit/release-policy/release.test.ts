@@ -113,6 +113,7 @@ describe("host-local publication", () => {
     expect(source).toContain('"--draft"');
     expect(source).toContain('"--draft=false"');
     expect(source).toContain('published.immutable !== true');
+    expect(source).toContain('releases/${draftView.databaseId}');
     expect(source.indexOf('release tag appeared with a different commit')).toBeLessThan(source.indexOf('"--draft=false"'));
     expect(source.indexOf('draft release assets no longer match')).toBeLessThan(source.indexOf('"--draft=false"'));
     expect(source).not.toContain('ARIA_RELEASE_PUBLISH');
