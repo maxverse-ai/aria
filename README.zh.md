@@ -6,7 +6,6 @@
 [![渠道](https://img.shields.io/badge/channels-pluggable-00D6B9?style=flat-square&labelColor=171717)](#runtime-flow)
 [![平台](https://img.shields.io/badge/platforms-Windows%20%7C%20macOS%20%7C%20Linux-55DDE0?style=flat-square&labelColor=171717)](#supported-scope)
 [![分发](https://img.shields.io/badge/distribution-source%20%2B%20GitHub%20Releases-F3B61F?style=flat-square&labelColor=171717)](#install)
-[![CI](https://img.shields.io/github/actions/workflow/status/maxverse-ai/aria/ci.yml?branch=main&style=flat-square&label=CI&labelColor=171717&color=00D6B9)](https://github.com/maxverse-ai/aria/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-MIT-7C5CFC?style=flat-square&labelColor=171717)](LICENSE)
 
 **本地优先的编码 Agent 控制平面。聊天是遥控器，不是算力。**
@@ -621,7 +620,7 @@ grep '"event":"enter"' ~/.aria/profiles/<profile>/logs/bridge-$(date +%Y%m%d).js
 
 [User Agent Space proposal](docs/USER_AGENT_SPACE_ARCHITECTURE.md)
 
-## 测试与 CI
+## 本地测试
 
 本地检查：
 
@@ -635,8 +634,8 @@ pnpm build
 ```
 
 `ci:local` 是合入前的完整本地门禁。`pnpm test` 包含 unit、integration 和
-process-level adapter 测试。CI 在 macOS、Ubuntu、Windows 上执行冻结安装、
-测试、typecheck 和生产构建。
+process-level adapter 测试。CI/CD 保持停用，验证和发布全部在宿主机完成，
+遵循[发布策略](docs/RELEASE_POLICY.md)。
 
 ## 可选：遥测（Telemetry）
 

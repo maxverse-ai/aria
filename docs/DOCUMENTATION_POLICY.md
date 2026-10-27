@@ -49,10 +49,10 @@ definition instead of copying it.
 | --- | --- |
 | Package version | `package.json` |
 | Authorized release line, patch policy | `.release-policy.json` |
-| Build and CI runtime | `.node-version` |
+| Preferred build runtime | `.node-version` |
 | Supported runtime floor | `package.json#engines.node` |
 | Supported CLI surface | `src/cli/index.ts` (and `aria <command> --help`) |
-| Required validation gates | `package.json` scripts, run by `.github/workflows/ci.yml` |
+| Required validation gates | `package.json` scripts, run locally under `RELEASE_POLICY.md` |
 
 When a document must state one of these, state it as a reference — for example
 "the runtime pinned in `.node-version`" — or name the version and note that the
