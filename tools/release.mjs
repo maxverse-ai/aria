@@ -346,7 +346,9 @@ function publishVerifiedRelease() {
   if (existingTag && run("git", ["rev-parse", `${tag}^{commit}`]) !== result.commit) {
     throw new Error("release tag appeared with a different commit; draft retained for inspection");
   }
-  const draft = JSON.parse(run("gh", ["api", `repos/${expectedRepository}/releases/tags/${tag}`]));
+  // The REST tag endpoint can return 404 for private draft releases.
+  const draftView = JSON.parse(run("gh", ["release", "view", tag, "--repo", expectedRepository, "--json", "databaseId"]));
+  const draft = JSON.parse(run("gh", ["api", `repos/${expectedRepository}/releases/${draftView.databaseId}`]));
   if (draft.draft !== true || draft.target_commitish !== result.commit) {
     throw new Error("draft release target no longer matches the tested commit");
   }
