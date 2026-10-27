@@ -1,3 +1,4 @@
+import { BRIDGE_SYSTEM_PROMPT } from '../agent/bridge-system-prompt';
 import type { LarkChannel } from '@larksuite/channel';
 import type { AgentEvent } from '../agent/types';
 import { capabilityFor } from '../agent/plugin/registry';
@@ -302,6 +303,7 @@ async function runMeetingAgent(
     controls.profileConfig,
   );
   const result = await startRunFlow({
+    channelPrompt: BRIDGE_SYSTEM_PROMPT,
     scopeId,
     scope: {
       source: 'meeting',

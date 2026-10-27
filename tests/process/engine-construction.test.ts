@@ -110,7 +110,8 @@ describe('prepared profile runtime process compatibility', () => {
         await realpath(['codex', 'grok', 'devin'].includes(engine) ? stateDirectory : root),
       );
       const prompts = [record.stdin, record.systemPrompt, ...record.argv, JSON.stringify(record.requests)].join('\n');
-      expect(prompts).toContain('Aria 运行约定');
+      expect(prompts).not.toContain('Aria 运行约定');
+      expect(prompts).not.toContain('飞书 OAuth');
       expect(prompts).toContain('ou_construction_fixture');
       expect(prompts).toContain('construction prompt');
 
@@ -126,7 +127,7 @@ describe('prepared profile runtime process compatibility', () => {
             type: 'user',
             message: { role: 'user', content: [{ type: 'text', text: 'construction prompt' }] },
           });
-          expect(record.systemPrompt).toContain('Aria 运行约定');
+          expect(record.systemPrompt).toContain('当前身份（你）');
           break;
         case 'codex':
           expect(record.argv).toEqual([

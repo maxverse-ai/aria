@@ -323,8 +323,19 @@ Duplicate declarations of the same capability must be reconciled through
 contract tests. Generic capability types must not carry CardKit markers,
 Lark prompts, Codex sandbox types or Claude permission modes.
 
-A prompt composer combines core instructions, source-specific presentation,
-authorized tool instructions and run context. Engine adapters handle native
+A prompt composer combines explicitly supplied channel instructions,
+authorized tool instructions and run context. The default channel prompt is
+empty: observability source labels never select a persona or a Feishu fallback.
+Trusted Feishu ingress supplies its channel contract, including task wakeups,
+comments, doctor and meetings. Generic external/worker ingress does not.
+When there is no host-supplied context, the user prompt is forwarded unchanged,
+without a `user_message` wrapper. This does not override native engine settings,
+history, authorization or runtime policy. Resumed sessions can retain earlier
+instructions; validate the changed default in a fresh session.
+An enabled notice+pull transport still receives its channel-neutral mailbox
+contract (see [STEERING.md](STEERING.md)); isolated runs still receive their
+authorized tool context. Neither implies a product persona.
+Engine adapters handle native
 system-prompt injection and stream translation. Self identity is a per-run
 source binding, not mutable global state on a shared adapter. Questions and
 approvals use channel-neutral interaction contracts when supported; Lark

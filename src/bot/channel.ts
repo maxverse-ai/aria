@@ -1,3 +1,4 @@
+import { BRIDGE_SYSTEM_PROMPT } from '../agent/bridge-system-prompt';
 import { PersonalAgentGroups, type PersonalGroupPeers } from './personal-agent-group';
 import { fetchSpaceFreshnessHistory } from './space-freshness-history';
 import { COOPERATIVE_REPLY_INSTRUCTION, parseCooperativeReply } from '../conversation/cooperative-reply';
@@ -1005,6 +1006,7 @@ export async function startChannel(deps: StartChannelDeps): Promise<BridgeChanne
       runtime: conversations,
       createStartInput: (input: TaskRunnerWakeInput) => ({
         identity: larkParticipantIdentity(controls.cfg.accounts.app.id, channel.botIdentity),
+        channelPrompt: BRIDGE_SYSTEM_PROMPT,
         scopeId: `task:${input.task.taskId}`,
         scope: {
           source: 'im',
@@ -2071,6 +2073,7 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<Terminal | undefined> 
   await refreshPersonalGroup();
   const flow = await conversations.start({
     identity: larkParticipantIdentity(controls.cfg.accounts.app.id, channel.botIdentity),
+    channelPrompt: BRIDGE_SYSTEM_PROMPT,
     ...(gate ? { spaceContext: gate.active().context } : {}),
     scopeId: scope,
     scope: scopeContext,

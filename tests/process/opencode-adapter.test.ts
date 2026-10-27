@@ -60,7 +60,7 @@ describe('OpenCodeAdapter process contract', () => {
     const record = JSON.parse(await readFile(recordPath, 'utf8')) as RecordPayload;
     expect(record.argv).toEqual(buildOpenCodeArgs({ cwd }));
     expect(record.argv).not.toContain('--auto');
-    expect(record.stdin).toContain('Aria 运行约定');
+    expect(record.stdin).toBe('hello from lark');
     expect(record.stdin).not.toContain('__bridge_cb');
     expect(record.stdin).toContain('hello from lark');
     expect(record.env.LARK_CHANNEL).toBe('1');

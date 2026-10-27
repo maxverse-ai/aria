@@ -1,5 +1,5 @@
 import { snapshotParticipantIdentity, type ParticipantIdentity } from '../conversation/participant-identity';
-import { withSourcePresentation } from '../conversation/presentation-context';
+import { withRunPresentation } from '../conversation/presentation-context';
 import type { RunTools, RunToolLease } from './run-tools';
 import { bindAgentRun } from '../agent/runtime/bound-run';
 import { bindRunAuthorization } from '../agent/runtime/run-authorization';
@@ -49,6 +49,8 @@ export interface RunAuditSink {
 
 export interface SubmitRunInput {
   identity?: ParticipantIdentity;
+  /** Trusted ingress instructions; absent for plain Agent conversations. */
+  channelPrompt?: string;
   spaceContext?: AuthorizedSpaceContext;
   assertAuthorized?: () => void;
   scopeId: string;
@@ -184,7 +186,7 @@ export class RunExecutor {
       stopGraceMs: input.stopGraceMs,
     };
     if (input.assertAuthorized) bindRunAuthorization(runOptions, input.assertAuthorized);
-    const present = <T>(operation: () => T): T => withSourcePresentation(input.observability?.source, Boolean(input.spaceContext), operation,
+    const present = <T>(operation: () => T): T => withRunPresentation(input.channelPrompt, Boolean(input.spaceContext), operation,
       [lease.instructions, tools?.prompt].filter(Boolean).join('\n') || undefined);
     let run: AgentRun;
     try {

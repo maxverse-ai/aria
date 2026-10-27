@@ -35,6 +35,8 @@ import {
 
 export interface StartRunFlowInput {
   identity?: ParticipantIdentity;
+  /** Trusted ingress instructions; absent for plain Agent conversations. */
+  channelPrompt?: string;
   spaceContext?: AuthorizedSpaceContext;
   assertAuthorized?: () => void;
   scopeId: string;
@@ -218,6 +220,7 @@ export async function startRunIntentFlow(
   try {
     execution = await input.executor.submit({
       identity: input.identity,
+      channelPrompt: input.channelPrompt,
       scopeId: input.scopeId,
       policy,
       spaceContext: input.spaceContext,

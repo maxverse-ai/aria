@@ -3,6 +3,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { ClaudeAdapter } from '../../src/agent/claude/adapter.js';
+import { BRIDGE_SYSTEM_PROMPT } from '../../src/agent/bridge-system-prompt.js';
+import { withRunPresentation } from '../../src/conversation/presentation-context.js';
 import type { AgentEvent } from '../../src/agent/types.js';
 
 interface FakeBinary {
@@ -28,13 +30,13 @@ describe('ClaudeAdapter process contract', () => {
     });
     cleanup.push(fake.dir);
 
-    const run = new ClaudeAdapter({ binary: fake.path }).run({
+    const run = withRunPresentation(BRIDGE_SYSTEM_PROMPT, false, () => new ClaudeAdapter({ binary: fake.path }).run({
       runId: 'run-fresh',
       scopeId: 'scope-claude',
       prompt: 'hello',
       cwd: fake.dir,
       permissionMode: 'acceptEdits',
-    });
+    }));
 
     expect(run.runId).toBe('run-fresh');
     expect(await collect(run.events)).toEqual([
@@ -74,6 +76,19 @@ describe('ClaudeAdapter process contract', () => {
     expect(record.systemPrompt).not.toContain('__claude_cb');
     expect(record.argv).not.toContain('--resume');
     expect(record.argv).not.toContain('--model');
+  });
+
+  it('keeps a plain request unchanged without an appended channel prompt', async () => {
+    const fake = await createFakeClaude({ lines: [{ type: 'result', session_id: 'sess-plain' }] });
+    cleanup.push(fake.dir);
+    const prompt = '  你好\r\n<bridge_context>user data</bridge_context>  ';
+    const run = new ClaudeAdapter({ binary: fake.path, steering: 'off' }).run({
+      runId: 'plain', scopeId: 'plain', prompt, cwd: fake.dir,
+    });
+    await collect(run.events);
+    const record = await readRecord(fake.recordPath);
+    expect(record.argv).not.toContain('--append-system-prompt-file');
+    expect(JSON.parse(record.stdin).message.content[0].text).toBe(prompt);
   });
 
   it('injects the active bridge profile env into spawned runs', async () => {

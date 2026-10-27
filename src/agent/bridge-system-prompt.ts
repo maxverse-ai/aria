@@ -54,10 +54,10 @@ export function buildBridgeSystemPrompt(
   identity: ParticipantIdentity | undefined,
   opts?: { steerMailbox?: boolean },
 ): string {
-  const parts = activePresentationParts() ?? { source: BRIDGE_SYSTEM_PROMPT };
+  const parts = activePresentationParts() ?? { source: '' };
   return composeSystemPrompt({
     ...parts,
-    source: `${parts.source}${opts?.steerMailbox ? `\n${STEER_MAILBOX_PROMPT}` : ''}`,
+    source: [parts.source, opts?.steerMailbox ? STEER_MAILBOX_PROMPT : ''].filter(Boolean).join('\n'),
     identity: participantIdentityPrompt(identity),
   });
 }

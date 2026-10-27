@@ -12,7 +12,8 @@ vi.mock('../../../src/platform/spawn', async (importOriginal) => {
   return { ...actual, spawnProcess: spawnMock.spawnProcess };
 });
 
-import { buildBridgeSystemPrompt } from '../../../src/agent/bridge-system-prompt';
+import { withRunPresentation } from '../../../src/conversation/presentation-context';
+import { BRIDGE_SYSTEM_PROMPT, buildBridgeSystemPrompt } from '../../../src/agent/bridge-system-prompt';
 import { ClaudeAdapter } from '../../../src/agent/claude/adapter';
 
 interface FakeChild extends EventEmitter {
@@ -47,30 +48,33 @@ describe('ClaudeAdapter system prompt wiring', () => {
     spawnMock.spawnProcess.mockReturnValue(child);
     const adapter = new ClaudeAdapter();
 
-    adapter.run({ identity: { providerId: 'lark', accountId: 'app', subjectId: 'ou_bot_self', displayName: 'Bridge' }, runId: 'r1', scopeId: 'scope-test', prompt: 'hi', cwd: '/tmp' });
+    withRunPresentation(BRIDGE_SYSTEM_PROMPT, false, () => adapter.run({ identity: { providerId: 'lark', accountId: 'app', subjectId: 'ou_bot_self', displayName: 'Bridge' }, runId: 'r1', scopeId: 'scope-test', prompt: 'hi', cwd: '/tmp' }));
 
     // The prompt goes via stdin as a stream-json user line, never argv
     // (cmd.exe would mangle it on Windows). stdin stays open for steering.
     expect(await readPromptText(child.stdin)).toBe('hi');
     expect(systemPromptFileContent()).toBe(
-      buildBridgeSystemPrompt(
+      withRunPresentation(BRIDGE_SYSTEM_PROMPT, false, () => buildBridgeSystemPrompt(
         { providerId: 'lark', accountId: 'app', subjectId: 'ou_bot_self', displayName: 'Bridge' },
         { steerMailbox: true },
-      ),
+      )),
     );
     // delivery:'none' engines compose the notice+pull contract in.
     expect(systemPromptFileContent()).toContain('## Steer 信箱');
+    child.emit('exit', 0, null);
   });
 
-  it('falls back to the base system prompt when no identity was set', async () => {
+  it('does not append a prompt file for a plain Agent request', async () => {
     const child = fakeChild();
     spawnMock.spawnProcess.mockReturnValue(child);
-    const adapter = new ClaudeAdapter();
+    const adapter = new ClaudeAdapter({ steering: 'off' });
 
     adapter.run({ runId: 'r1', scopeId: 'scope-test', prompt: 'hi', cwd: '/tmp' });
 
     expect(await readPromptText(child.stdin)).toBe('hi');
-    expect(systemPromptFileContent()).toBe(buildBridgeSystemPrompt(undefined, { steerMailbox: true }));
+    const args = spawnMock.spawnProcess.mock.calls[0]?.[1] as string[];
+    expect(args).not.toContain('--append-system-prompt-file');
+    child.emit('exit', 0, null);
   });
 
   function systemPromptFileContent(): string {
