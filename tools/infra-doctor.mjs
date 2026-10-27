@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 
-import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import crossSpawn from "cross-spawn";
 
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
 
@@ -49,12 +49,11 @@ export function evaluateToolchain({ nodeVersion, minimumNode, preferredNode, pnp
   return { ok: checks.every((check) => check.status !== "fail"), checks };
 }
 
-function runVersion(executable, args) {
-  try {
-    return execFileSync(executable, args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
-  } catch {
-    return null;
-  }
+export function runVersion(executable, args) {
+  const result = crossSpawn.sync(executable, args, {
+    cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"],
+  });
+  return result.error || result.status !== 0 ? null : result.stdout.trim();
 }
 
 function main() {
