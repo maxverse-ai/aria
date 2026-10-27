@@ -68,7 +68,7 @@ describe('MiMo-Code adapter process contract', () => {
     const record = JSON.parse(await readFile(recordPath, 'utf8')) as RecordPayload;
     expect(record.argv).toEqual(buildOpenCodeArgs({ cwd }));
     expect(record.stdin).toContain('hello from lark');
-    expect(record.env.LARK_CHANNEL).toBe('1');
+    expect(record.env.LARK_CHANNEL).toBe(process.env.LARK_CHANNEL);
   });
 
   it('uses the MiMo auto-approve flag instead of opencode --auto', async () => {

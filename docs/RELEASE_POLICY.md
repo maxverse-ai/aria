@@ -28,7 +28,7 @@ to GitHub Pro" for a private repository on this plan, and the required-status
 check list is empty, so a failing check cannot refuse anything. The durable
 record is therefore the release commit itself: a release that advances the
 release line must carry `Authorized-Release-Line: <new line>` in its exact
-commit message, and the release workflow fails closed without it. A statement
+commit message, and the local publisher fails closed without it. A statement
 copied from chat is not a durable authorization record.
 
 If the repository is ever moved to a plan with protected environments, approval
@@ -62,80 +62,43 @@ identity behavior, removes an existing capability, may break compatibility, or
 cannot be classified confidently.
 
 It must also stop on a dirty worktree, a non-main release commit, failed gates,
-version or tag collision, stale remote state, concurrent release, or missing
-protected-environment approval.
+version or tag collision, stale remote state, concurrent release, or missing release authorization.
 
-## Commands
+## Host-local publication
 
-The policy tools are intentionally read-only. They plan and verify versions but
-do not edit files, create tags, or publish packages.
+CI/CD is disabled and there is no restoration plan. All validation, builds,
+packaging, publication and downloaded-asset verification run on the host with
+its authenticated `gh`. GitHub hosts source, pull requests and immutable Release
+assets, not the release executor. Do not enable workflows, provision runners,
+impersonate Actions through environment variables, or invoke `npm publish`.
 
-```bash
-pnpm release:check
-pnpm release:check -- --base-ref origin/main
-pnpm release:plan -- --level patch
-pnpm release:verify -- --from 0.1.1 --to 0.1.2
-```
+`pnpm release:plan` inspects the next version. `pnpm release:prepare` prepares
+exactly one patch in a clean task branch; commit version and bilingual release
+notes, validate and integrate them before publication. The release line remains
+controlled by `.release-policy.json`; do not change it without explicit human
+authorization recorded in the release commit.
 
-CI supplies the pull-request base or previous push commit to `release:check`.
-The check compares both `package.json` and `.release-policy.json` with that base,
-so an unauthorized release-line change cannot pass merely by editing both files.
+`pnpm release:publish` is the supported single-writer local publication entry
+point. It must:
 
-For MINOR, MAJOR, or stable-promotion verification, an approved job may inject
-`ARIA_RELEASE_HUMAN_AUTHORIZED=true` instead of recording the line in the commit.
-Agents must not set that variable to manufacture authorization.
+1. Reject CI execution, validate the expected repository origin and `gh` access,
+   acquire an exclusive lock shared by linked worktrees, fetch main and tags,
+   and require a clean checkout at the exact latest `origin/main` commit.
+2. Run the full local gates, build and inspect the package and standalone worker
+   on that exact commit. Candidates are not releases and must not be pinned by
+   consumers as if they were published assets.
+3. Verify the next authorized version, bilingual notes, manifests, checksums,
+   and absence of a remote tag or release collision. Recheck remote main before
+   publication; never overwrite an existing version or asset.
+4. Upload a draft with the complete eight-asset contract, download and compare
+   every asset, then publish the verified draft as a stable release.
+5. Verify the published tag resolves to the tested commit, the release is not
+   draft or prerelease and reports `immutable: true`. Release immutability must
+   be enabled. Consumers must not advance until downloaded assets verify.
+6. Release the local lock on success or failure. Leave an incomplete draft
+   explicitly identified for inspection; never represent partial publication
+   as success or silently overwrite/delete it on retry.
 
-Both read the same rule. `ci.yml` compares against the previous commit and can
-only redden a run, so it reports an unauthorized line change;
-`.github/workflows/release.yml` runs the action that produces a
-published artifact, so it refuses to perform one.
-
-## Publishing architecture
-
-When package publication is enabled, it must be implemented as a single-writer
-GitHub Actions job with a concurrency group. The job must fetch full history and
-tags, rerun all gates, call `release:verify`, build from the merged `origin/main`
-commit, ensure the tag and registry version are unused, publish, then verify the
-published artifact. npm credentials must exist only in the protected workflow.
-
-Where the plan allows it, repository settings should require human review for
-changes to `.release-policy.json` and for the environment used by MINOR, MAJOR,
-and stable-promotion releases. On the current plan neither is available, so the
-recorded release line is the only durable authorization signal.
-
-## Retired internal channel
-
-Aria previously shipped private snapshots as immutable GitHub prereleases
-tagged `internal-v<VERSION>`. That channel has been retired and its releases
-deleted; public distribution uses `v*` GitHub Releases through the workflow
-described below. The `internal-v*` tag prefix is no longer produced and
-existing installations on that channel receive no further updates.
-
-## Trusted GitHub Release workflow
-
-`.github/workflows/release.yml` is the only supported publication entry point.
-It exposes two explicit operations:
-
-- `prepare_patch` queries Git tags and GitHub Releases, calculates exactly one
-  PATCH, updates only `package.json`, and opens an auto-merge release pull
-  request. For the first publication it keeps the already committed version and
-  reports that it is ready instead of inventing another version.
-- `publish_current` runs in the protected `release-production` environment. It
-  accepts only the exact `origin/main` commit, reruns every gate, builds and
-  verifies the candidate, prepares the release contract assets (tarball,
-  `manifest.json`, `SHA256SUMS`, `release.json`, `aria-install.mjs`, and the
-  standalone worker tarball with its manifest and checksum), rejects
-  tag or release collisions, and publishes a `v<VERSION>` GitHub release whose
-  notes come from `docs/releases/v<VERSION>.md`. It then verifies the published
-  release is non-draft, non-prerelease, complete, and marked `immutable`.
-
-Repository-level Release immutability is mandatory: the workflow verifies the
-published release's `immutable` API field and fails closed when the protection
-is not enabled. Consumers ignore drafts, prereleases, incomplete asset sets,
-and tags outside `v*`.
-
-The workflow uses a single non-cancelling concurrency group. Local
-`npm publish` is rejected by `prepublishOnly`; the publish command additionally
-checks the repository, branch, workflow identity, and protected-job marker.
-These checks are defense in depth—the `release-production` environment and the
-recorded release line remain the actual authorization boundary.
+The retired `internal-v*` snapshot channel remains unsupported. Public
+consumption uses immutable `v*` GitHub Releases. Local npm publication is not a
+supported distribution path.

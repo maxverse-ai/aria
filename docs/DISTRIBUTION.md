@@ -2,6 +2,10 @@
 
 > Status: current
 
+Publication runs entirely on the host with authenticated `gh`; CI/CD remains
+disabled. See [release policy](RELEASE_POLICY.md) for the local validation,
+publication and downloaded-asset verification boundary.
+
 > 中文版：[DISTRIBUTION.zh.md](DISTRIBUTION.zh.md)
 
 Aria's consumer channel is a public GitHub repository. GitHub Releases is

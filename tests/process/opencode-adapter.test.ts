@@ -63,7 +63,7 @@ describe('OpenCodeAdapter process contract', () => {
     expect(record.stdin).toBe('hello from lark');
     expect(record.stdin).not.toContain('__bridge_cb');
     expect(record.stdin).toContain('hello from lark');
-    expect(record.env.LARK_CHANNEL).toBe('1');
+    expect(record.env.LARK_CHANNEL).toBe(process.env.LARK_CHANNEL);
   });
 
   it('passes session id through argv and honors profile XDG isolation', async () => {

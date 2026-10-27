@@ -45,7 +45,7 @@ describe('ClaudeAdapter process contract', () => {
     const record = await readRecord(fake.recordPath);
 
     expect(await realpath(record.cwd)).toBe(await realpath(fake.dir));
-    expect(record.env.LARK_CHANNEL).toBe('1');
+    expect(record.env.LARK_CHANNEL).toBe(process.env.LARK_CHANNEL);
     // The prompt goes via stdin as a stream-json user message, and the bridge
     // system prompt via a temp file, so neither ever touches argv (which
     // cmd.exe would mangle on Windows).

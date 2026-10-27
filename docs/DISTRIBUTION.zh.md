@@ -2,6 +2,9 @@
 
 > Status: current
 
+发布完全由宿主机使用已认证的 `gh` 完成，CI/CD 保持停用。宿主机验证、发布和下载校验边界见
+[发布策略](RELEASE_POLICY.md)。
+
 > 本文是 [`DISTRIBUTION.md`](DISTRIBUTION.md) 的中文版。
 
 Aria 当前的消费者渠道是一个GitHub 仓库。GitHub Releases 是包权威；
