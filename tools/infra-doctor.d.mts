@@ -6,6 +6,7 @@ export interface ToolchainReport {
 }
 
 export function parseNumericVersion(value: string): [number, number, number];
+export function runVersion(executable: string, args: string[]): string | null;
 export function compareNumericVersions(left: [number, number, number], right: [number, number, number]): number;
 export function evaluateToolchain(input: {
   nodeVersion: string;
