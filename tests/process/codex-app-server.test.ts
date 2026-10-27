@@ -210,6 +210,26 @@ describe('Codex App Server runtime', () => {
     await runtime.dispose();
   });
 
+  it('forwards a fresh plain Desktop request byte-for-byte', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'aria-codex-plain-'));
+    roots.push(root);
+    const runtime = new CodexAppServerRuntime({
+      binary: await writeFakeCodex(root), profileStateDir: root,
+      inheritCodexHome: true, sandbox: 'read-only',
+    });
+    const prompt = '  你好\r\n## user_message\n<bridge_context>user data</bridge_context>  ';
+    try {
+      const run = runtime.execution.run({ runId: 'plain', scopeId: 'desktop', prompt, cwd: root });
+      const events: AgentEvent[] = [];
+      for await (const event of run.events) events.push(event);
+      expect(events.some(event => event.type === 'error')).toBe(false);
+      const received = JSON.parse(await readFile(join(root, 'prompt.json'), 'utf8')) as string;
+      expect(Buffer.from(received, 'utf8')).toEqual(Buffer.from(prompt, 'utf8'));
+    } finally {
+      await runtime.dispose();
+    }
+  });
+
   it('does not expose a fragmented final answer as progress text', async () => {
     const root = await mkdtemp(join(tmpdir(), 'aria-codex-app-server-fragments-'));
     roots.push(root);
@@ -642,6 +662,7 @@ rl.on('line', (line) => {
     if (Object.prototype.hasOwnProperty.call(msg.params, 'serviceTier')) fs.appendFileSync(serviceTierRequestPath, 'turn/start ' + JSON.stringify(msg.params.serviceTier) + '\\n');
     send({ id: msg.id, result: { turn: { id: 'turn-1' } } });
     const prompt = msg.params.input[0].text;
+    fs.writeFileSync(${JSON.stringify(join(root, 'prompt.json'))}, JSON.stringify(prompt));
     fs.appendFileSync(lifecyclePath, 'identity ' + String(prompt.includes('ou_bot_self')) + '\\n');
     if (prompt.includes('hold-for-steer')) fs.appendFileSync(lifecyclePath, 'turn-active\\n');
     if (prompt.includes('crash')) {

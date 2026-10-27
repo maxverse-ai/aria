@@ -1,8 +1,10 @@
-import { readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { normalizeVersions, selectReleasePlan, validatePublishContext } from "../../../tools/release.mjs";
+import { normalizeVersions, selectReleasePlan, validatePublishContext, validateOrigin, withReleaseLock } from "../../../tools/release.mjs";
 
 const policy = {
   schemaVersion: 1,
@@ -76,31 +78,44 @@ describe("trusted release planning", () => {
   });
 });
 
-describe("publish context", () => {
-  const valid = {
-    GITHUB_ACTIONS: "true",
-    GITHUB_REPOSITORY: "maxverse-ai/aria",
-    GITHUB_REF: "refs/heads/main",
-    GITHUB_WORKFLOW_REF: "maxverse-ai/aria/.github/workflows/release.yml@refs/heads/main",
-    ARIA_RELEASE_PUBLISH: "true",
-  };
-
-  it("accepts only the protected main release workflow", () => {
-    expect(validatePublishContext(valid)).toEqual({ ok: true, failures: [] });
-    expect(validatePublishContext({ ...valid, GITHUB_REF: "refs/heads/feature" }).ok).toBe(false);
-    expect(validatePublishContext({ ...valid, ARIA_RELEASE_PUBLISH: undefined }).ok).toBe(false);
+describe("host-local publication", () => {
+  it("confines publishing to canonical origin URLs", () => {
+    expect(validateOrigin("https://github.com/maxverse-ai/aria.git")).toBe(true);
+    expect(validateOrigin("git@github.com:maxverse-ai/aria.git")).toBe(true);
+    for (const origin of ["https://github.com/other/aria.git", "https://github.com/maxverse-ai/aria.git.evil", "https://github.com.evil/maxverse-ai/aria.git"])
+      expect(validateOrigin(origin)).toBe(false);
   });
 
-  it("keeps the workflow single-writer, protected, and GitHub-Release-based", () => {
-    const workflow = readFileSync(new URL("../../../.github/workflows/release.yml", import.meta.url), "utf8");
-    const packageJson = JSON.parse(readFileSync(new URL("../../../package.json", import.meta.url), "utf8"));
-    expect(workflow).toContain("group: aria-release");
-    expect(workflow).toContain("cancel-in-progress: false");
-    expect(workflow).toContain("environment: release-production");
-    expect(workflow).not.toContain("id-token: write");
-    expect(workflow).not.toContain("npm publish");
-    expect(workflow).not.toContain("NODE_AUTH_TOKEN");
-    expect(packageJson.scripts.prepublishOnly).toContain("publish-gate");
+  it("excludes concurrent worktree releases and releases the lock on failure", () => {
+    const directory = mkdtempSync(join(tmpdir(), "aria-release-lock-"));
+    try {
+      expect(() => withReleaseLock(directory, () => {
+        expect(existsSync(join(directory, "aria-local-release.lock", "owner.json"))).toBe(true);
+        expect(() => withReleaseLock(directory, () => undefined)).toThrow(/another local release/);
+        throw new Error("gate failed");
+      })).toThrow("gate failed");
+      expect(existsSync(join(directory, "aria-local-release.lock"))).toBe(false);
+      expect(withReleaseLock(directory, () => "released")).toBe("released");
+    } finally { rmSync(directory, { recursive: true, force: true }); }
+  });
+
+  it("accepts local execution without fabricated Actions variables and rejects CI", () => {
+    expect(validatePublishContext({})).toEqual({ ok: true, failures: [] });
+    expect(validatePublishContext({ GITHUB_ACTIONS: "true" }).ok).toBe(false);
+    expect(validatePublishContext({ CI: "true" }).ok).toBe(false);
+  });
+
+  it("runs validation inside the repository lock before draft upload and publication", () => {
+    const source = readFileSync(new URL("../../../tools/release.mjs", import.meta.url), "utf8");
+    expect(source).toContain('withReleaseLock(commonDirectory');
+    expect(source).toContain('["ci:local"]');
+    expect(source).toContain('["artifact:verify"]');
+    expect(source).toContain('"--draft"');
+    expect(source).toContain('"--draft=false"');
+    expect(source).toContain('published.immutable !== true');
+    expect(source.indexOf('release tag appeared with a different commit')).toBeLessThan(source.indexOf('"--draft=false"'));
+    expect(source.indexOf('draft release assets no longer match')).toBeLessThan(source.indexOf('"--draft=false"'));
+    expect(source).not.toContain('ARIA_RELEASE_PUBLISH');
   });
 });
 

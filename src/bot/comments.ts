@@ -1,3 +1,4 @@
+import { BRIDGE_SYSTEM_PROMPT } from '../agent/bridge-system-prompt';
 import { larkParticipantIdentity } from './participant-identity';
 import { randomUUID } from 'node:crypto';
 import { mkdir } from 'node:fs/promises';
@@ -272,6 +273,7 @@ export async function handleCommentMention(deps: CommentDeps): Promise<void> {
 
       const execution = await deps.executor.submit({
         identity: larkParticipantIdentity(controls.cfg.accounts.app.id, channel.botIdentity),
+        channelPrompt: BRIDGE_SYSTEM_PROMPT,
         scopeId: runScopeId,
         policy,
         sessionId,

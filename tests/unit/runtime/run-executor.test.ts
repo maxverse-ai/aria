@@ -1,4 +1,4 @@
-import { buildBridgeSystemPrompt } from '../../../src/agent/bridge-system-prompt';
+import { BRIDGE_SYSTEM_PROMPT, buildBridgeSystemPrompt, prefixBridgeSystemPrompt } from '../../../src/agent/bridge-system-prompt';
 import { describe, expect, it, vi } from 'vitest';
 import { activeSystemPrompt } from '../../../src/conversation/presentation-context';
 import { fixture, authorize } from '../space/helpers';
@@ -155,4 +155,34 @@ it('keeps concurrent identities separate and does not inherit them into an unide
   expect(prompts.get('alice')).toContain('alice'); expect(prompts.get('alice')).not.toContain('jack');
   expect(prompts.get('anonymous')).not.toContain('当前身份（你）');
   expect([...prompts.values()].every(p => !p.includes('飞书 OAuth'))).toBe(true);
+});
+
+it('keeps plain requests byte-identical regardless of observability source and isolates explicit channel instructions', async () => {
+  const prompts = new Map<string, string[]>();
+  const raw = '  你好\r\n## user_message\n<bridge_context>user text</bridge_context>  ';
+  const agent: AgentAdapter = new FakeAgentAdapter();
+  const record = (options: Parameters<AgentAdapter['run']>[0]) => {
+    const values = prompts.get(options.scopeId) ?? [];
+    values.push(prefixBridgeSystemPrompt(options.prompt, options.identity));
+    prompts.set(options.scopeId, values);
+  };
+  agent.prepareRun = async options => { await Promise.resolve(); record(options); };
+  agent.run = options => ({runId: options.runId, events: {async *[Symbol.asyncIterator]() {
+    await Promise.resolve(); record(options);
+    yield {type: 'done' as const, terminationReason: 'normal' as const};
+  }}, stop: async () => {}, waitForExit: async () => true});
+  const executor = new RunExecutor({agent, pool: new ProcessPool(() => 4), activeRuns: new ActiveRuns(), now: () => 1000});
+  await Promise.all(['channel:riff-desktop', 'im', 'unknown', 'explicit-lark'].map(async scopeId => {
+    const run = await executor.submit({scopeId, policy: policy({prompt: raw}),
+      channelPrompt: scopeId === 'explicit-lark' ? BRIDGE_SYSTEM_PROMPT : undefined,
+      observability: {source: scopeId, profile: 'fixture', agent: 'fake', stage: 'submit'}});
+    await collect(run.subscribe());
+  }));
+  for (const scope of ['channel:riff-desktop', 'im', 'unknown']) expect(prompts.get(scope)).toEqual([raw, raw]);
+  for (const prompt of prompts.get('explicit-lark')!) {
+    expect(prompt).toContain('飞书 OAuth');
+    expect(prompt).toContain('真实 @（结构化 mention）');
+    expect(prompt.endsWith(raw)).toBe(true);
+  }
+  expect(activeSystemPrompt()).toBeUndefined();
 });

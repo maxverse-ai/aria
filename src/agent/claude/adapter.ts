@@ -89,13 +89,11 @@ export class ClaudeAdapter implements AgentAdapter {
     // stream-json response. Pass the prompt via stdin and the appended system
     // prompt via a temp file (the same approach the Codex adapter uses) so no
     // special characters ever reach the shell.
-    const systemPromptFile = writeSystemPromptFile(
-      buildBridgeSystemPrompt(opts.identity, {
-        // Only transports that can receive <steer_notice> need the contract.
-        steerMailbox: CLAUDE_STEERING_SUPPORT.delivery === 'none',
-      }),
-      this.systemPromptDirectory,
-    );
+    const systemPrompt = buildBridgeSystemPrompt(opts.identity, {
+      // Only enabled transports that can receive <steer_notice> need the contract.
+      steerMailbox: this.steeringEnabled && CLAUDE_STEERING_SUPPORT.delivery === 'none',
+    });
+    const systemPromptFile = systemPrompt ? writeSystemPromptFile(systemPrompt, this.systemPromptDirectory) : undefined;
 
     const args = [
       '-p',
@@ -106,8 +104,7 @@ export class ClaudeAdapter implements AgentAdapter {
       '--verbose',
       '--permission-mode',
       opts.permissionMode ?? CLAUDE_DEFAULT_PERMISSION_MODE,
-      '--append-system-prompt-file',
-      systemPromptFile.path,
+      ...(systemPromptFile ? ['--append-system-prompt-file', systemPromptFile.path] : []),
     ];
     if (opts.sessionId) args.push('--resume', opts.sessionId);
     if (opts.model) args.push('--model', opts.model);
@@ -152,11 +149,11 @@ export class ClaudeAdapter implements AgentAdapter {
 
     child.on('error', (err) => {
       runtimeError = err;
-      systemPromptFile.cleanup();
+      systemPromptFile?.cleanup();
     });
     child.on('exit', (code, signal) => {
       log.info('agent', 'exit', { pid: child.pid ?? null, code, signal });
-      systemPromptFile.cleanup();
+      systemPromptFile?.cleanup();
     });
     // Mid-turn live input shares stdin with the initial prompt, so it stays
     // open for the run's lifetime and is closed when the turn's `result`

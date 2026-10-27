@@ -42,8 +42,7 @@ describe('DshAdapter process contract', () => {
     ]);
     const record = JSON.parse(await readFile(join(dir, 'record.json'), 'utf8')) as RecordPayload;
     expect(record.argv).toEqual(['--profile', 'headless', '--patch', expect.any(String), expect.stringContaining('hello')]);
-    expect(record.argv[4]).toContain('Aria 运行约定');
-    expect(record.argv[4]).toContain('hello');
+    expect(record.argv[4]).toBe('hello');
   });
 
   it('emits an error when dsh exits nonzero', async () => {

@@ -22,3 +22,6 @@ export function validatePublishContext(env: Record<string, string | undefined>):
   failures: string[];
 };
 export function renderReleaseNotes(notesPath: string, tag: string): string;
+
+export function validateOrigin(origin: string): boolean;
+export function withReleaseLock<T>(commonDirectory: string, operation: () => T): T;

@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import crossSpawn from "cross-spawn";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { copyFileSync, cpSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
@@ -27,12 +28,14 @@ function command(name) {
 }
 
 function run(executable, args, options = {}) {
-  return execFileSync(executable, args, {
+  const result = crossSpawn.sync(executable, args, {
     cwd: options.cwd ?? root,
-    env: options.env ? { ...process.env, ...options.env } : process.env,
     encoding: "utf8",
-    stdio: options.capture === false ? "inherit" : ["ignore", "pipe", "inherit"],
-  })?.trim() ?? "";
+    env: options.env ? { ...process.env, ...options.env } : process.env,
+    stdio: options.capture === false ? "inherit" : ["ignore", "pipe", "pipe"],
+  });
+  if (result.error || result.status !== 0) throw result.error ?? new Error(`${executable} failed (${result.status}): ${result.stderr ?? ""}`);
+  return result.stdout?.trim() ?? "";
 }
 
 export function sha256File(path) {

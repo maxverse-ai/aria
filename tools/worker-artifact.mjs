@@ -84,7 +84,8 @@ function verify() {
   }
   validateWorkerManifest(manifest, { version: packageJson.version, commit });
   const listing = execFileSync('tar', ['-tzf', tarball], { encoding: 'utf8' });
-  if (!listing.split('\n').includes('worker/index.js') || !listing.split('\n').includes('LICENSE')) {
+  const entries = listing.split(/\r?\n/);
+  if (!entries.includes('worker/index.js') || !entries.includes('LICENSE')) {
     throw new Error('worker artifact is missing required files');
   }
   process.stdout.write(`${JSON.stringify({ ok: true, ...manifest }, null, 2)}\n`);

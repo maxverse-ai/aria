@@ -1,29 +1,32 @@
 #!/usr/bin/env node
 
-import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import crossSpawn from "cross-spawn";
+import { existsSync, readFileSync, writeFileSync, mkdirSync, rmSync, mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { basename, dirname, posix, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { parseVersion, validatePolicy, verifyTransition } from "./release-policy.mjs";
 import { sha256File, validateManifest } from "./artifact.mjs";
 import { validateWorkerManifest } from "./worker-artifact.mjs";
+import { validateReleaseContext } from "./github-release.mjs";
 
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const expectedRepository = "maxverse-ai/aria";
-const releaseWorkflowSuffix = "/.github/workflows/release.yml@refs/heads/main";
 
 function command(name) {
   return process.platform === "win32" && ["corepack", "npm", "pnpm"].includes(name) ? `${name}.cmd` : name;
 }
 
 function run(executable, args, options = {}) {
-  return execFileSync(executable, args, {
+  const result = crossSpawn.sync(executable, args, {
     cwd: options.cwd ?? root,
     encoding: "utf8",
     env: options.env ? { ...process.env, ...options.env } : process.env,
     stdio: options.capture === false ? "inherit" : ["ignore", "pipe", "pipe"],
-  })?.trim() ?? "";
+  });
+  if (result.error || result.status !== 0) throw result.error ?? new Error(`${executable} failed (${result.status}): ${result.stderr ?? ""}`);
+  return result.stdout?.trim() ?? "";
 }
 
 function compareVersions(leftInput, rightInput) {
@@ -107,15 +110,7 @@ export function selectReleasePlan({ packageVersion, policy, taggedVersions = [],
 }
 
 export function validatePublishContext(env) {
-  const failures = [];
-  if (env.GITHUB_ACTIONS !== "true") failures.push("publishing is restricted to GitHub Actions");
-  if (env.GITHUB_REPOSITORY !== expectedRepository) failures.push(`publishing repository must be ${expectedRepository}`);
-  if (env.GITHUB_REF !== "refs/heads/main") failures.push("publishing ref must be refs/heads/main");
-  if (!String(env.GITHUB_WORKFLOW_REF ?? "").endsWith(releaseWorkflowSuffix)) {
-    failures.push("publishing workflow must be .github/workflows/release.yml from main");
-  }
-  if (env.ARIA_RELEASE_PUBLISH !== "true") failures.push("ARIA_RELEASE_PUBLISH must be enabled by the protected publish job");
-  return { ok: failures.length === 0, failures };
+  return validateReleaseContext(env);
 }
 
 function readJson(relativePath) {
@@ -261,9 +256,53 @@ export function renderReleaseNotes(notesPath, tag) {
   );
 }
 
+export function validateOrigin(origin) {
+  return ["https://github.com/maxverse-ai/aria.git", "https://github.com/maxverse-ai/aria", "git@github.com:maxverse-ai/aria.git", "ssh://git@github.com/maxverse-ai/aria.git"].includes(origin);
+}
+
+export function withReleaseLock(commonDirectory, operation) {
+  const lock = resolve(commonDirectory, "aria-local-release.lock");
+  try { mkdirSync(lock); } catch (error) {
+    if (error.code === "EEXIST") throw new Error("another local release holds the repository lock; inspect before removing a stale lock");
+    throw error;
+  }
+  try {
+    writeFileSync(resolve(lock, "owner.json"), JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString() }));
+    return operation();
+  } finally { rmSync(lock, { recursive: true, force: true }); }
+}
+
+function refreshMain() {
+  run("git", ["fetch", "origin", "main:refs/remotes/origin/main", "--tags"]);
+  return assertExactMain();
+}
+
 function publishRelease() {
   const context = validatePublishContext(process.env);
   if (!context.ok) throw new Error(context.failures.join("; "));
+  if (!validateOrigin(run("git", ["remote", "get-url", "origin"]))) throw new Error("origin must be the canonical maxverse-ai/aria repository");
+  run("gh", ["auth", "status"], { capture: false });
+  const repository = JSON.parse(run("gh", ["api", `repos/${expectedRepository}`]));
+  if (repository.full_name !== expectedRepository || !repository.permissions?.push) throw new Error("authenticated gh user needs push permission to the canonical repository");
+  const immutable = JSON.parse(run("gh", ["api", `repos/${expectedRepository}/immutable-releases`]));
+  if (immutable.enabled !== true) throw new Error("repository release immutability must be enabled before publication");
+  const commonDirectory = resolve(root, run("git", ["rev-parse", "--git-common-dir"]));
+  return withReleaseLock(commonDirectory, () => {
+    assertCleanWorktree();
+    const commit = refreshMain();
+    const plan = releasePlan();
+    if (!plan.ok || plan.needsVersionChange) throw new Error(plan.failures.join("; ") || "merge the prepared version before publishing");
+    run(command("pnpm"), ["ci:local"], { capture: false });
+    run(command("pnpm"), ["artifact:build"], { capture: false });
+    run(command("pnpm"), ["artifact:verify"], { capture: false });
+    run(process.execPath, ["tools/github-release.mjs", "prepare"], { capture: false });
+    assertCleanWorktree();
+    if (refreshMain() !== commit) throw new Error("main changed during local release validation");
+    return publishVerifiedRelease();
+  });
+}
+
+function publishVerifiedRelease() {
   const result = verifyReleaseArtifact();
   const tag = `v${result.target}`;
   const notesPath = `docs/releases/v${result.target}.md`;
@@ -291,12 +330,38 @@ function publishRelease() {
     "--target", result.commit,
     "--title", `Aria ${tag}`,
     "--notes-file", renderedNotesPath,
-    "--latest",
+    "--draft",
   ], { capture: false });
-  run(command("git"), ["fetch", "origin", tag], { capture: false });
-  if (!publishedVersions().includes(result.target)) {
-    throw new Error("GitHub release verification did not find the published version");
+  const downloaded = mkdtempSync(resolve(tmpdir(), "aria-release-download-"));
+  try {
+    run("gh", ["release", "download", tag, "--repo", expectedRepository, "--dir", downloaded]);
+    for (const asset of assets) {
+      if (sha256File(resolve(downloaded, basename(asset))) !== sha256File(resolve(root, asset))) {
+        throw new Error(`uploaded release asset does not match local bytes: ${basename(asset)}`);
+      }
+    }
+  } finally { rmSync(downloaded, { recursive: true, force: true }); }
+  if (refreshMain() !== result.commit) throw new Error("main changed before publication; draft retained for inspection");
+  const existingTag = run("git", ["tag", "--list", tag]);
+  if (existingTag && run("git", ["rev-parse", `${tag}^{commit}`]) !== result.commit) {
+    throw new Error("release tag appeared with a different commit; draft retained for inspection");
   }
+  const draft = JSON.parse(run("gh", ["api", `repos/${expectedRepository}/releases/tags/${tag}`]));
+  if (draft.draft !== true || draft.target_commitish !== result.commit) {
+    throw new Error("draft release target no longer matches the tested commit");
+  }
+  const expectedAssets = assets.map((asset) => basename(asset)).sort();
+  const actualAssets = (draft.assets ?? []).map((asset) => asset.name).sort();
+  if (actualAssets.length !== expectedAssets.length || actualAssets.some((asset, index) => asset !== expectedAssets[index])) {
+    throw new Error("draft release assets no longer match the verified contract");
+  }
+  run("gh", ["release", "edit", tag, "--repo", expectedRepository, "--draft=false", "--latest"], { capture: false });
+  const published = JSON.parse(run("gh", ["api", `repos/${expectedRepository}/releases/tags/${tag}`]));
+  if (published.draft || published.prerelease || published.immutable !== true || published.assets.length !== assets.length) {
+    throw new Error("published release is not immutable, stable and complete; do not consume it");
+  }
+  run("git", ["fetch", "origin", `refs/tags/${tag}:refs/tags/${tag}`]);
+  if (run("git", ["rev-parse", `${tag}^{commit}`]) !== result.commit) throw new Error("published tag does not match the tested commit");
   return { ...result, published: true, tag };
 }
 
@@ -311,9 +376,7 @@ function main() {
   if (operation === "verify") return print(verifyReleaseArtifact());
   if (operation === "publish") return print(publishRelease());
   if (operation === "publish-gate") {
-    const result = validatePublishContext(process.env);
-    if (!result.ok) throw new Error(result.failures.join("; "));
-    return print(result);
+    throw new Error("npm publication is unsupported; use pnpm release:publish for host-local GitHub Releases");
   }
   throw new Error("release command must be plan, prepare-patch, verify, publish, or publish-gate");
 }

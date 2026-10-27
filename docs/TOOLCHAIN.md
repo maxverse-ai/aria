@@ -2,9 +2,9 @@
 
 > Status: current
 
-Aria's toolchain has two goals: make local and CI validation reproducible, and
+Aria's toolchain has two goals: make host-local validation reproducible, and
 ensure that the package being inspected is the exact package later consumed by
-release or deployment automation.
+the local release publisher.
 
 ## Runtime baseline
 
@@ -14,7 +14,7 @@ release or deployment automation.
   separately installed global pnpm.
 - `pnpm-workspace.yaml#allowBuilds` is the reviewed allowlist for dependency
   lifecycle scripts.
-- CI and the package artifact are built with the pinned runtime. `engines`
+- Release packages are built with the pinned runtime. `engines`
   remains the supported floor, so the pin can advance ahead of it.
 
 Run the local prerequisite check with:
@@ -33,7 +33,7 @@ failure, so a release line can pin a patch while the floor stays lower.
 ```bash
 corepack pnpm check       # fast local feedback
 corepack pnpm ci:local    # complete pre-integration gate
-corepack pnpm ci:platform # complete CI gate
+corepack pnpm ci:platform # cross-platform validation entry point
 ```
 
 Agents and maintainers should call these entry points instead of reconstructing
@@ -65,14 +65,10 @@ temporary directory and executes `--help`, so a supposedly standalone asset
 cannot pass by resolving packages from the repository's `node_modules` tree.
 It never reads credentials or modifies an installed Aria.
 
-CI uploads this as a candidate artifact only after the platform matrix passes.
-It is not a release. The protected release workflow repeats the exact-commit
-gates, builds this candidate once, verifies it, and passes the same tarball to
-the guarded publisher. It never runs `npm publish` against the source directory.
-
-The earlier internal GitHub Release snapshot channel (`internal-v*` tags, a
-standalone installer, and release assets) has been retired; npm publication
-through the protected release workflow is the distribution path.
+CI/CD is disabled with no restoration planned. The host-local publisher repeats
+exact-commit gates and publishes verified GitHub Release assets using gh.
+See [release policy](RELEASE_POLICY.md) for the complete publication command.
+The package is not published to npm.
 
 ## Release boundary
 

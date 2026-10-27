@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest';
-import { BRIDGE_SYSTEM_PROMPT } from '../../../src/agent/bridge-system-prompt';
 import { claudeCapability, codexCapability } from '../../../src/agent/capability';
 import { createDefaultProfileConfig } from '../../../src/config/profile-schema';
 
@@ -12,7 +11,7 @@ describe('agent capability contract', () => {
       sessionKind: 'claude-session',
       promptInjection: 'append-system-prompt',
       supportsNativeHistory: true,
-      systemPrompt: BRIDGE_SYSTEM_PROMPT,
+      systemPrompt: '',
       callback: {
         marker: '__bridge_cb',
         legacyMarkers: [],
@@ -44,7 +43,7 @@ describe('agent capability contract', () => {
       sessionKind: 'codex-thread',
       promptInjection: 'stdin-prefix',
       supportsNativeHistory: true,
-      systemPrompt: BRIDGE_SYSTEM_PROMPT,
+      systemPrompt: '',
       permissions: {
         maxAccess: 'workspace',
       },

@@ -1,4 +1,4 @@
-import { withSourcePresentation } from '../../../src/conversation/presentation-context';
+import { withRunPresentation } from '../../../src/conversation/presentation-context';
 import { describe, expect, it } from 'vitest';
 import {
   BRIDGE_SYSTEM_PROMPT,
@@ -32,13 +32,13 @@ describe('bridge system prompt bot collaboration rules', () => {
 });
 
 describe('buildBridgeSystemPrompt', () => {
-  it('returns the base prompt unchanged when no identity is available', () => {
-    expect(buildBridgeSystemPrompt(undefined)).toBe(BRIDGE_SYSTEM_PROMPT);
+  it('has no implicit channel prompt when no identity is available', () => {
+    expect(buildBridgeSystemPrompt(undefined)).toBe('');
   });
 
   it('appends a concrete identity line with open_id and name', () => {
     const prompt = buildBridgeSystemPrompt({ providerId: 'lark', accountId: 'app', subjectId: 'ou_bot_self', displayName: '助手' });
-    expect(prompt.startsWith(BRIDGE_SYSTEM_PROMPT)).toBe(true);
+    expect(prompt).not.toContain('Aria');
     expect(prompt).toContain('ou_bot_self');
     expect(prompt).toContain('助手');
   });
@@ -56,10 +56,17 @@ describe('steer mailbox contract', () => {
   });
 
   it('is composed in only for mailbox-capable engines', () => {
-    const prompt = buildBridgeSystemPrompt(undefined, { steerMailbox: true });
+    const prompt = withRunPresentation(BRIDGE_SYSTEM_PROMPT, false, () => buildBridgeSystemPrompt(undefined, { steerMailbox: true }));
     expect(prompt).toContain('## Steer 信箱');
     expect(prompt).toContain('<steer_notice>');
     expect(prompt).toContain('inbox pull');
+  });
+
+  it('preserves the enabled mailbox contract without assuming a Feishu channel', () => {
+    const prompt = buildBridgeSystemPrompt(undefined, { steerMailbox: true });
+    expect(prompt).toContain('<steer_notice>');
+    expect(prompt).not.toContain('飞书 OAuth');
+    expect(prompt).not.toContain('# Aria');
   });
 });
 
@@ -73,8 +80,7 @@ describe('prefixBridgeSystemPrompt', () => {
 
   it('keeps working without an identity', () => {
     const prompt = prefixBridgeSystemPrompt('hello world', undefined);
-    expect(prompt.startsWith(BRIDGE_SYSTEM_PROMPT)).toBe(true);
-    expect(prompt.endsWith('hello world')).toBe(true);
+    expect(prompt).toBe('hello world');
   });
 });
 
@@ -99,12 +105,12 @@ describe('stable identity prefix', () => {
     const first = buildBridgeSystemPrompt({ providerId: 'lark', accountId: 'app', subjectId: 'jack', displayName: 'Jack' });
     const second = buildBridgeSystemPrompt({ displayName: 'Jack', subjectId: 'jack', accountId: 'app', providerId: 'lark' });
     expect(first).toBe(second);
-    expect(first.slice(BRIDGE_SYSTEM_PROMPT.length).trim().split('\n')).toHaveLength(1);
+    expect(first.trim().split('\n')).toHaveLength(1);
   });
 
   it('places stable identity before changing tool instructions on the generic path', () => {
     const identity = { providerId: 'web', accountId: 'host', subjectId: 'jack' };
-    const render = (tools: string) => withSourcePresentation('web', true, () => buildBridgeSystemPrompt(identity), tools);
+    const render = (tools: string) => withRunPresentation(undefined, true, () => buildBridgeSystemPrompt(identity), tools);
     const first = render('tool-lease-A'); const second = render('tool-lease-B');
     expect(first.slice(0, first.indexOf('tool-lease-A'))).toBe(second.slice(0, second.indexOf('tool-lease-B')));
     expect(first.indexOf('当前身份（你）')).toBeLessThan(first.indexOf('本次任务使用独立工作目录'));

@@ -1,3 +1,4 @@
+import { BRIDGE_SYSTEM_PROMPT } from '../agent/bridge-system-prompt';
 import { messageCommandText } from '../bot/message-normalization';
 import {
   parseTaskCommand,
@@ -2562,6 +2563,7 @@ async function handleDoctor(args: string, ctx: CommandContext): Promise<void> {
   try {
     execution = await ctx.runExecutor.submit({
       identity: larkParticipantIdentity(ctx.controls.cfg.accounts.app.id, ctx.channel.botIdentity),
+      channelPrompt: BRIDGE_SYSTEM_PROMPT,
       scopeId: `${ctx.scope}:doctor`,
       policy,
       nowait: true,

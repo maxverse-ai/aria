@@ -9,6 +9,7 @@ export interface ChannelEnvContext {
 }
 
 export function buildChannelEnv(context?: ChannelEnvContext): NodeJS.ProcessEnv {
+  if (!context) return {};
   const env: NodeJS.ProcessEnv = {
     LARK_CHANNEL: '1',
   };

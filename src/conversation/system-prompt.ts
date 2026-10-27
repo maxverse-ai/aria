@@ -14,5 +14,6 @@ export function composeSystemPrompt(parts: SystemPromptParts): string {
 
 /** Transport adapter for engines that accept only a single prompt string. */
 export function prefixSystemPrompt(prompt: string, systemPrompt: string): string {
+  if (!systemPrompt) return prompt;
   return `${systemPrompt}\n\n## user_message\n\n${prompt}`;
 }

@@ -1,6 +1,5 @@
 import type { AccessMode } from '../config/permissions';
 import type { ProfileConfig } from '../config/profile-schema';
-import { BRIDGE_SYSTEM_PROMPT } from './bridge-system-prompt';
 import type { AgentSteeringSupport } from './steering';
 
 export type AgentCapabilityId = string;
@@ -38,7 +37,7 @@ export function claudeCapability(profile?: Pick<ProfileConfig, 'permissions'>): 
     agentId: 'claude',
     sessionKind: 'claude-session',
     promptInjection: 'append-system-prompt',
-    systemPrompt: BRIDGE_SYSTEM_PROMPT,
+    systemPrompt: '',
     supportsNativeHistory: true,
     callback: {
       marker: '__bridge_cb',
@@ -57,7 +56,7 @@ export function codexCapability(profile: Pick<ProfileConfig, 'permissions'>): Ag
     agentId: 'codex',
     sessionKind: 'codex-thread',
     promptInjection: 'stdin-prefix',
-    systemPrompt: BRIDGE_SYSTEM_PROMPT,
+    systemPrompt: '',
     supportsNativeHistory: true,
     callback: {
       marker: '__bridge_cb',
@@ -79,7 +78,7 @@ export function devinCapability(profile: Pick<ProfileConfig, 'permissions'>): Ag
     agentId: 'devin',
     sessionKind: 'devin-session',
     promptInjection: 'stdin-prefix',
-    systemPrompt: BRIDGE_SYSTEM_PROMPT,
+    systemPrompt: '',
     supportsNativeHistory: true,
     callback: {
       marker: '__bridge_cb',
@@ -100,7 +99,7 @@ export function grokCapability(profile: Pick<ProfileConfig, 'permissions'>): Age
     agentId: 'grok',
     sessionKind: 'grok-session',
     promptInjection: 'stdin-prefix',
-    systemPrompt: BRIDGE_SYSTEM_PROMPT,
+    systemPrompt: '',
     supportsNativeHistory: true,
     callback: {
       marker: '__bridge_cb',
@@ -121,7 +120,7 @@ export function opencodeCapability(profile: Pick<ProfileConfig, 'permissions'>):
     agentId: 'opencode',
     sessionKind: 'opencode-session',
     promptInjection: 'stdin-prefix',
-    systemPrompt: BRIDGE_SYSTEM_PROMPT,
+    systemPrompt: '',
     supportsNativeHistory: true,
     callback: {
       marker: '__bridge_cb',
@@ -139,7 +138,7 @@ export function mimoCapability(profile: Pick<ProfileConfig, 'permissions'>): Age
     agentId: 'mimo',
     sessionKind: 'mimo-session',
     promptInjection: 'stdin-prefix',
-    systemPrompt: BRIDGE_SYSTEM_PROMPT,
+    systemPrompt: '',
     supportsNativeHistory: true,
     callback: {
       marker: '__bridge_cb',
@@ -157,7 +156,7 @@ export function dshCapability(profile: Pick<ProfileConfig, 'permissions'>): Agen
     agentId: 'dsh',
     sessionKind: 'dsh-session',
     promptInjection: 'stdin-prefix',
-    systemPrompt: BRIDGE_SYSTEM_PROMPT,
+    systemPrompt: '',
     supportsNativeHistory: false,
     finalReply: 'separate',
     callback: {
@@ -176,7 +175,7 @@ export function kimiCapability(profile: Pick<ProfileConfig, 'permissions'>): Age
     agentId: 'kimi',
     sessionKind: 'kimi-session',
     promptInjection: 'append-system-prompt',
-    systemPrompt: BRIDGE_SYSTEM_PROMPT,
+    systemPrompt: '',
     supportsNativeHistory: false,
     callback: {
       marker: '__bridge_cb',
@@ -194,7 +193,7 @@ export function piCapability(profile: Pick<ProfileConfig, 'permissions'>): Agent
     agentId: 'pi',
     sessionKind: 'pi-session',
     promptInjection: 'stdin-prefix',
-    systemPrompt: BRIDGE_SYSTEM_PROMPT,
+    systemPrompt: '',
     supportsNativeHistory: false,
     callback: {
       marker: '__bridge_cb',

@@ -11,7 +11,7 @@ import {
   validatePackageName,
   verifyStandaloneNodeAsset,
 } from "../../../tools/artifact.mjs";
-import { compareNumericVersions, evaluateToolchain, parseNumericVersion } from "../../../tools/infra-doctor.mjs";
+import { compareNumericVersions, evaluateToolchain, parseNumericVersion, runVersion } from "../../../tools/infra-doctor.mjs";
 import { validateWorkerManifest } from "../../../tools/worker-artifact.mjs";
 
 const requiredFiles = [
@@ -28,6 +28,23 @@ const requiredFiles = [
 ];
 
 describe("toolchain doctor", () => {
+  it("reads successful versions and rejects failed or missing commands", () => {
+    expect(runVersion(process.execPath, ["-e", "console.log('12.0.0')"])).toBe("12.0.0");
+    expect(runVersion(process.execPath, ["-e", "console.log('12.0.0'); process.exit(1)"])).toBeNull();
+    expect(runVersion("aria-doctor-missing-command-fixture", [])).toBeNull();
+  });
+
+  it.skipIf(process.platform !== "win32")("runs Windows command shims in paths with spaces", () => {
+    const directory = mkdtempSync(join(tmpdir(), "aria doctor shim "));
+    try {
+      const shim = join(directory, "version.cmd");
+      writeFileSync(shim, "@echo off\r\necho 12.0.0\r\n", "utf8");
+      expect(runVersion(shim, [])).toBe("12.0.0");
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it("parses and compares numeric runtime versions", () => {
     expect(parseNumericVersion("v22.22.3")).toEqual([22, 22, 3]);
     expect(compareNumericVersions([20, 12, 0], [20, 12, 0])).toBe(0);

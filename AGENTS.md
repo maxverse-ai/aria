@@ -32,6 +32,14 @@
 
 ## Release invariants
 
+- Releases are built, tested, packaged, published and downloaded for verification
+  on the host machine using its authenticated `gh`. CI/CD is disabled with no
+  restoration planned; do not enable workflows or provision runners for release.
+- The supported publication entry point is the local release tool described in
+  `docs/RELEASE_POLICY.md`. Never impersonate GitHub Actions with environment
+  variables. Preserve clean exact `origin/main`, local gates, exclusive release
+  locking, version/tag collision checks and immutable asset verification.
+
 - Normal development work MUST NOT change versions, create release tags, or publish packages.
 - Read `docs/RELEASE_POLICY.md` before changing a version, tag, changelog, release policy, package publication, or deployment workflow.
 - PATCH releases may be automated only on the release line authorized by `.release-policy.json`; MINOR, MAJOR, and stable promotion releases require explicit human authorization.

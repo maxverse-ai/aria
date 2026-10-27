@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { execFileSync } from "node:child_process";
+import crossSpawn from "cross-spawn";
 import { copyFileSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -21,14 +21,13 @@ export { releaseLineAuthorization };
 
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const expectedRepository = "maxverse-ai/aria";
-const workflowSuffix = "/.github/workflows/release.yml@refs/heads/main";
 
 function run(executable, args) {
-  return execFileSync(executable, args, {
-    cwd: root,
-    encoding: "utf8",
-    stdio: ["ignore", "pipe", "pipe"],
-  }).trim();
+  const result = crossSpawn.sync(executable, args, {
+    cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"],
+  });
+  if (result.error || result.status !== 0) throw result.error ?? new Error(`${executable} failed: ${result.stderr}`);
+  return result.stdout.trim();
 }
 
 function readJson(relativePath) {
@@ -43,15 +42,9 @@ export function tagForVersion(version) {
 
 export function validateReleaseContext(env) {
   const failures = [];
-  if (env.GITHUB_ACTIONS !== "true") failures.push("GitHub releases are restricted to GitHub Actions");
-  if (env.GITHUB_REPOSITORY !== expectedRepository) {
-    failures.push(`GitHub release repository must be ${expectedRepository}`);
+  if (env.GITHUB_ACTIONS === "true" || (env.CI && env.CI !== "false")) {
+    failures.push("releases must run locally on the host, not in CI/CD");
   }
-  if (env.GITHUB_REF !== "refs/heads/main") failures.push("GitHub releases must run from main");
-  if (!String(env.GITHUB_WORKFLOW_REF ?? "").endsWith(workflowSuffix)) {
-    failures.push("GitHub releases must use .github/workflows/release.yml from main");
-  }
-  if (env.ARIA_GITHUB_RELEASE !== "true") failures.push("ARIA_GITHUB_RELEASE must be enabled");
   return { ok: failures.length === 0, failures };
 }
 
@@ -136,6 +129,8 @@ function writeGitHubOutput(values) {
 }
 
 function prepareGitHubRelease() {
+  const context = validateReleaseContext(process.env);
+  if (!context.ok) throw new Error(context.failures.join("; "));
   assertCleanWorktree();
   const commit = assertExactMain();
   const packageJson = readJson("package.json");
@@ -152,6 +147,10 @@ function prepareGitHubRelease() {
   const tarball = resolve(root, "artifacts", manifest.tarball);
   const notes = `docs/releases/v${packageJson.version}.md`;
   const notesContent = readFileSync(resolve(root, notes), "utf8");
+  const translatedNotes = readFileSync(resolve(root, `docs/releases/v${packageJson.version}.zh.md`), "utf8");
+  if (!translatedNotes.trim() || !translatedNotes.includes(`# Aria v${packageJson.version}`)) {
+    throw new Error("Chinese release notes must match the package version");
+  }
   const digest = sha256File(tarball);
   const plan = createGitHubReleasePlan({
     packageJson,

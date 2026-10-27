@@ -411,8 +411,8 @@ Every stage must pass, from a branch rebased onto current `origin/main`:
 
 Runtime-changing stages additionally prove foreground and Supervisor start/stop,
 profile restart, engine switch, bounded drain, prior-config compatibility, and
-the documented rollback switch. CI covers supported operating systems before a
-new path becomes the default.
+the documented rollback switch. Native local validation must establish each claimed operating system before a
+new path becomes the default; CI/CD is disabled.
 
 Feature flags are temporary migration controls with an owner and removal stage;
 they are not permanent alternate architectures. Until an opt-in path is proven,
