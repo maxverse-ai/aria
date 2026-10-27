@@ -108,35 +108,12 @@ describe("GitHub release planning", () => {
   });
 });
 
-describe("GitHub release workflow boundary", () => {
-  const valid = {
-    GITHUB_ACTIONS: "true",
-    GITHUB_REPOSITORY: "maxverse-ai/aria",
-    GITHUB_REF: "refs/heads/main",
-    GITHUB_WORKFLOW_REF: "maxverse-ai/aria/.github/workflows/release.yml@refs/heads/main",
-    ARIA_GITHUB_RELEASE: "true",
-  };
-
-  it("accepts only the dedicated main-branch workflow", () => {
-    expect(validateReleaseContext(valid)).toEqual({ ok: true, failures: [] });
-    expect(validateReleaseContext({ ...valid, GITHUB_REF: "refs/heads/feature" }).ok).toBe(false);
-    expect(validateReleaseContext({ ...valid, GITHUB_WORKFLOW_REF: "release.yml" }).ok).toBe(false);
-  });
-
-  it("is single-writer, environment-protected, and immutable-verified", () => {
-    const workflow = readFileSync(new URL("../../../.github/workflows/release.yml", import.meta.url), "utf8");
-    const notes = readFileSync(new URL("../../../docs/releases/v0.1.2.md", import.meta.url), "utf8");
-    expect(workflow).toContain("group: aria-release");
-    expect(workflow).toContain("cancel-in-progress: false");
-    expect(workflow).toContain("environment: release-production");
-    expect(workflow).toContain("pnpm github-release:gate");
-    expect(workflow).toContain("pnpm github-release:prepare");
-    expect(workflow).toContain("pnpm release:publish");
-    expect(workflow).toContain(".immutable");
-    expect(workflow).not.toContain("npm publish");
-    expect(workflow).not.toContain("id-token: write");
-    expect(workflow).not.toContain("NODE_AUTH_TOKEN");
-    expect(notes).toContain("# Aria");
+describe("host-local release context", () => {
+  it("accepts local execution and rejects Actions or other CI environments", () => {
+    expect(validateReleaseContext({})).toEqual({ ok: true, failures: [] });
+    expect(validateReleaseContext({ GITHUB_ACTIONS: "true" }).ok).toBe(false);
+    expect(validateReleaseContext({ CI: "1" }).ok).toBe(false);
+    expect(validateReleaseContext({ CI: "false" }).ok).toBe(true);
   });
 });
 
