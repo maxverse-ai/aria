@@ -72,11 +72,26 @@ its authenticated `gh`. GitHub hosts source, pull requests and immutable Release
 assets, not the release executor. Do not enable workflows, provision runners,
 impersonate Actions through environment variables, or invoke `npm publish`.
 
-`pnpm release:plan` inspects the next version. `pnpm release:prepare` prepares
+`pnpm release:plan` inspects the next version against local tags and published
+GitHub Releases; `release:status` remains an alias. `pnpm release:preflight`
+performs read-only checks of the toolchain, canonical origin, current GitHub
+identity and push permission, release immutability, clean exact remote-main
+checkout, remote target collisions and prepared bilingual notes. It does not
+switch accounts, modify channel bindings, install tools or fetch refs. Use the
+intended authenticated `gh` environment; missing authentication fails explicitly.
+On Windows, invoke scripts through `corepack.cmd pnpm` or `pnpm.cmd` when
+PowerShell execution policy blocks `.ps1` shims.
+
+`pnpm release:prepare` prepares
 exactly one patch in a clean task branch; commit version and bilingual release
 notes, validate and integrate them before publication. The release line remains
 controlled by `.release-policy.json`; do not change it without explicit human
 authorization recorded in the release commit.
+
+Run focused tests while editing, then form the complete commit, synchronize the
+task branch with main and run the integration gates before pushing. Avoid an
+extra full gate run on the same uncommitted contents. Publication still reruns
+all gates on the exact merged commit; validation is not reused across commits.
 
 `pnpm release:publish` is the supported single-writer local publication entry
 point. It must:
@@ -84,7 +99,9 @@ point. It must:
 1. Reject CI execution, validate the expected repository origin and `gh` access,
    acquire an exclusive lock shared by linked worktrees, fetch main and tags,
    and require a clean checkout at the exact latest `origin/main` commit.
-2. Run the full local gates, build and inspect the package and standalone worker
+2. Run `release:validate` (diff, toolchain, policy, build, full tests, typecheck,
+   worker packaging and verification), then package the already-built output
+   and inspect the package and standalone worker
    on that exact commit. Candidates are not releases and must not be pinned by
    consumers as if they were published assets.
 3. Verify the next authorized version, bilingual notes, manifests, checksums,
@@ -98,6 +115,38 @@ point. It must:
 6. Release the local lock on success or failure. Leave an incomplete draft
    explicitly identified for inspection; never represent partial publication
    as success or silently overwrite/delete it on retry.
+
+The publisher builds once before running tests against the generated console;
+it does not invoke `pretest` or the independently useful `artifact:build` script,
+both of which would rebuild. The standalone scripts retain their original
+behavior. Stage start, outcome and elapsed time are written to stderr and to
+`<git-common-dir>/aria-releases/<version>.jsonl`. Detailed child command output
+remains on the calling terminal and can be redirected to a separate log.
+
+## Interrupted publication
+
+After successful exact-main validation and asset preparation, the publisher
+atomically saves `<git-common-dir>/aria-releases/<version>.json`. It records the
+repository, version, full commit, Node/pnpm versions, platform, architecture,
+rendered-notes digest, all eight asset names/sizes/digests, stage and Release ID
+when known. These local records contain no credentials and survive task branches.
+
+Use `pnpm release:resume` from the original clean checkout with the original
+`artifacts/` directory to explicitly reconcile an interrupted publication. It
+requires the same exact current main commit, toolchain and unchanged asset bytes;
+it does not skip gates for a different commit or rebuild changed inputs.
+Keep that workspace until publication and verification complete.
+
+Recovery queries actual GitHub state before creating anything. It adopts only
+the matching target commit and tag, uploads only missing assets without
+overwriting, rejects unexpected or conflicting assets, downloads and hashes all
+assets, rechecks main and the draft, and then publishes. A timeout after a
+successful create, upload or publish is resolved by the next explicit resume,
+not by blindly repeating the write. Already published releases must be stable,
+immutable and complete; recovery downloads their assets and verifies the tag
+without publishing again. A changed main, changed local artifact, conflicting
+draft or failed gate requires inspection; never delete a session or overwrite
+remote assets merely to bypass a failure.
 
 The retired `internal-v*` snapshot channel remains unsupported. Public
 consumption uses immutable `v*` GitHub Releases. Local npm publication is not a

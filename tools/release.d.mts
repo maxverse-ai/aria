@@ -25,3 +25,6 @@ export function renderReleaseNotes(notesPath: string, tag: string): string;
 
 export function validateOrigin(origin: string): boolean;
 export function withReleaseLock<T>(commonDirectory: string, operation: () => T): T;
+export function releaseStage<T>(name: string, operation: () => T, report?: (event: {
+  stage: string; status: string; at?: string; durationMs?: number; error?: string;
+}) => void): T;

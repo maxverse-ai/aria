@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import crossSpawn from "cross-spawn";
-import { existsSync, readFileSync, writeFileSync, mkdirSync, rmSync, mkdtempSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, mkdirSync, rmSync, mkdtempSync, statSync, appendFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, posix, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -10,9 +10,28 @@ import { parseVersion, validatePolicy, verifyTransition } from "./release-policy
 import { sha256File, validateManifest } from "./artifact.mjs";
 import { validateWorkerManifest } from "./worker-artifact.mjs";
 import { validateReleaseContext } from "./github-release.mjs";
+import { saveSession, readSession, resumeSession } from "./release-session.mjs";
 
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const expectedRepository = "maxverse-ai/aria";
+let stageLog;
+
+export function releaseStage(name, operation, report = (event) => {
+  const line = JSON.stringify(event);
+  process.stderr.write(`${line}\n`);
+  if (stageLog) appendFileSync(stageLog, `${line}\n`);
+}) {
+  const started = Date.now();
+  report({ stage: name, status: "started", at: new Date(started).toISOString() });
+  try {
+    const result = operation();
+    report({ stage: name, status: "passed", durationMs: Date.now() - started });
+    return result;
+  } catch (error) {
+    report({ stage: name, status: "failed", durationMs: Date.now() - started, error: error.message });
+    throw error;
+  }
+}
 
 function command(name) {
   return process.platform === "win32" && ["corepack", "npm", "pnpm"].includes(name) ? `${name}.cmd` : name;
@@ -137,13 +156,13 @@ function taggedVersions() {
 function publishedVersions() {
   let value;
   try {
-    value = run(command("gh"), ["api", `repos/${expectedRepository}/releases?per_page=100`]);
+    value = run(command("gh"), ["api", "--paginate", "--slurp", `repos/${expectedRepository}/releases?per_page=100`]);
   } catch {
     throw new Error("could not query GitHub releases (gh authentication required)");
   }
   let releases;
   try {
-    releases = JSON.parse(value);
+    releases = JSON.parse(value).flat();
   } catch {
     throw new Error("GitHub releases API returned invalid JSON");
   }
@@ -193,6 +212,7 @@ function preparePatch() {
   assertCleanWorktree();
   const plan = releasePlan();
   if (!plan.ok) throw new Error(plan.failures.join("; "));
+  assertTargetAvailable(plan.target);
   if (plan.kind === "initial" || !plan.needsVersionChange) {
     writeGitHubOutput({ changed: false, target: plan.target, initial: plan.kind === "initial" });
     return plan;
@@ -277,7 +297,7 @@ function refreshMain() {
   return assertExactMain();
 }
 
-function publishRelease() {
+function preflight() {
   const context = validatePublishContext(process.env);
   if (!context.ok) throw new Error(context.failures.join("; "));
   if (!validateOrigin(run("git", ["remote", "get-url", "origin"]))) throw new Error("origin must be the canonical maxverse-ai/aria repository");
@@ -286,85 +306,125 @@ function publishRelease() {
   if (repository.full_name !== expectedRepository || !repository.permissions?.push) throw new Error("authenticated gh user needs push permission to the canonical repository");
   const immutable = JSON.parse(run("gh", ["api", `repos/${expectedRepository}/immutable-releases`]));
   if (immutable.enabled !== true) throw new Error("repository release immutability must be enabled before publication");
+  const toolchain = JSON.parse(run(process.execPath, ["tools/infra-doctor.mjs", "--json"]));
+  assertCleanWorktree();
+  const commit = run("git", ["rev-parse", "HEAD"]);
+  const remote = run("git", ["ls-remote", "origin", "refs/heads/main"]).split(/\s/)[0];
+  if (commit !== remote) throw new Error("preflight requires the exact remote main commit");
+  const plan = releasePlan();
+  if (!plan.ok) throw new Error(plan.failures.join("; "));
+  assertTargetAvailable(plan.target);
+  if (!plan.needsVersionChange) {
+    for (const suffix of ["md", "zh.md"]) {
+      const notes = readFileSync(resolve(root, `docs/releases/v${plan.target}.${suffix}`), "utf8");
+      if (!notes.trim() || !notes.includes(`# Aria v${plan.target}`)) throw new Error("release notes must match the target version");
+    }
+  }
+  return { ...plan, commit, toolchain, ready: !plan.needsVersionChange };
+}
+
+function assertTargetAvailable(version) {
+  if (run("git", ["ls-remote", "origin", `refs/tags/v${version}`])) throw new Error("target release tag already exists remotely");
+  const releases = JSON.parse(run("gh", ["api", "--paginate", "--slurp", `repos/${expectedRepository}/releases?per_page=100`])).flat();
+  if (releases.some((release) => release.tag_name === `v${version}`)) throw new Error("target release or draft already exists; inspect its session before resuming");
+}
+
+function sessionIdentity(commit) {
+  return {
+    repository: expectedRepository, commit, version: readJson("package.json").version,
+    node: process.version, pnpm: run(command("corepack"), ["pnpm", "--version"]),
+    platform: process.platform, arch: process.arch,
+  };
+}
+
+function publishRelease(resume = false) {
   const commonDirectory = resolve(root, run("git", ["rev-parse", "--git-common-dir"]));
   return withReleaseLock(commonDirectory, () => {
-    assertCleanWorktree();
-    const commit = refreshMain();
-    const plan = releasePlan();
-    if (!plan.ok || plan.needsVersionChange) throw new Error(plan.failures.join("; ") || "merge the prepared version before publishing");
-    run(command("pnpm"), ["ci:local"], { capture: false });
-    run(command("pnpm"), ["artifact:build"], { capture: false });
-    run(command("pnpm"), ["artifact:verify"], { capture: false });
-    run(process.execPath, ["tools/github-release.mjs", "prepare"], { capture: false });
-    assertCleanWorktree();
-    if (refreshMain() !== commit) throw new Error("main changed during local release validation");
-    return publishVerifiedRelease();
+    const directory = resolve(commonDirectory, "aria-releases");
+    mkdirSync(directory, { recursive: true });
+    const version = readJson("package.json").version;
+    stageLog = resolve(directory, `${version}.jsonl`);
+    const sessionPath = resolve(directory, `${version}.json`);
+    try {
+      if (resume) {
+        const context = validatePublishContext(process.env);
+        if (!context.ok) throw new Error(context.failures.join("; "));
+        if (!validateOrigin(run("git", ["remote", "get-url", "origin"]))) throw new Error("origin must be canonical");
+        run("gh", ["auth", "status"], { capture: false });
+        const repository = JSON.parse(run("gh", ["api", `repos/${expectedRepository}`]));
+        if (repository.full_name !== expectedRepository || !repository.permissions?.push) throw new Error("resume requires canonical repository push permission");
+        if (JSON.parse(run("gh", ["api", `repos/${expectedRepository}/immutable-releases`])).enabled !== true) throw new Error("release immutability must be enabled");
+        assertCleanWorktree();
+        const commit = refreshMain();
+        const session = readSession(sessionPath, sessionIdentity(commit), root);
+        return publishSession(session, sessionPath);
+      }
+      const plan = releaseStage("preflight", preflight);
+      if (!plan.ready) throw new Error("merge the prepared version before publishing");
+      if (existsSync(sessionPath)) throw new Error("release session exists; use pnpm release:resume to inspect and continue");
+      const commit = refreshMain();
+      releaseStage("validate", () => run(command("pnpm"), ["release:validate"], { capture: false }));
+      releaseStage("package", () => run(process.execPath, ["tools/artifact.mjs", "build"], { capture: false }));
+      releaseStage("inspect-package", () => run(command("pnpm"), ["artifact:verify"], { capture: false }));
+      releaseStage("prepare-assets", () => run(process.execPath, ["tools/github-release.mjs", "prepare"], { capture: false }));
+      assertCleanWorktree();
+      if (refreshMain() !== commit) throw new Error("main changed during local release validation");
+      const result = verifyReleaseArtifact();
+      const tag = `v${result.target}`;
+      writeFileSync(resolve(root, "artifacts/release-notes.md"), renderReleaseNotes(`docs/releases/${tag}.md`, tag), "utf8");
+      const assets = [result.tarball, "artifacts/manifest.json", "artifacts/SHA256SUMS", "artifacts/release.json", "artifacts/aria-install.mjs", result.worker, "artifacts/aria-worker-manifest.json", "artifacts/aria-worker-SHA256SUMS"];
+      const session = {
+        schemaVersion: 1, ...sessionIdentity(commit), tag, stage: "prepared",
+        notesSha256: sha256File(resolve(root, "artifacts/release-notes.md")),
+        assets: assets.map((asset) => ({ name: basename(asset), size: statSync(resolve(root, asset)).size, sha256: sha256File(resolve(root, asset)) })),
+      };
+      saveSession(sessionPath, session);
+      return publishSession(session, sessionPath);
+    } catch (error) {
+      throw new Error(`${error.message}\nRelease log: ${stageLog}\nSession: ${sessionPath}. Inspect any GitHub draft before retrying.`, { cause: error });
+    } finally { stageLog = undefined; }
   });
 }
 
-function publishVerifiedRelease() {
-  const result = verifyReleaseArtifact();
-  const tag = `v${result.target}`;
-  const notesPath = `docs/releases/v${result.target}.md`;
-  if (!existsSync(resolve(root, notesPath))) throw new Error(`release notes ${notesPath} are missing`);
-  const renderedNotesPath = "artifacts/release-notes.md";
-  writeFileSync(resolve(root, renderedNotesPath), renderReleaseNotes(notesPath, tag), "utf8");
-  const assets = [
-    result.tarball,
-    "artifacts/manifest.json",
-    "artifacts/SHA256SUMS",
-    "artifacts/release.json",
-    "artifacts/aria-install.mjs",
-    result.worker,
-    "artifacts/aria-worker-manifest.json",
-    "artifacts/aria-worker-SHA256SUMS",
-  ];
-  for (const asset of assets) {
-    if (!existsSync(resolve(root, asset))) {
-      throw new Error(`release asset ${asset} is missing; run github-release:prepare first`);
-    }
-  }
-  run(command("gh"), [
-    "release", "create", tag, ...assets,
-    "--repo", expectedRepository,
-    "--target", result.commit,
-    "--title", `Aria ${tag}`,
-    "--notes-file", renderedNotesPath,
-    "--draft",
-  ], { capture: false });
-  const downloaded = mkdtempSync(resolve(tmpdir(), "aria-release-download-"));
-  try {
-    run("gh", ["release", "download", tag, "--repo", expectedRepository, "--dir", downloaded]);
-    for (const asset of assets) {
-      if (sha256File(resolve(downloaded, basename(asset))) !== sha256File(resolve(root, asset))) {
-        throw new Error(`uploaded release asset does not match local bytes: ${basename(asset)}`);
-      }
-    }
-  } finally { rmSync(downloaded, { recursive: true, force: true }); }
-  if (refreshMain() !== result.commit) throw new Error("main changed before publication; draft retained for inspection");
-  const existingTag = run("git", ["tag", "--list", tag]);
-  if (existingTag && run("git", ["rev-parse", `${tag}^{commit}`]) !== result.commit) {
-    throw new Error("release tag appeared with a different commit; draft retained for inspection");
-  }
-  // The REST tag endpoint can return 404 for private draft releases.
-  const draftView = JSON.parse(run("gh", ["release", "view", tag, "--repo", expectedRepository, "--json", "databaseId"]));
-  const draft = JSON.parse(run("gh", ["api", `repos/${expectedRepository}/releases/${draftView.databaseId}`]));
-  if (draft.draft !== true || draft.target_commitish !== result.commit) {
-    throw new Error("draft release target no longer matches the tested commit");
-  }
-  const expectedAssets = assets.map((asset) => basename(asset)).sort();
-  const actualAssets = (draft.assets ?? []).map((asset) => asset.name).sort();
-  if (actualAssets.length !== expectedAssets.length || actualAssets.some((asset, index) => asset !== expectedAssets[index])) {
-    throw new Error("draft release assets no longer match the verified contract");
-  }
-  run("gh", ["release", "edit", tag, "--repo", expectedRepository, "--draft=false", "--latest"], { capture: false });
-  const published = JSON.parse(run("gh", ["api", `repos/${expectedRepository}/releases/tags/${tag}`]));
-  if (published.draft || published.prerelease || published.immutable !== true || published.assets.length !== assets.length) {
-    throw new Error("published release is not immutable, stable and complete; do not consume it");
-  }
-  run("git", ["fetch", "origin", `refs/tags/${tag}:refs/tags/${tag}`]);
-  if (run("git", ["rev-parse", `${tag}^{commit}`]) !== result.commit) throw new Error("published tag does not match the tested commit");
-  return { ...result, published: true, tag };
+function publishSession(session, sessionPath) {
+  const notes = resolve(root, "artifacts/release-notes.md");
+  if (sha256File(notes) !== session.notesSha256) throw new Error("rendered release notes changed");
+  const inspect = () => {
+    const releases = JSON.parse(run("gh", ["api", "--paginate", "--slurp", `repos/${expectedRepository}/releases?per_page=100`])).flat();
+    const matches = releases.filter((release) => release.tag_name === session.tag);
+    if (matches.length > 1) throw new Error("multiple releases match the session tag");
+    const release = matches[0];
+    if (!release && session.releaseId) throw new Error("recorded release is missing; inspect before restarting");
+    if (release && session.releaseId && release.id !== session.releaseId) throw new Error("release ID changed");
+    return release;
+  };
+  const result = releaseStage("upload-and-verify", () => resumeSession(session, {
+    inspect,
+    create: () => run("gh", ["release", "create", session.tag, "--repo", expectedRepository, "--target", session.commit, "--title", `Aria ${session.tag}`, "--notes-file", notes, "--draft"], { capture: false }),
+    save: () => saveSession(sessionPath, session),
+    upload: (asset) => releaseStage(`upload:${asset.name}`, () => run("gh", ["release", "upload", session.tag, resolve(root, "artifacts", asset.name), "--repo", expectedRepository], { capture: false })),
+    verify: (release) => {
+      const downloaded = mkdtempSync(resolve(tmpdir(), "aria-release-download-"));
+      try {
+        run("gh", ["release", "download", session.tag, "--repo", expectedRepository, "--dir", downloaded]);
+        for (const asset of release.assets) {
+          const output = resolve(downloaded, asset.name);
+          if (sha256File(output) !== session.assets.find((expected) => expected.name === asset.name).sha256) throw new Error(`downloaded asset mismatch: ${asset.name}`);
+        }
+      } finally { rmSync(downloaded, { recursive: true, force: true }); }
+    },
+    checkMain: () => {
+      if (refreshMain() !== session.commit) throw new Error("main changed before publication; draft retained");
+      const remoteTag = run("git", ["ls-remote", "origin", `refs/tags/${session.tag}`, `refs/tags/${session.tag}^{}`]);
+      if (remoteTag) throw new Error("release tag appeared before publication; inspect before resuming");
+    },
+    publish: () => run("gh", ["release", "edit", session.tag, "--repo", expectedRepository, "--draft=false", "--latest"], { capture: false }),
+    verifyTag: () => {
+      run("git", ["fetch", "origin", `refs/tags/${session.tag}:refs/tags/${session.tag}`]);
+      if (run("git", ["rev-parse", `${session.tag}^{commit}`]) !== session.commit) throw new Error("published tag does not match tested commit");
+    },
+  }));
+  return { published: true, tag: session.tag, commit: session.commit, url: result.html_url, session: sessionPath };
 }
 
 function print(value) {
@@ -374,13 +434,15 @@ function print(value) {
 function main() {
   const operation = process.argv[2] ?? "plan";
   if (operation === "plan") return print(releasePlan());
+  if (operation === "preflight") return print(releaseStage("preflight", preflight));
   if (operation === "prepare-patch") return print(preparePatch());
   if (operation === "verify") return print(verifyReleaseArtifact());
   if (operation === "publish") return print(publishRelease());
+  if (operation === "resume") return print(publishRelease(true));
   if (operation === "publish-gate") {
     throw new Error("npm publication is unsupported; use pnpm release:publish for host-local GitHub Releases");
   }
-  throw new Error("release command must be plan, prepare-patch, verify, publish, or publish-gate");
+  throw new Error("release command must be plan, preflight, prepare-patch, verify, publish, resume, or publish-gate");
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

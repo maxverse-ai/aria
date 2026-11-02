@@ -108,14 +108,13 @@ describe("host-local publication", () => {
   it("runs validation inside the repository lock before draft upload and publication", () => {
     const source = readFileSync(new URL("../../../tools/release.mjs", import.meta.url), "utf8");
     expect(source).toContain('withReleaseLock(commonDirectory');
-    expect(source).toContain('["ci:local"]');
+    expect(source).toContain('["release:validate"]');
     expect(source).toContain('["artifact:verify"]');
     expect(source).toContain('"--draft"');
     expect(source).toContain('"--draft=false"');
-    expect(source).toContain('published.immutable !== true');
-    expect(source).toContain('releases/${draftView.databaseId}');
-    expect(source.indexOf('release tag appeared with a different commit')).toBeLessThan(source.indexOf('"--draft=false"'));
-    expect(source.indexOf('draft release assets no longer match')).toBeLessThan(source.indexOf('"--draft=false"'));
+    expect(source).toContain('resumeSession(session');
+    expect(source).toContain('readSession(sessionPath');
+    expect(source).toContain('"--paginate", "--slurp"');
     expect(source).not.toContain('ARIA_RELEASE_PUBLISH');
   });
 });
