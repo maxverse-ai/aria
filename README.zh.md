@@ -244,6 +244,8 @@ Lark 国际版应用可加 `--tenant lark`。
 
 ### 后台运行
 
+Windows 自适应自启动默认保留已有任务；首次根据权限和交互环境选择开机或登录启动。详见[运维指南](docs/operate-the-bridge.zh.md#windows-自适应自启动)。
+
 `run` 适合首次配置和前台调试。确认 bot 能正常收发消息后，先用 `Ctrl-C` 停掉前台进程，再用系统服务常驻后台：
 
 ```bash

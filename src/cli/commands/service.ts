@@ -23,8 +23,10 @@ import {
   type RestartSafetyReportV1,
   type RestartTarget,
 } from '../../runtime/restart-safety';
+import type { AutostartMode } from '../../daemon/windows-autostart';
 
 export interface ServiceStartOptions {
+  autostart?: AutostartMode;
   profile?: string;
   agent?: string;
   workspace?: string;
@@ -331,6 +333,12 @@ async function reportConnectAfter(
  * they've switched runtime versions or updated their PATH since last install.
  */
 export async function runServiceStart(opts: ServiceStartOptions = {}): Promise<void> {
+  if (opts.autostart && !['auto', 'boot', 'logon'].includes(opts.autostart)) {
+    throw new Error('Invalid autostart mode. Choose auto, boot, or logon.');
+  }
+  if (process.platform !== 'win32' && opts.autostart && opts.autostart !== 'auto') {
+    throw new Error('--autostart boot/logon is supported only on Windows. Other platforms keep their native service autostart.');
+  }
   if (opts.webUi) {
     await runServiceStartWebUi(opts);
     return;
@@ -361,7 +369,7 @@ export async function runServiceStart(opts: ServiceStartOptions = {}): Promise<v
     },
   });
 
-  await adapter.install();
+  await adapter.install({ autostart: opts.autostart });
 
   // If already running, stop first so start operations don't race.
   if (adapter.isRunning()) {
@@ -382,6 +390,7 @@ export async function runServiceStart(opts: ServiceStartOptions = {}): Promise<v
   }
 
   await reportConnectAfter('started', profile, adapter.start);
+  printAutostartStatus(adapter);
 }
 
 /**
@@ -418,7 +427,7 @@ async function runServiceStartWebUi(opts: ServiceStartOptions): Promise<void> {
     },
   });
 
-  await adapter.install();
+  await adapter.install({ autostart: opts.autostart });
 
   if (adapter.isRunning()) {
     console.log('检测到 supervisor 服务已在运行,先停掉再重启...');
@@ -436,6 +445,7 @@ async function runServiceStartWebUi(opts: ServiceStartOptions): Promise<void> {
   }
 
   await reportConnectAfter('started', profile, adapter.start);
+  printAutostartStatus(adapter);
   console.log('  控制台由后台 supervisor 托管；用 `aria ui` 打开');
 }
 
@@ -619,6 +629,16 @@ function printProfileAssessment(assessment: RestartProfileAssessment): void {
   console.error(`  ${assessment.profile}: ${blockers}`);
 }
 
+function printAutostartStatus(adapter: ServiceAdapter): void {
+  const status = adapter.autostartStatus?.();
+  if (!status) return;
+  const mode = status.mode === 'boot' ? '开机触发' : status.mode === 'logon' ? '登录后启动' : '未知触发方式';
+  const unattended = status.mode === 'boot' && ['Password', 'S4U', 'ServiceAccount'].includes(status.logonType ?? '');
+  console.log(`  自启动: ${status.enabled ? '已启用' : '已禁用'} · ${mode}${unattended ? '(无需登录)' : ''}`);
+  if (status.account) console.log(`  运行账户: ${status.account}`);
+  if (status.mode === 'logon') console.log('  无人登录时启动: 在管理员终端运行 aria start --autostart boot，并在本机输入 Windows 账户密码。');
+}
+
 /** `bridge status` — report whether the daemon is running, with pid + log paths. */
 export async function runServiceStatus(opts: ServiceProfileOptions = {}): Promise<void> {
   const { serviceId, profile, webUi } = await resolveServiceTarget(opts);
@@ -631,6 +651,7 @@ export async function runServiceStatus(opts: ServiceProfileOptions = {}): Promis
         serviceId,
         target: webUi ? 'supervisor' : 'profile',
         state,
+        ...(adapter.autostartStatus ? { autostart: adapter.autostartStatus() } : {}),
         logs: { stdout: daemonStdoutPath(serviceId), stderr: daemonStderrPath(serviceId) },
         ...extra,
       },
@@ -654,6 +675,7 @@ export async function runServiceStatus(opts: ServiceProfileOptions = {}): Promis
       return;
     }
     console.log(`${label} 当前没在后台运行`);
+    printAutostartStatus(adapter);
     console.log(`  通过 ${startHint} 重新启动`);
     return;
   }
@@ -685,6 +707,7 @@ export async function runServiceStatus(opts: ServiceProfileOptions = {}): Promis
     console.log('✓ bot 正在后台运行');
   }
   if (pid) console.log(`  进程 ID: ${pid}`);
+  printAutostartStatus(adapter);
   console.log('  日志:');
   console.log(`    ${daemonStdoutPath(serviceId)}`);
   console.log(`    ${daemonStderrPath(serviceId)}`);

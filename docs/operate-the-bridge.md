@@ -13,8 +13,9 @@ control-plane commands. All commands are listed in the
 
 - **`aria run`** — foreground bridge. Use it for first-run setup (the QR
   wizard) and debugging; stop it with `Ctrl-C`.
-- **`aria start`** — installs (if needed) and starts an OS-managed daemon that
-  survives logout and restarts on boot.
+- **`aria start`** — installs (if needed) and starts an OS-managed daemon with
+  autostart. Windows logon mode requires a signed-in user; boot mode can run
+  before sign-in.
 
 Both accept `--profile <name>` (defaults to the active profile) and
 `--web-ui`, which runs the machine-wide Supervisor + local web console that
@@ -34,6 +35,32 @@ with `aria logs [--profile <name>] [--lines <n>] [--follow]` (`--stdout` for
 the stdout log, `--web-ui` for the Supervisor's).
 
 ## Service lifecycle
+
+### Windows adaptive autostart
+
+`aria start` defaults to `--autostart auto` on Windows. It preserves an existing
+task's trigger, principal, and saved credentials while refreshing the launcher.
+For a new task, an elevated interactive terminal offers Windows account password
+input to register boot autostart; otherwise it registers logon autostart for the
+current user. Cancelling password input in auto mode selects logon; registration
+errors fail visibly without a fallback. Aria never silently downgrades an existing
+boot task. Use the same Windows account that owns the installation when elevating.
+
+Use `aria start --autostart boot` from an Administrator terminal to explicitly
+enable startup before sign-in (also accepts `--profile` or `--web-ui`). It requires
+local Windows account password input, not a Windows Hello PIN. No password is
+accepted on the command line or stored by Aria; Windows Task Scheduler stores the
+credential. Missing elevation or interactive input fails without changing the task.
+`--autostart logon` explicitly selects login-time startup. These two explicit modes
+are Windows-only; macOS and Linux retain their native service behavior.
+
+New tasks have no execution time limit, ignore duplicate task instances, retry
+failure ten times at one-minute intervals, and allow battery operation. Boot tasks
+wait 60 seconds after startup. `aria status` and `aria status --json` expose the
+actual mode, enabled state, account and logon type. `stop` retains autostart;
+`unregister` removes it. A reboot with the machine left at the sign-in screen is
+still needed to validate unattended credentials, network and agent availability;
+desktop automation requires an interactive desktop session.
 
 ```bash
 aria start [--profile <name>]      # install (if needed) + start the daemon

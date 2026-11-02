@@ -664,6 +664,7 @@ Install (if needed) and start the bridge as an OS-managed daemon
 
 | Option | Description |
 | --- | --- |
+| `--autostart <mode>` | Windows autostart: auto (default; preserve existing, otherwise boot when elevated and interactive, logon otherwise), boot, or logon |
 | `--profile <name>` | profile name (defaults to active profile) |
 | `--web-ui` | run the supervisor + web console as the background service (hosts all profiles) instead of a single profile |
 | `--agent <kind>` | engine plugin id for first-run bootstrap (claude, codex, ...) |

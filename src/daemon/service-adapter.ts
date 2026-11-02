@@ -2,6 +2,14 @@ import * as launchd from './launchd';
 import { launchAgentPlistPath, systemdUnitPath, windowsTaskName } from './paths';
 import * as schtasks from './schtasks';
 import * as systemd from './systemd';
+import type { AutostartMode } from './windows-autostart';
+
+export interface AutostartStatus {
+  mode: 'boot' | 'logon' | 'unknown';
+  enabled: boolean;
+  account?: string;
+  logonType?: string;
+}
 
 export interface ServiceResult {
   ok: boolean;
@@ -39,7 +47,10 @@ export interface ServiceAdapter {
   servicePath(): string;
 
   /** Write or overwrite the service definition. */
-  install(): Promise<void>;
+  install(options?: { autostart?: AutostartMode }): Promise<void>;
+
+  /** Present on Windows; reports the actual registered task, not a preference. */
+  autostartStatus?(): AutostartStatus;
 
   /** Start the service (enables autostart where applicable). */
   start(): ServiceResultLike;
@@ -152,14 +163,19 @@ function makeSchtasksAdapter(profile: string, runArgs: string[], launchSpec?: Se
     // registration (queryable via schtasks) and the launcher .cmd we wrote.
     // The task name is what the user would search for in Task Scheduler UI.
     servicePath: () => windowsTaskName(profile),
-    install: async () => {
-      const r = await schtasks.installTask(profile, runArgs, launchSpec);
+    autostartStatus: () => {
+      const { mode, enabled, account, logonType } = schtasks.readWindowsTaskStatus(windowsTaskName(profile));
+      return { mode, enabled, account, logonType };
+    },
+    install: async (options) => {
+      const r = await schtasks.installTask(profile, runArgs, launchSpec, options?.autostart);
       if (!r.ok) throw new Error(r.stderr || 'schtasks /Create failed');
     },
     // Mirror launchd: a previous `stop` disabled the task, and a disabled
     // task refuses to run. Re-enable before starting it.
     start: () => {
-      schtasks.enableTask(profile);
+      const enabled = schtasks.enableTask(profile);
+      if (!enabled.ok) return enabled;
       return schtasks.runTask(profile);
     },
     stop: () => schtasks.endTask(profile),

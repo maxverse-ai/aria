@@ -11,8 +11,8 @@ Aria 安装的日常运维：前台与守护进程模式、profile、进程注�
 
 - **`aria run`** —— 前台 bridge。用于首次配置（二维码向导）和调试；
   `Ctrl-C` 停止。
-- **`aria start`** —— 安装（如需要）并启动 OS 托管的 daemon，登出后存活、
-  开机自启。
+- **`aria start`** —— 安装（如需要）并启动 OS 托管的 daemon，默认配置自启动。
+  Windows 登录启动需要用户登录；开机启动模式可以在登录前运行。
 
 两者都接受 `--profile <name>`（默认当前活跃 profile）和 `--web-ui`——后者
 运行机器级 Supervisor + 本地 web 控制台，托管所有 profile，而不是单
@@ -31,6 +31,27 @@ daemon 日志在 `~/.aria/profiles/<profile>/logs/daemon/` 下。用
 查看 stdout 日志，`--web-ui` 查看 Supervisor 的）。
 
 ## 服务生命周期
+
+### Windows 自适应自启动
+
+Windows 上 `aria start` 默认使用 `--autostart auto`。已有任务会保留触发器、
+运行账户和已保存的凭据，只刷新启动脚本。首次创建时，管理员交互终端会引导输入
+Windows 账户密码以注册开机启动；其他情况配置当前用户登录后启动。
+auto 模式取消密码输入会选择登录启动；注册错误会直接报错，不静默回退。
+已有开机任务不会自动降级。提权时应使用拥有当前安装的同一个 Windows 账户。
+
+需要无人登录也启动时，在管理员终端执行 `aria start --autostart boot`，
+可同时指定 `--profile` 或 `--web-ui`。密码在本机输入，必须是 Windows 账户密码，
+不是 Windows Hello PIN。Aria 不接受命令行密码，也不保存密码，由任务计划程序保管。
+缺少管理员权限或交互输入时直接失败，不修改任务。
+`--autostart logon` 显式选择登录后启动。这两个显式模式仅支持 Windows；
+macOS 和 Linux 保留原生服务行为。
+
+新任务不设运行时限、忽略重复任务实例、失败后每分钟重试一次（最多十次），
+允许电池供电时运行。开机任务延迟 60 秒触发。
+`aria status` 和 `aria status --json` 显示实际启动模式、启用状态、运行账户和登录类型。
+`stop` 保留自启动，`unregister` 移除注册。仍需重启并停留在登录界面，验证凭据、
+网络和 agent 的无人登录可用性；桌面操作需要交互式桌面会话。
 
 ```bash
 aria start [--profile <name>]      # 安装（如需要）并启动 daemon

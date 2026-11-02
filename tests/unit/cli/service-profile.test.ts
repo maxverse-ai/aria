@@ -71,6 +71,20 @@ vi.mock('../../../src/runtime/restart-safety', () => ({
 const { runServiceRestart, runServiceStart, runServiceStatus, runServiceStop, runServiceUnregister } = await import('../../../src/cli/commands/service');
 
 describe('profile-aware service commands', () => {
+  it('rejects invalid autostart input before touching configuration or services', async () => {
+    await expect(runServiceStart({ autostart: 'invalid' as never })).rejects.toThrow('Invalid autostart mode');
+    expect(mocks.adapter.install).not.toHaveBeenCalled();
+  });
+
+  it('includes actual autostart details in stopped service JSON', async () => {
+    const output = vi.spyOn(console, 'log').mockImplementation(() => {});
+    mocks.adapter.autostartStatus = () => ({ mode: 'boot', enabled: true, account: 'HOST\\user', logonType: 'Password' });
+    await runServiceStatus({ profile: 'codex-dev', json: true });
+    expect(JSON.parse(output.mock.calls.at(-1)![0])).toMatchObject({
+      state: 'stopped', autostart: { mode: 'boot', enabled: true, account: 'HOST\\user', logonType: 'Password' },
+    });
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.adapter = {

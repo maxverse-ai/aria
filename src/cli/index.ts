@@ -720,6 +720,7 @@ program
 program
   .command('start')
   .description('Install (if needed) and start the bridge as an OS-managed daemon')
+  .option('--autostart <mode>', 'Windows autostart: auto (default; preserve existing, otherwise boot when elevated and interactive, logon otherwise), boot, or logon')
   .option('--profile <name>', 'profile name (defaults to active profile)')
   .option('--web-ui', 'run the supervisor + web console as the background service (hosts all profiles) instead of a single profile')
   .option('--agent <kind>', 'engine plugin id for first-run bootstrap (claude, codex, ...)')
@@ -737,6 +738,7 @@ program
     appSecret?: string;
     tenant?: string;
     skipCheckLarkCli?: boolean;
+    autostart?: import('../daemon/windows-autostart').AutostartMode;
   }) => {
     warnAppSecretOnCommandLine(opts.appSecret);
     await runServiceStart(opts);

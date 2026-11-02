@@ -253,6 +253,8 @@ For Lark global apps, add `--tenant lark`.
 
 ### Background service
 
+Windows adaptive autostart preserves existing tasks and selects boot or logon startup for a new task according to elevation and interactive input. See the [operations guide](docs/operate-the-bridge.md#windows-adaptive-autostart).
+
 Use `run` for first-run setup and foreground debugging. After the bot can send and receive messages, stop the foreground process with `Ctrl-C`, then use an OS-managed service for background operation:
 
 ```bash

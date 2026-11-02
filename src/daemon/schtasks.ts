@@ -12,6 +12,9 @@ import {
 import { paths } from '../config/paths';
 import { currentRuntime, isBunRuntime, runtimeEntryPath } from '../platform/runtime';
 import type { ServiceLaunchSpec } from './service-adapter';
+import { bootTaskScript, logonTaskScript, readWindowsTaskStatus, runTaskPowerShell, selectAutostartMode, type AutostartMode } from './windows-autostart';
+
+export { readWindowsTaskStatus } from './windows-autostart';
 
 export interface LauncherInputs {
   /** Absolute path to the JS runtime executable (node.exe or bun.exe). */
@@ -94,31 +97,46 @@ function runSchtasks(args: string[]): SchtasksResult {
 }
 
 /**
- * Create (or overwrite) the scheduled task. Trigger: ONLOGON.
- * `/RL LIMITED` runs as the current user without admin elevation.
- * `/F` overwrites if the task already exists.
- *
- * The /TR value is the .cmd wrapper path. Schtasks treats /TR as a command
- * line, so wrapping in quotes keeps spaces in the path intact.
+ * Register autostart adaptively; preserve existing registrations by default so
+ * a saved boot principal/password is never replaced by an ONLOGON task.
+ * New tasks run as the current user with limited privileges. Logon mode uses
+ * an account-specific trigger and interactive token, without storing a password.
  */
 export async function installTask(
   profile: string,
   runArgs: string[] = ['run'],
   launchSpec?: ServiceLaunchSpec,
+  autostart: AutostartMode = 'auto',
 ): Promise<SchtasksResult> {
+  const taskName = windowsTaskName(profile);
+  const before = readWindowsTaskStatus(taskName);
+  const interactive = Boolean(process.stdin.isTTY && process.stdout.isTTY);
+  const selected = selectAutostartMode(autostart, before, interactive);
   await writeLauncherCmd(profile, runArgs, launchSpec);
-  return runSchtasks([
-    '/Create',
-    '/F',
-    '/SC',
-    'ONLOGON',
-    '/RL',
-    'LIMITED',
-    '/TN',
-    windowsTaskName(profile),
-    '/TR',
-    `"${windowsLauncherCmdPath(profile)}"`,
-  ]);
+  if (selected === 'preserve') return { ok: true, stderr: '', stdout: '' };
+  if (selected === 'boot') {
+    const result = runTaskPowerShell(bootTaskScript(taskName, windowsLauncherCmdPath(profile), paths.rootDir, before.currentUser), true);
+    if (result.status === 0) {
+      const after = readWindowsTaskStatus(taskName);
+      if (!after.installed || after.mode !== 'boot' || after.logonType !== 'Password' || !after.enabled) {
+        throw new Error('Boot task registration could not be verified. Inspect aria status before retrying.');
+      }
+      return { ok: true, stderr: '', stdout: '' };
+    }
+    if (result.status !== 2 || autostart !== 'auto') {
+      throw new Error('Boot autostart was cancelled or failed. No logon fallback was applied. Check the Windows error above; use an Administrator terminal and the Windows account password.');
+    }
+    console.warn('Aria: boot setup skipped; configuring logon autostart.');
+  }
+  const registered = runTaskPowerShell(logonTaskScript(taskName, windowsLauncherCmdPath(profile), paths.rootDir, before.currentUser));
+  const result = { ok: registered.status === 0, stdout: registered.stdout ?? '', stderr: registered.stderr || registered.error?.message || '' };
+  if (result.ok) {
+    const after = readWindowsTaskStatus(taskName);
+    if (!after.installed || after.mode !== 'logon' || !after.enabled) {
+      throw new Error('Logon autostart registration could not be verified. Inspect aria status.');
+    }
+  }
+  return result;
 }
 
 /** Start the task now (regardless of trigger). */
@@ -171,14 +189,10 @@ export function isTaskRegistered(profile: string): boolean {
 }
 
 /**
- * Parse `/Query /V /FO LIST` output for the current run state. Looks for
- * `Status: Running` in the verbose listing. Other states include
- * "Ready" (registered, not currently running) and "Disabled".
+ * Query the numeric scheduler state, independent of Windows display language.
  */
 export function isTaskRunning(profile: string): boolean {
-  const r = runSchtasks(['/Query', '/V', '/FO', 'LIST', '/TN', windowsTaskName(profile)]);
-  if (!r.ok) return false;
-  return /Status:\s+Running/i.test(r.stdout);
+  return readWindowsTaskStatus(windowsTaskName(profile)).running;
 }
 
 export function describeTask(profile: string): string {
