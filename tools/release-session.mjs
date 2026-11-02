@@ -55,6 +55,15 @@ export function reconcileAssets(session, release) {
   return missing;
 }
 
+export function verifiedAssetIdentity(release) {
+  if (!release.assets?.length || release.assets.some((asset) =>
+    !Number.isSafeInteger(asset.id) || !/^sha256:[a-f0-9]{64}$/.test(asset.digest ?? "")
+    || asset.state !== "uploaded" || typeof asset.updated_at !== "string")) return undefined;
+  return JSON.stringify({ id: release.id, assets: release.assets.map((asset) => ({
+    id: asset.id, name: asset.name, size: asset.size, digest: asset.digest, updatedAt: asset.updated_at,
+  })).sort((left, right) => left.name.localeCompare(right.name)) });
+}
+
 export function resumeSession(session, operations) {
   let release = operations.inspect();
   if (!release) {
@@ -67,11 +76,10 @@ export function resumeSession(session, operations) {
   session.releaseId = release.id;
   session.stage = release.draft ? "draft" : "published";
   operations.save();
-  if (release.draft) {
-    for (const asset of missing) operations.upload(asset);
-  }
+  if (release.draft && missing.length) operations.upload(missing);
   release = operations.inspect();
   if (!release || reconcileAssets(session, release).length) throw new Error("release assets are incomplete");
+  const verifiedIdentity = verifiedAssetIdentity(release);
   operations.verify(release);
   session.stage = "download-verified";
   operations.save();
@@ -81,7 +89,11 @@ export function resumeSession(session, operations) {
     if (!latest || !latest.draft || latest.id !== release.id || reconcileAssets(session, latest).length) {
       throw new Error("draft changed before publication");
     }
-    operations.verify(latest);
+    if (verifiedIdentity) {
+      if (verifiedIdentity !== verifiedAssetIdentity(latest)) throw new Error("verified asset identity changed before publication");
+    } else {
+      operations.verify(latest);
+    }
     operations.checkMain();
     operations.publish();
   }

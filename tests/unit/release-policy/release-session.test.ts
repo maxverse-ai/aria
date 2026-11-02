@@ -19,7 +19,10 @@ function fixture() {
     inspect: vi.fn(() => release),
     create: vi.fn(() => { release = { id: 12, tag_name: session.tag, target_commitish: session.commit, draft: true, prerelease: false, assets: [] }; }),
     save: vi.fn(),
-    upload: vi.fn((asset: SessionAsset) => { release!.assets.push({ ...asset, digest: `sha256:${asset.sha256}` }); }),
+    upload: vi.fn((assets: SessionAsset[]) => {
+      for (const asset of assets) release!.assets.push({ ...asset, digest: `sha256:${asset.sha256}`,
+        id: release!.assets.length + 1, state: "uploaded", updated_at: "2026-11-02T08:00:00Z" });
+    }),
     verify: vi.fn(), checkMain: vi.fn(), verifyTag: vi.fn(),
     publish: vi.fn(() => { release!.draft = false; release!.immutable = true; }),
   };
@@ -30,12 +33,13 @@ describe("release recovery", () => {
   it("resumes partial uploads without replacing uploaded assets", () => {
     const { session, operations } = fixture();
     const upload = operations.upload.getMockImplementation()!;
-    operations.upload.mockImplementationOnce((asset) => { upload(asset); throw new Error("network timeout"); });
+    operations.upload.mockImplementationOnce((assets) => { upload(assets.slice(0, 3)); throw new Error("network timeout"); });
     expect(() => resumeSession(session, operations)).toThrow("network timeout");
     expect(operations.publish).not.toHaveBeenCalled();
     resumeSession(session, operations);
     expect(operations.create).toHaveBeenCalledOnce();
-    expect(operations.upload).toHaveBeenCalledTimes(8);
+    expect(operations.upload).toHaveBeenCalledTimes(2);
+    expect(operations.upload.mock.calls[1]![0]).toEqual(session.assets.slice(3));
     expect(session).toMatchObject({ stage: "complete", releaseId: 12 });
   });
 
@@ -71,7 +75,7 @@ describe("release recovery", () => {
     const { session, operations } = fixture();
     operations.checkMain.mockImplementationOnce(() => undefined).mockImplementationOnce(() => { throw new Error("main changed"); });
     expect(() => resumeSession(session, operations)).toThrow("main changed");
-    expect(operations.upload).toHaveBeenCalledTimes(8);
+    expect(operations.upload).toHaveBeenCalledOnce();
     expect(operations.publish).not.toHaveBeenCalled();
   });
 
@@ -89,6 +93,35 @@ describe("release recovery", () => {
     resumeSession(session, operations);
     expect(operations.publish).toHaveBeenCalledOnce();
     expect(operations.verifyTag).toHaveBeenCalledTimes(2);
+  });
+
+  it("downloads once when immutable asset identity metadata remains unchanged", () => {
+    const { session, operations } = fixture();
+    resumeSession(session, operations);
+    expect(operations.verify).toHaveBeenCalledOnce();
+    expect(operations.upload).toHaveBeenCalledOnce();
+  });
+
+  it("downloads again when asset identity metadata is unavailable", () => {
+    const { session, operations, getRelease } = fixture();
+    const upload = operations.upload.getMockImplementation()!;
+    operations.upload.mockImplementation((assets) => {
+      upload(assets);
+      for (const asset of getRelease()!.assets) delete asset.digest;
+    });
+    resumeSession(session, operations);
+    expect(operations.verify).toHaveBeenCalledTimes(2);
+  });
+
+  it.each(["id", "updated_at"] as const)("rejects a changed verified asset %s", (field) => {
+    const { session, operations, getRelease } = fixture();
+    operations.verify.mockImplementationOnce(() => {
+      const asset = getRelease()!.assets[0]!;
+      if (field === "id") asset.id = 999;
+      else asset.updated_at = "changed";
+    });
+    expect(() => resumeSession(session, operations)).toThrow("identity changed");
+    expect(operations.publish).not.toHaveBeenCalled();
   });
 
   it("rejects conflicting identity, assets and nonimmutable publication", () => {

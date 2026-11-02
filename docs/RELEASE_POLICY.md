@@ -148,6 +148,21 @@ without publishing again. A changed main, changed local artifact, conflicting
 draft or failed gate requires inspection; never delete a session or overwrite
 remote assets merely to bypass a failure.
 
+Missing assets are uploaded in one `gh release upload` invocation. A partial
+batch failure is reconciled on resume; existing assets are never overwritten.
+Once the Release ID is known, inspections query that ID rather than listing all
+releases. Creation-time discovery still uses the paginated list so a successful
+creation followed by a client timeout can be recovered.
+
+All assets are downloaded and hashed before publication. The verified remote
+asset IDs, names, sizes, SHA-256 digests, upload states and update timestamps are
+checked again before publishing. When complete identity metadata is available
+and unchanged, the second download is avoided; changed identity stops publication.
+Missing identity metadata retains the second full download. Verification evidence
+is scoped to one invocation; resume always downloads again. Logs separately time
+release inspection, batch upload, download/hash, main/tag checks, publication and
+final tag verification.
+
 The retired `internal-v*` snapshot channel remains unsupported. Public
 consumption uses immutable `v*` GitHub Releases. Local npm publication is not a
 supported distribution path.

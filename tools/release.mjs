@@ -390,6 +390,11 @@ function publishSession(session, sessionPath) {
   const notes = resolve(root, "artifacts/release-notes.md");
   if (sha256File(notes) !== session.notesSha256) throw new Error("rendered release notes changed");
   const inspect = () => {
+    if (session.releaseId) {
+      const release = JSON.parse(run("gh", ["api", `repos/${expectedRepository}/releases/${session.releaseId}`]));
+      if (release.id !== session.releaseId) throw new Error("release ID changed");
+      return release;
+    }
     const releases = JSON.parse(run("gh", ["api", "--paginate", "--slurp", `repos/${expectedRepository}/releases?per_page=100`])).flat();
     const matches = releases.filter((release) => release.tag_name === session.tag);
     if (matches.length > 1) throw new Error("multiple releases match the session tag");
@@ -399,11 +404,11 @@ function publishSession(session, sessionPath) {
     return release;
   };
   const result = releaseStage("upload-and-verify", () => resumeSession(session, {
-    inspect,
-    create: () => run("gh", ["release", "create", session.tag, "--repo", expectedRepository, "--target", session.commit, "--title", `Aria ${session.tag}`, "--notes-file", notes, "--draft"], { capture: false }),
+    inspect: () => releaseStage("inspect-release", inspect),
+    create: () => releaseStage("create-draft", () => run("gh", ["release", "create", session.tag, "--repo", expectedRepository, "--target", session.commit, "--title", `Aria ${session.tag}`, "--notes-file", notes, "--draft"], { capture: false })),
     save: () => saveSession(sessionPath, session),
-    upload: (asset) => releaseStage(`upload:${asset.name}`, () => run("gh", ["release", "upload", session.tag, resolve(root, "artifacts", asset.name), "--repo", expectedRepository], { capture: false })),
-    verify: (release) => {
+    upload: (assets) => releaseStage(`upload-batch:${assets.length}`, () => run("gh", ["release", "upload", session.tag, ...assets.map((asset) => resolve(root, "artifacts", asset.name)), "--repo", expectedRepository], { capture: false })),
+    verify: (release) => releaseStage("download-and-hash", () => {
       const downloaded = mkdtempSync(resolve(tmpdir(), "aria-release-download-"));
       try {
         run("gh", ["release", "download", session.tag, "--repo", expectedRepository, "--dir", downloaded]);
@@ -412,17 +417,17 @@ function publishSession(session, sessionPath) {
           if (sha256File(output) !== session.assets.find((expected) => expected.name === asset.name).sha256) throw new Error(`downloaded asset mismatch: ${asset.name}`);
         }
       } finally { rmSync(downloaded, { recursive: true, force: true }); }
-    },
-    checkMain: () => {
+    }),
+    checkMain: () => releaseStage("check-main-and-tag", () => {
       if (refreshMain() !== session.commit) throw new Error("main changed before publication; draft retained");
       const remoteTag = run("git", ["ls-remote", "origin", `refs/tags/${session.tag}`, `refs/tags/${session.tag}^{}`]);
       if (remoteTag) throw new Error("release tag appeared before publication; inspect before resuming");
-    },
-    publish: () => run("gh", ["release", "edit", session.tag, "--repo", expectedRepository, "--draft=false", "--latest"], { capture: false }),
-    verifyTag: () => {
+    }),
+    publish: () => releaseStage("publish-draft", () => run("gh", ["release", "edit", session.tag, "--repo", expectedRepository, "--draft=false", "--latest"], { capture: false })),
+    verifyTag: () => releaseStage("verify-published-tag", () => {
       run("git", ["fetch", "origin", `refs/tags/${session.tag}:refs/tags/${session.tag}`]);
       if (run("git", ["rev-parse", `${session.tag}^{commit}`]) !== session.commit) throw new Error("published tag does not match tested commit");
-    },
+    }),
   }));
   return { published: true, tag: session.tag, commit: session.commit, url: result.html_url, session: sessionPath };
 }
