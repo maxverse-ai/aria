@@ -2,7 +2,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { PassThrough } from 'node:stream';
-import { afterEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { defineEngineRuntimeDescriptor } from '../../../src/agent/runtime/types';
 import type { ProfileConversationHost } from '../../../src/conversation/profile-host';
 
@@ -13,6 +13,15 @@ const { createProfileConversationHost } = vi.hoisted(() => ({
 vi.mock('../../../src/conversation/profile-host', () => ({ createProfileConversationHost }));
 
 const dirs: string[] = [];
+
+beforeEach(() => {
+  for (const key of Object.keys(process.env)) {
+    if (/^(LARK_|LARKSUITE_|FEISHU_|ARIA_UI_)/.test(key)
+        || ['ARIA_HOME', 'ARIA_WORKSPACE_HOME', 'ARIA_TRIGGER_RUNTIME'].includes(key)) {
+      vi.stubEnv(key, undefined);
+    }
+  }
+});
 
 afterEach(async () => {
   createProfileConversationHost.mockReset();
@@ -70,12 +79,19 @@ it('rejects invalid product metadata before creating the host', async () => {
   expect(createProfileConversationHost).not.toHaveBeenCalled();
 });
 
-it('rejects an inherited standalone Aria environment before creating the host', async () => {
+it.each([
+  'ARIA_HOME',
+  'LARK_CHANNEL',
+  'LARK_CHANNEL_HOME',
+  'LARK_CHANNEL_PROFILE',
+  'LARK_CHANNEL_CONFIG',
+  'LARKSUITE_CLI_CONFIG_DIR',
+])('rejects inherited %s before creating the host', async (key) => {
   const { createAriaWorker } = await import('../../../src/worker/embed');
-  vi.stubEnv('ARIA_HOME', 'standalone-aria');
+  vi.stubEnv(key, 'inherited-test-value');
   await expect(createAriaWorker({
     configPath: 'unused.json', profile: 'local', stateDirectory: 'unused',
     input: new PassThrough(), output: new PassThrough(),
-  })).rejects.toThrow('isolated environment');
+  })).rejects.toThrow(key);
   expect(createProfileConversationHost).not.toHaveBeenCalled();
 });
