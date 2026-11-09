@@ -12,6 +12,11 @@ Aria 把凭证放在哪里，以及谁能和你的 bot 说话。
 `~/.aria/profiles/<profile>/secrets.enc`（设置了 `$ARIA_HOME` 时在其下）。
 它存放频道应用密钥——例如绑定的 PersonalAgent 应用的 App Secret。
 
+同一密钥库的操作在本机进程之间串行执行，包括首次创建 salt 和完整的读改写事务，
+加密文件格式保持不变。请将配套的 `.keystore.salt` 与加密文件一起保留：
+已有条目时缺失 salt，或 salt 格式损坏，操作会明确失败，不会静默替换 salt
+而使原有条目无法解密。
+
 ```bash
 aria secrets set --app-id cli_xxx [--profile <name>]   # 无回显提示输入
 aria secrets list [--profile <name>]                   # 只列 id，不显示值

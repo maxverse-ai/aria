@@ -1,6 +1,8 @@
 import { createCipheriv, createDecipheriv, pbkdf2Sync, randomBytes } from 'node:crypto';
-import { readFile } from 'node:fs/promises';
+import { chmod, mkdir, readFile, realpath, writeFile } from 'node:fs/promises';
 import { hostname, userInfo } from 'node:os';
+import { basename, dirname, join, resolve } from 'node:path';
+import * as lockfile from 'proper-lockfile';
 import type { AppPaths } from './app-paths';
 import { paths } from './paths';
 import { writeFileAtomic } from '../platform/atomic-write';
@@ -25,7 +27,7 @@ const IV_LEN = 12; // GCM standard
 const TAG_LEN = 16; // GCM auth tag
 const PBKDF2_ITER = 100_000;
 const FILE_VERSION = 1;
-const derivedKeyCache = new Map<string, Buffer>();
+const derivedKeyCache = new Map<string, { salt: string; key: Buffer }>();
 
 interface Envelope {
   /** base64 of 12-byte IV */
@@ -42,6 +44,28 @@ interface StoreFile {
 }
 
 export type KeystorePaths = Pick<AppPaths, 'secretsFile' | 'keystoreSaltFile'>;
+
+/** The stable target is never renamed with the encrypted file. Every operation,
+ * including salt initialization and reads, participates in this transaction. */
+async function withStoreLock<T>(storePaths: KeystorePaths, fn: (normalized: KeystorePaths) => Promise<T>): Promise<T> {
+  const secretsFile = await canonicalFile(storePaths.secretsFile);
+  const keystoreSaltFile = await canonicalFile(storePaths.keystoreSaltFile);
+  const target = `${secretsFile}.lock`;
+  await writeFile(target, '', { flag: 'a', mode: 0o600 });
+  await chmod(target, 0o600).catch(() => undefined);
+  const release = await lockfile.lock(target, {
+    realpath: false, stale: 30_000, update: 10_000,
+    retries: { retries: 100, minTimeout: 10, maxTimeout: 100 },
+  });
+  try { return await fn({ secretsFile, keystoreSaltFile }); }
+  finally { await release(); }
+}
+
+async function canonicalFile(file: string): Promise<string> {
+  const absolute = resolve(file);
+  await mkdir(dirname(absolute), { recursive: true, mode: 0o700 });
+  return join(await realpath(dirname(absolute)), basename(absolute));
+}
 
 /** Read + return the full keystore. Missing file or unreadable → empty store. */
 async function readStore(storePaths: KeystorePaths = paths): Promise<StoreFile> {
@@ -71,26 +95,29 @@ async function writeStore(store: StoreFile, storePaths: KeystorePaths = paths): 
  * an attacker that can read this file can also read the keystore. Its job
  * is to ensure two users on the same machine don't derive the same key.
  */
-async function loadOrCreateSalt(storePaths: KeystorePaths = paths): Promise<Buffer> {
+async function loadOrCreateSalt(storePaths: KeystorePaths, allowCreate: boolean): Promise<Buffer> {
   try {
     const buf = await readFile(storePaths.keystoreSaltFile);
     if (buf.length === KEY_LEN) return buf;
+    throw new Error('invalid keystore salt; refusing to replace an existing salt');
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
   }
+  if (!allowCreate) throw new Error('keystore salt is missing for existing encrypted entries');
   const salt = randomBytes(KEY_LEN);
   await writeFileAtomic(storePaths.keystoreSaltFile, salt, { mode: 0o600 });
   return salt;
 }
 
-async function deriveKey(storePaths: KeystorePaths = paths): Promise<Buffer> {
+async function deriveKey(storePaths: KeystorePaths, allowCreate = false): Promise<Buffer> {
   const cacheKey = `${storePaths.keystoreSaltFile}`;
+  const salt = await loadOrCreateSalt(storePaths, allowCreate);
+  const saltIdentity = salt.toString('hex');
   const cached = derivedKeyCache.get(cacheKey);
-  if (cached) return cached;
-  const salt = await loadOrCreateSalt(storePaths);
+  if (cached?.salt === saltIdentity) return cached.key;
   const seed = `${hostname()}|${userInfo().username}`;
   const key = pbkdf2Sync(seed, salt, PBKDF2_ITER, KEY_LEN, 'sha256');
-  derivedKeyCache.set(cacheKey, key);
+  derivedKeyCache.set(cacheKey, { salt: saltIdentity, key });
   return key;
 }
 
@@ -125,11 +152,13 @@ export async function getSecret(
   id: string,
   storePaths: KeystorePaths = paths,
 ): Promise<string | undefined> {
-  const store = await readStore(storePaths);
-  const env = store.entries[id];
-  if (!env) return undefined;
-  const key = await deriveKey(storePaths);
-  return decrypt(key, env);
+  return withStoreLock(storePaths, async (normalized) => {
+    const store = await readStore(normalized);
+    const env = store.entries[id];
+    if (!env) return undefined;
+    const key = await deriveKey(normalized);
+    return decrypt(key, env);
+  });
 }
 
 /** Store / overwrite the secret for `id`. */
@@ -138,11 +167,12 @@ export async function setSecret(
   plaintext: string,
   storePaths: KeystorePaths = paths,
 ): Promise<void> {
-  const key = await deriveKey(storePaths);
-  const env = encrypt(key, plaintext);
-  const store = await readStore(storePaths);
-  store.entries[id] = env;
-  await writeStore(store, storePaths);
+  await withStoreLock(storePaths, async (normalized) => {
+    const store = await readStore(normalized);
+    const key = await deriveKey(normalized, Object.keys(store.entries).length === 0);
+    store.entries[id] = encrypt(key, plaintext);
+    await writeStore(store, normalized);
+  });
 }
 
 /** Remove an entry. Returns true if something was removed. */
@@ -150,17 +180,18 @@ export async function removeSecret(
   id: string,
   storePaths: KeystorePaths = paths,
 ): Promise<boolean> {
-  const store = await readStore(storePaths);
-  if (!(id in store.entries)) return false;
-  delete store.entries[id];
-  await writeStore(store, storePaths);
-  return true;
+  return withStoreLock(storePaths, async (normalized) => {
+    const store = await readStore(normalized);
+    if (!(id in store.entries)) return false;
+    delete store.entries[id];
+    await writeStore(store, normalized);
+    return true;
+  });
 }
 
 /** List ids (no secrets in the output, by design). */
 export async function listSecretIds(storePaths: KeystorePaths = paths): Promise<string[]> {
-  const store = await readStore(storePaths);
-  return Object.keys(store.entries);
+  return withStoreLock(storePaths, async (normalized) => Object.keys((await readStore(normalized)).entries));
 }
 
 export function clearKeystoreDerivedKeyCache(): void {

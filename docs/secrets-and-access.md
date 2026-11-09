@@ -13,6 +13,12 @@ Each profile has an encrypted secret keystore at
 holds channel app secrets — for example the App Secret of the bound
 PersonalAgent app.
 
+Operations on one keystore serialize across local processes, including first
+salt creation and complete read/modify/write transactions. The encryption
+format is unchanged. Keep the companion `.keystore.salt` with the encrypted
+file: a missing salt for existing entries or an invalid salt fails explicitly
+instead of silently replacing it and making the old entries unreadable.
+
 ```bash
 aria secrets set --app-id cli_xxx [--profile <name>]   # prompts without echoing
 aria secrets list [--profile <name>]                   # ids only, never values
