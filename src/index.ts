@@ -81,6 +81,7 @@ export {
 
 export {
   TriggerManager,
+  TriggerExecutionNotAcceptedError,
   TriggerIngressCoordinator,
   TriggerIngressError,
   createTriggerRunIntent,

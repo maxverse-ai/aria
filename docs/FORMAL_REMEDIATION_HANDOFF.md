@@ -1,6 +1,6 @@
 # Aria 审计整改 Goal 执行提示词与续跑记录
 
-> Status: in progress — execution prompt prepared against audit baseline `3a297061616568123f2451dfed50c3cd9e1c1590`; remediation worktrees exist at baseline `973599b`; partial fixes and uncommitted work are recorded below. No remediation has been integrated.
+> Status: historical — all 17 remediation items integrated in origin/main through `dff3639`; full local gate passed (45 formal cases, 357 test files, 2255 tests passed, 2 skipped). See final evidence below.
 
 ## 执行提示词
 
@@ -94,15 +94,13 @@ R1–R4、D1–D4、C1–C5、T1–T4 共 17 项问题的验证、修复和集�
 7. 目标完成后，更新状态头为 historical，列出全部集成提交与最终验收结果，
    清理本目标定位指针和已合并工作区；保留可复查的源码证据与必要日志。
 
-## 当前续跑定位
+## 最终集成状态
 
-- 检查点：2026-11-09 16:57 UTC+8；本文件为主任务账本。
-- 主 worktree：D:/dev/aria/.worktrees/remediation，分支 agent/remediation，HEAD 3204c5a（核对git log）。
-- 所有17项已有修复/正常模型/实现测试；均未推origin/main，不算完成。完整门禁67ba597已通过45formal/357files2250tests/2skip。
-- 当前阻项：C4反向审查发现排空等待中owner消失的pause泄漏及legacy rollback能力核验，fix_updatelock正在自己工作区修复；接收后必须再次完整门禁。
-- 主任务当前tracked干净（见实际git status）；根目录用户快照和.pnpm-store保持保护。
-- 下一步：核对fix_updatelock实际运行状态/提交，接收最终C4修复与明确未受理错误接线，fetch/rebase并完整验证；再按17项逐条验收、正常推送main与清理。
-- goal active，无token预算；未发布、部署、变更版本或操作生产服务。
+- 全部17项修复已在2026-11-09通过普通快进推送集成origin/main至dff3639，无force push。
+- 完整验收基线dff3639：pnpm ci:local exit0，45formal案例符合预期，357测试文件/2255测试通过、2跳过；build/typecheck/worker artifact构建及校验通过。
+- 身份使用用户指定的项目gh配置，具有main写权限；未修改全局Git身份、AGENTS.md、版本、release策略或生产服务。
+- 本文保留历史检查点供追溯，早先“未集成”记录仅描述当时状态；最终以本节、逐项账本与证据索引为准。
+- 同一任务的后续文档/API收尾提交接受同样门禁并正常推送。完成后清理续跑指针与任务worktrees，后续新工作应从最新origin/main创建独立任务。
 
 ## 逐项账本
 
@@ -111,23 +109,23 @@ R1–R4、D1–D4、C1–C5、T1–T4 共 17 项问题的验证、修复和集�
 
 | ID | 当前状态 | 复现/前提与模型 | 修复/验证证据 | 集成提交或关闭依据 | 下一步 |
 | --- | --- | --- | --- | --- | --- |
-| R1 | 待集成 | 子任务复现证据与正常 fixed/legacy 模型 | 主整改分支 focused 及 TLC 已重跑通过，见 16:25 检查点 | 仅任务分支 | 完整门禁、主线集成 |
-| R2 | 待集成 | 子任务复现证据与正常 fixed/legacy 模型 | 主整改分支 focused 及 TLC 已重跑通过，见 16:25 检查点 | 仅任务分支 | 完整门禁、主线集成 |
-| R3 | 待集成 | 子任务复现证据与正常 fixed/legacy 模型 | 主整改分支 focused 及 TLC 已重跑通过，见 16:25 检查点 | 仅任务分支 | 完整门禁、主线集成 |
-| R4 | 待集成 | 子任务复现证据与正常 fixed/legacy 模型 | 主整改分支 focused 及 TLC 已重跑通过，见 16:25 检查点 | 仅任务分支 | 完整门禁、主线集成 |
-| D1 | 待验证 | NoticeOwnership legacy NoDuplicate 指定反例 | 28 项邮箱/联合调用链/独立进程测试通过；fixed TLC 通过 | 未集成 | 完整门禁及评审 |
-| D2 | 待集成 | ReliabilityLease；真实独立进程负向及fixed | 67ba597完整门禁通过，见16:55检查点 | 任务分支450e1ef | 最终评审后主线集成 |
-| D3 | 待集成 | ManagedCardFallback；实际SDK受控provider | 67ba597完整门禁通过，见16:55检查点 | 任务分支9b95283 | 最终评审后主线集成 |
-| D4 | 待验证 | NoticeOwnership；TTL redaction/tombstone | 过期可见且正文清理、防 redeposit 回归通过 | 未集成 | 完整门禁及评审 |
-| C1 | 待集成 | 子任务复现证据与正常 fixed/legacy 模型 | 主整改分支 focused 及 TLC 已重跑通过，见 16:25 检查点 | 仅任务分支 | 完整门禁、主线集成 |
-| C2 | 待集成 | 子任务复现证据与正常 fixed/legacy 模型 | 主整改分支 focused 及 TLC 已重跑通过，见 16:25 检查点 | 仅任务分支 | 完整门禁、主线集成 |
-| C3 | 待集成 | 子任务复现证据与正常 fixed/legacy 模型 | 主整改分支 focused 及 TLC 已重跑通过，见 16:25 检查点 | 仅任务分支 | 完整门禁、主线集成 |
-| C4 | 待集成 | UpdateAdmission；实际控制管道+manager hooks | 67ba597完整门禁通过，见16:55检查点 | 任务分支e713906 | 最终评审后主线集成 |
-| C5 | 待集成 | ExpectedBuild；新实例身份控制回归 | 67ba597完整门禁通过，见16:55检查点 | 任务分支e713906 | 最终评审后主线集成 |
-| T1 | 待集成 | TriggerRecovery；durable outbox重启/工具 | 67ba597完整门禁通过，见16:55检查点 | 任务分支4b35ce1 | 最终评审后主线集成 |
-| T2 | 待集成 | ResultDeliveryClaim；独立进程+owner死亡 | 67ba597完整门禁通过，见16:55检查点 | 任务分支49ac76a | 最终评审后主线集成 |
-| T3 | 待集成 | TriggerRecovery；unknown/overlap/工具CAS | 67ba597完整门禁通过，见16:55检查点 | 任务分支67ba597 | 最终评审后主线集成 |
-| T4 | 待集成 | DailyQuota；同grant双进程与跨日 | 67ba597完整门禁通过，见16:55检查点 | 任务分支d5fc374 | 最终评审后主线集成 |
+| R1 | 已修复集成 | 子任务复现证据与正常 fixed/legacy 模型 | 主整改分支 focused 及 TLC 已重跑通过，见 16:25 检查点 | origin/main dff3639（含对应修复提交） | 完成；适用边界见证据索引 |
+| R2 | 已修复集成 | 子任务复现证据与正常 fixed/legacy 模型 | 主整改分支 focused 及 TLC 已重跑通过，见 16:25 检查点 | origin/main dff3639（含对应修复提交） | 完成；适用边界见证据索引 |
+| R3 | 已修复集成 | 子任务复现证据与正常 fixed/legacy 模型 | 主整改分支 focused 及 TLC 已重跑通过，见 16:25 检查点 | origin/main dff3639（含对应修复提交） | 完成；适用边界见证据索引 |
+| R4 | 已修复集成 | 子任务复现证据与正常 fixed/legacy 模型 | 主整改分支 focused 及 TLC 已重跑通过，见 16:25 检查点 | origin/main dff3639（含对应修复提交） | 完成；适用边界见证据索引 |
+| D1 | 已修复集成 | NoticeOwnership legacy NoDuplicate 指定反例 | 邮箱联合/独立进程及部分发布回归；dff3639完整门禁通过 | origin/main dff3639（含对应修复提交） | 完成；适用边界见证据索引 |
+| D2 | 已修复集成 | ReliabilityLease；真实独立进程负向及fixed | dff3639完整门禁通过，见最终验收 | origin/main dff3639（含对应修复提交） | 完成；适用边界见证据索引 |
+| D3 | 已修复集成 | ManagedCardFallback；实际SDK受控provider | dff3639完整门禁通过，见最终验收 | origin/main dff3639（含对应修复提交） | 完成；适用边界见证据索引 |
+| D4 | 已修复集成 | NoticeOwnership；TTL redaction/tombstone | 过期可见且正文清理、防 redeposit 回归通过 | origin/main dff3639（含对应修复提交） | 完成；适用边界见证据索引 |
+| C1 | 已修复集成 | 子任务复现证据与正常 fixed/legacy 模型 | 主整改分支 focused 及 TLC 已重跑通过，见 16:25 检查点 | origin/main dff3639（含对应修复提交） | 完成；适用边界见证据索引 |
+| C2 | 已修复集成 | 子任务复现证据与正常 fixed/legacy 模型 | 主整改分支 focused 及 TLC 已重跑通过，见 16:25 检查点 | origin/main dff3639（含对应修复提交） | 完成；适用边界见证据索引 |
+| C3 | 已修复集成 | 子任务复现证据与正常 fixed/legacy 模型 | 主整改分支 focused 及 TLC 已重跑通过，见 16:25 检查点 | origin/main dff3639（含对应修复提交） | 完成；适用边界见证据索引 |
+| C4 | 已修复集成 | UpdateAdmission；实际控制管道+manager hooks | dff3639完整门禁通过，见最终验收 | origin/main dff3639（含对应修复提交） | 完成；适用边界见证据索引 |
+| C5 | 已修复集成 | ExpectedBuild；新实例身份控制回归 | dff3639完整门禁通过，见最终验收 | origin/main dff3639（含对应修复提交） | 完成；适用边界见证据索引 |
+| T1 | 已修复集成 | TriggerRecovery；durable outbox重启/工具 | dff3639完整门禁通过，见最终验收 | origin/main dff3639（含对应修复提交） | 完成；适用边界见证据索引 |
+| T2 | 已修复集成 | ResultDeliveryClaim；独立进程+owner死亡 | dff3639完整门禁通过，见最终验收 | origin/main dff3639（含对应修复提交） | 完成；适用边界见证据索引 |
+| T3 | 已修复集成 | TriggerRecovery；unknown/overlap/工具CAS | dff3639完整门禁通过，见最终验收 | origin/main dff3639（含对应修复提交） | 完成；适用边界见证据索引 |
+| T4 | 已修复集成 | DailyQuota；同grant双进程与跨日 | dff3639完整门禁通过，见最终验收 | origin/main dff3639（含对应修复提交） | 完成；适用边界见证据索引 |
 
 ## 决策与检查点日志
 
@@ -213,3 +211,32 @@ R1–R4、D1–D4、C1–C5、T1–T4 共 17 项问题的验证、修复和集�
 - 最终审查真实文件系统复现D1残留：put发布新body后另一mail损坏claim令list统计抛错，旧catch直接推送造成双交付。已禁止异常时direct copy；仅撤销本请求邮箱权后退队，否则邮箱持有。真实调用链新增partial-deposit回归通过。STEERING中英同步。
 - 独立附录筛查：关闭后reconcile已有closing保护；maxRuntimeMs缺少可信绝对期限传播，源证据明确但独立于17项，后续专项（intent.ts/gateway/startIntent及取消后unknown），本次不声称修复运行时限。其余原生外部/断电/跨OS用户保留已声明验证限制。
 - 下一步保存D1/CLI文档提交，fetch/rebase，再跑完整门禁；全部验收后主线集成。
+
+## 最终验收证据索引（集成前复核）
+
+历史复现保持在原审计及tools/formal/audits/2026-11-09，不改为当前通过断言。正常模型配置、性质与负向对照以tools/formal/manifest.json为准；所有新case纳入ci:local。下表列出实现回归源码，可独立重跑，原生外部环境未运行不计成功。
+
+| 项目 | 正常实现/隔离链路证据 | 生产模型组 |
+| --- | --- | --- |
+| R1/R2 | tests/unit/agent/engine-lifecycle.test.ts：两ACP准备stop、新旧session、EOF排空/拒绝及最终响应 | engine-lifecycle |
+| R3/R4 | 同文件：nested turn.id旧轮隔离、Grok load replay与model/live事件 | engine-lifecycle |
+| D1 | tests/unit/bot/mailbox-notice-ownership.test.ts + tests/process/mailbox-notice-ownership.test.ts：queue/pull/held/部分发布及独立进程 | notice-ownership |
+| D2 | tests/process/reliability-ownership.test.ts + reliability-reconcile-tool.test.ts：实际独立进程过期竞争/死亡/工具CAS | reliability-lease |
+| D3 | tests/unit/card/managed.test.ts：实际SDK分类/尝试次数、unknown接受后不raw重发 | managed-card-fallback |
+| D4 | tests/unit/conversation/steer-mailbox.test.ts：过期可观测/正文清理、stable-ID不复活、held/uncertain不清理 | notice-ownership |
+| C1/C3 | tests/process/update-lock.test.ts + tests/unit/distribution/update-lock.test.ts：独立进程竞争/死亡、空锁诊断、EPERM保护 | update-lock |
+| C2 | tests/process/keystore-transactions.test.ts + tests/unit/config/keystore.test.ts：首次salt竞争、并发写/删与新进程解密 | keystore-transaction |
+| C4/C5 | tests/integration/runtime/update-admission-control.test.ts + tests/integration/runtime/supervisor.test.ts + update-admission/unit distribution tests：真实认证pipe替换、hold/drain/owner丢失、identity/静态能力预检、停止profile保持 | update-admission |
+| T1 | tests/unit/trigger/file-state-store.test.ts + runtime-manager.test.ts：重启outbox/定义快照/cleanup保护、交付失败不重跑、success checkpoint失败不重试 | trigger-recovery |
+| T2 | tests/process/trigger-result-ownership.test.ts + tests/unit/trigger/result-router.test.ts：独立进程单send/kill后不重发、operator确认/CAS | result-delivery-claim |
+| T3 | tests/unit/trigger/runtime-manager.test.ts + state-store.test.ts：未知submit/observer/markRunning失败、unknown占用、权威resolution+队列恢复、旧fence拒绝 | trigger-recovery |
+| T4 | tests/process/trigger-quota.test.ts + tests/unit/trigger/state-store.test.ts：双进程同grant竞争、revision/cancel、UTC跨日/未来cleanup cutoff保护 | trigger-recovery |
+
+执行范围：本地Windows隔离测试、真实文件系统与Node子进程、受控stdio/provider、真实本机认证控制pipe。未向活跃生产会话注入任务，未启动/停止真实Aria生产服务；未验证原生Grok账号、真实飞书交付、Linux执行隔离、任意停顿下proper-lockfile、断电/fsync和跨主机共享存储。模型有限检查不构成TypeScript refinement或无限状态正确性证明。
+
+### 2026-11-09 17:12 UTC+8 — 17项集成闭环
+
+- 实际普通push成功：origin/main由973599b快进至dff3639。先fetch/rebase无新main变化；完整ci:local准确dff3639 exit0，45 formal cases、357files/2255pass/2skip，所有检查命令由package.json ci:local串联。日志scripts/formal-remediation/integration-gates-dff3639.log；测试和模型源码永久随仓库保留，可独立重跑。
+- 逐项验收已核对调用链、正常回归、指定负向/固定模型、文档与实际Git集成。真实外部限制在索引单列；没有把未运行当成功。
+- 收尾补齐公开TriggerExecutionNotAcceptedError（与已公开TriggerResultRejectedError对称），文档状态归档。收尾门禁成功后推送并清理临时工作区。
+- 后续独立待办maxRuntimeMs：需要将可信deadline从授权ceiling传到execution边界并验证取消/unknown，源证据见src/trigger/runtime/intent.ts、manager.ts与runtime/supervisor.ts；本次17项不包含绝对运行预算新协议。
