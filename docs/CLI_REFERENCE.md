@@ -12,6 +12,12 @@ Every command below mirrors a Commander declaration in `src/cli/index.ts`. `aria
 - `aria <command> --help` — print usage for any command.
 - Read commands marked `--json` print machine-readable JSON.
 
+## `aria runtime-capabilities`
+
+_Hidden command (machine-facing or deprecated): still functional, but not shown in `aria --help`._
+
+Report static runtime build and update admission capabilities
+
 ## `aria run`
 
 Run the bridge in the foreground (was `start` in older versions)

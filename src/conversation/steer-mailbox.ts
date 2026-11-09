@@ -118,7 +118,10 @@ export function retractSteerMail(inboxDir: string, scope: string, requestId: str
   try {
     const file = mailFile(inboxDir, scope, requestId);
     const mail = readMail(file);
-    if (!mail || !UNREAD_STATES.has(mail.state)) return false;
+    // An absent record under our exclusive claim has no delivery right to
+    // revoke. This also permits safe queue fallback after a failed deposit.
+    if (!mail) return true;
+    if (!UNREAD_STATES.has(mail.state)) return false;
     writeMail(file, { ...mail, state: 'dropped', stateAt: now });
     finishMailClaim(claim, 'committed');
     committed = true;

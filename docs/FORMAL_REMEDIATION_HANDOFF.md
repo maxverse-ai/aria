@@ -206,3 +206,10 @@ R1–R4、D1–D4、C1–C5、T1–T4 共 17 项问题的验证、修复和集�
 - supervisor实际四处明确未受理路径接入typed errors（profile absent/closed、显式start拒绝、result profile offline），未知异常保留unknown。
 - 更新控制/trigger focused5files37tests通过，实际完整supervisor integration随后包含在full gate，不声称不存在的unit路径已测。
 - 下一步commit当前接线，fetch/rebase，完整ci:local；若通过再逐项验收正常push main。
+
+### 2026-11-09 17:06 UTC+8 — D1部分发布故障封闭
+
+- ae72d39完整门禁45formal通过，356测试文件通过/1失败（2253pass/1fail/2skip）；唯一失败是新增hidden runtime-capabilities未同步生成CLI reference。已使用官方gen-cli-reference.mjs生成中英文docs。
+- 最终审查真实文件系统复现D1残留：put发布新body后另一mail损坏claim令list统计抛错，旧catch直接推送造成双交付。已禁止异常时direct copy；仅撤销本请求邮箱权后退队，否则邮箱持有。真实调用链新增partial-deposit回归通过。STEERING中英同步。
+- 独立附录筛查：关闭后reconcile已有closing保护；maxRuntimeMs缺少可信绝对期限传播，源证据明确但独立于17项，后续专项（intent.ts/gateway/startIntent及取消后unknown），本次不声称修复运行时限。其余原生外部/断电/跨OS用户保留已声明验证限制。
+- 下一步保存D1/CLI文档提交，fetch/rebase，再跑完整门禁；全部验收后主线集成。

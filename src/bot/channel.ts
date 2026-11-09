@@ -1722,14 +1722,15 @@ export async function tryMergeLiveFollowup(input: {
       });
       steerPrompt = buildSteerNoticePrompt(input.scope, unread);
     } catch (err) {
-      // Mailbox unavailable (disk/perm) — degrade to a direct body push
-      // rather than stranding the claimed input.
-      useMailbox = false;
-      steerPrompt = buildLiveFollowupPrompt(message, input.botIdentity);
+      // Deposit may have published before counting/diagnostics failed. Never
+      // create a second delivery path without revoking that published body.
       log.warn('followup', 'mailbox-unavailable', {
         scope: input.scope,
         err: err instanceof Error ? err.message : String(err),
       });
+      if (retractSteerMail(input.inboxDir, input.scope, requestId)) input.pending.release(claim);
+      else input.pending.acknowledge(claim);
+      return;
     }
   } else {
     steerPrompt = buildLiveFollowupPrompt(message, input.botIdentity);

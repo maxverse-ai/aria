@@ -12,6 +12,12 @@
 - `aria <command> --help` — 打印任意命令的用法。
 - 标记 `--json` 的读取类命令输出机器可读 JSON。
 
+## `aria runtime-capabilities`
+
+_隐藏命令（面向机器或已弃用）：仍可使用，但不在 `aria --help` 中显示。_
+
+Report static runtime build and update admission capabilities
+
 ## `aria run`
 
 Run the bridge in the foreground (was `start` in older versions)

@@ -560,7 +560,11 @@ not a user message — because Aria owns no code inside the engine loop
 (the prompt-contract variant, weaker than Raft's plugin pull); and the
 notice's own transport evidence stays `none` — the stdin write has no
 acknowledgement, so `accepted` means "written", not "seen". If the
-mailbox write itself fails, the path degrades to the legacy direct push.
+mailbox deposit fails, the host first revokes that request's mailbox delivery
+right before returning it to the pending queue. A deposit may publish before
+counting unread mail fails; unknown ownership therefore never creates a direct
+body push. If another consumer owns the body, the producer acknowledges its
+queue claim and leaves delivery to the mailbox.
 
 Mailbox consumers exclusively claim a record across processes before returning
 its body. Stable request IDs preserve the first deposit and cannot resurrect a
