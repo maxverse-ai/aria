@@ -10,4 +10,3 @@ Acquire(a) == /\ disk = "empty" /\ a \notin held /\ disk' = a /\ held' = held \c
 Next == \E a \in Actors : ReadStale(a) \/ Unlink(a) \/ Acquire(a)
 SingleUpdater == Cardinality(held) <= 1
 =======================================================
-

@@ -11,4 +11,3 @@ RunNext == /\ pending="queued" /\ pending'="done" /\ delivered'=delivered+1 /\ U
 Next == Deposit \/ Pull \/ RejectNotice \/ RunNext
 NoDuplicate == delivered <= 1
 ======================================================
-
