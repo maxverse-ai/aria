@@ -1,5 +1,8 @@
+import { execFileSync } from 'node:child_process';
 import { resolve } from 'node:path';
 import { defineConfig } from 'tsup';
+
+const buildIdentity = { ARIA_BUILD_COMMIT: JSON.stringify(execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()) };
 
 export default defineConfig([
   {
@@ -8,6 +11,7 @@ export default defineConfig([
       updater: 'src/updater/index.ts',
     },
     outDir: 'dist',
+    define: buildIdentity,
     format: ['esm'],
     target: 'node24',
     platform: 'node',
@@ -23,6 +27,7 @@ export default defineConfig([
   {
     entry: { installer: 'src/installer/index.ts' },
     outDir: 'dist',
+    define: buildIdentity,
     format: ['esm'],
     target: 'node24',
     platform: 'node',
@@ -41,6 +46,7 @@ export default defineConfig([
   {
     entry: { index: 'src/index.ts' },
     outDir: 'dist',
+    define: buildIdentity,
     format: ['esm'],
     target: 'node24',
     platform: 'node',
@@ -51,6 +57,7 @@ export default defineConfig([
   {
     entry: { worker: 'src/worker/index.ts' },
     outDir: 'dist',
+    define: buildIdentity,
     format: ['esm'],
     target: 'node24',
     platform: 'node',

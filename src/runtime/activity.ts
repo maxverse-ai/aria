@@ -34,6 +34,8 @@ export interface RuntimeActivityProvider {
 }
 
 export interface RuntimeActivitySnapshotV1 {
+  managedProfiles?: string[];
+  runtimeIdentity?: { version: string; commit: string; ready: boolean; pid: number };
   presentation?: import('../outbound/presentation').PresentationState;
   schemaVersion: 1;
   profile: string;

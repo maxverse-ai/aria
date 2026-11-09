@@ -164,6 +164,7 @@ export class DistributionService {
   }
 
   private async applyLocked(plan: UpdatePlanV1, operation: UpdateOperationV1): Promise<UpdateOperationV1> {
+    let releaseAdmission: (() => Promise<void>) | undefined;
     let switched = false;
     let previous: InstalledVersion | null = null;
     let installed: InstalledVersion | null = null;
@@ -211,6 +212,8 @@ export class DistributionService {
       }
       await this.services.assertSafe(targets, plan.force);
 
+      releaseAdmission = await this.services.acquireAdmission(targets, plan.force);
+
       transition(operation, 'switching', this.now());
       operation.previous = previous;
       operation.installed = installed;
@@ -231,7 +234,7 @@ export class DistributionService {
         runtimePath: spec.runtimePath,
         entryPath: spec.entryPath,
       });
-      await this.services.restartAndCheck(targets, installed.version);
+      await this.services.restartAndCheck(targets, installed);
       transition(operation, 'healthy', this.now());
       await this.store.writeOperation(operation);
       complete(operation, 'succeeded', this.now());
@@ -256,6 +259,8 @@ export class DistributionService {
       complete(operation, 'failed', this.now());
       await this.store.writeOperation(operation);
       throw new Error(failure.message, { cause: err });
+    } finally {
+      await releaseAdmission?.();
     }
   }
 
@@ -280,11 +285,13 @@ export class DistributionService {
     };
     await this.store.writeOperation(operation);
     let targets = await this.services.discover();
+    let releaseAdmission: (() => Promise<void>) | undefined;
     let switched = false;
     try {
       await this.services.assertSafe(targets, force);
       await this.installer.smokeTest(target);
       await this.launcher.write();
+      releaseAdmission = await this.services.acquireAdmission(targets, force);
       transition(operation, 'rolling-back', this.now());
       await this.store.writeOperation(operation);
       await this.store.writeState({ ...state, current: target, previous: current });
@@ -293,7 +300,7 @@ export class DistributionService {
       await this.services.reconcileLaunchers(targets, { runtimePath: spec.runtimePath, entryPath: spec.entryPath });
       transition(operation, 'restarting', this.now());
       await this.store.writeOperation(operation);
-      await this.services.restartAndCheck(targets, target.version);
+      await this.services.restartAndCheck(targets, target);
       transition(operation, 'healthy', this.now());
       await this.store.writeOperation(operation);
       complete(operation, 'succeeded', this.now());
@@ -305,9 +312,8 @@ export class DistributionService {
         try {
           await this.store.writeState({ ...state, current, previous: target });
           const spec = this.launcher.launchSpec();
-          targets = await this.services.discover();
           await this.services.reconcileLaunchers(targets, { runtimePath: spec.runtimePath, entryPath: spec.entryPath });
-          await this.services.restartAndCheck(targets, current.version);
+          await this.services.restartAndCheck(targets, current);
         } catch (restoreErr) {
           const restoreFailure = normalizeError(restoreErr);
           failure.code = 'ROLLBACK_AND_RESTORE_FAILED';
@@ -318,6 +324,8 @@ export class DistributionService {
       complete(operation, 'failed', this.now());
       await this.store.writeOperation(operation);
       throw new Error(failure.message, { cause: err });
+    } finally {
+      await releaseAdmission?.();
     }
   }
 
@@ -349,7 +357,7 @@ export class DistributionService {
     if (previous) {
       const spec = this.launcher.launchSpec();
       await this.services.reconcileLaunchers(targets, { runtimePath: spec.runtimePath, entryPath: spec.entryPath });
-      await this.services.restartAndCheck(targets, previous.version);
+      await this.services.restartAndCheck(targets, previous);
     }
   }
 

@@ -68,6 +68,8 @@ export interface UpdateServiceTarget {
   kind: 'profile-service' | 'supervisor-service';
   profiles: string[];
   running: boolean;
+  /** False only for a legacy host without authenticated online inventory. */
+  inventoryKnown?: boolean;
 }
 
 export interface UpdatePlanV1 {
@@ -134,12 +136,13 @@ export interface VersionInstaller {
 
 export interface ServiceOrchestrator {
   discover(): Promise<UpdateServiceTarget[]>;
+  acquireAdmission(targets: UpdateServiceTarget[], force: boolean): Promise<() => Promise<void>>;
   assertSafe(targets: UpdateServiceTarget[], force: boolean): Promise<void>;
   reconcileLaunchers(
     targets: UpdateServiceTarget[],
     launcher: { runtimePath: string; entryPath: string },
   ): Promise<void>;
-  restartAndCheck(targets: UpdateServiceTarget[], expectedVersion: string): Promise<void>;
+  restartAndCheck(targets: UpdateServiceTarget[], expectedVersion: InstalledVersion): Promise<void>;
 }
 
 export interface DetachedUpdateExecutor {

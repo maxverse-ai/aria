@@ -1,3 +1,6 @@
+import { RuntimeActivityTracker } from './activity';
+import { resolveAppPaths } from '../config/app-paths';
+import { SUPERVISOR_CONTROL_PROFILE, UpdateAdmissionFence } from './update-admission';
 import { PersonalGroupPeers } from '../bot/personal-agent-group';
 import { ProfileRunIntentStore } from './profile-run-intent';
 import { createLarkSpaceGate } from '../bot/space-context';
@@ -230,6 +233,7 @@ class ManagedProfile {
     private taskStore?: TaskStore,
     private taskCoordinator?: TaskCoordinator,
     readonly spaces?: PreparedSpaceProfile,
+    private readonly updateTriggers?: { pause(): () => void; waitIdle(timeoutMs: number): Promise<void> },
   ) {
     this.runtimeSlot = new ProfileRuntimeSlot(engineRuntime);
   }
@@ -237,9 +241,25 @@ class ManagedProfile {
   get appId(): string {
     return this.cfg.accounts.app.id;
   }
+  private updateFence?: UpdateAdmissionFence;
+  private updateExecutionResume?: () => void;
+  private async drainUpdate(admissionId: string, timeoutMs: number): Promise<void> {
+    if (this.transitionResume || this.transitionIngressResume) throw new Error('space transition already owns profile');
+    if (!this.updateFence || !this.conversationRuntime || this.externalChannelRuntime) throw new Error('update admission unavailable for this profile');
+    if (!(await this.updateFence.refresh()).includes(admissionId)) throw new Error('update admission owner is not active');
+    const deadline = Date.now() + timeoutMs;
+    await this.updateTriggers?.waitIdle(timeoutMs);
+    while (this.restarting || this.bridge.activitySnapshot().decision !== 'safe') {
+      if (Date.now() >= deadline) throw new Error('update waiting for active work');
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+    this.updateExecutionResume ??= this.conversationRuntime.runtime.pauseNewRuns('update');
+    if (!(await this.updateFence.refresh()).includes(admissionId)) throw new Error('update admission owner disappeared');
+  }
   private transitionResume?: () => void;
   private transitionIngressResume?: () => void;
   async drainTransition(timeoutMs: number): Promise<void> {
+    if ((await this.updateFence?.refresh())?.length) throw new Error('profile update in progress');
     if (!this.conversationRuntime) throw new Error('profile execution is unavailable');
     // External durable ingress has its own drain contract. A composition must
     // supply a coordinated transition owner before this path can stop it.
@@ -318,6 +338,13 @@ class ManagedProfile {
           ? { governanceAudit: this.nativeReadRuntime.governanceAudit }
           : {}),
       });
+      this.updateFence = new UpdateAdmissionFence(this.appPaths.profileDir, () => {
+        const ingress = this.conversationRuntime!.runtime.ingress.pause();
+        const triggers = this.updateTriggers?.pause();
+        if (!this.bridge) this.updateExecutionResume ??= this.conversationRuntime!.runtime.pauseNewRuns('update-startup');
+        return () => { this.updateExecutionResume?.(); this.updateExecutionResume = undefined; triggers?.(); ingress(); };
+      });
+      await this.updateFence.start();
       const resolvedChannelInstances = projectProfileChannelInstances({
         profileId: this.profile,
         profile: {
@@ -360,6 +387,7 @@ class ManagedProfile {
         endpoint: this.appPaths.runtimeControlEndpoint,
         sidecarFile: this.appPaths.runtimeControlFile,
         snapshot: () => this.bridge.activitySnapshot(),
+        updateDrain: (id, timeout) => this.drainUpdate(id, timeout),
         transition: { drain: timeout => this.drainTransition(timeout), resume: () => this.resumeTransition() },
       });
       const botName = this.bridge.channel.botIdentity?.name;
@@ -369,6 +397,7 @@ class ManagedProfile {
         );
       }
     } catch (err) {
+      this.updateFence?.close();
       // Roll back partial bring-up so a failed start doesn't leak locks/entries.
       await this.runtimeControl?.close().catch(() => undefined);
       this.runtimeControl = undefined;
@@ -389,6 +418,7 @@ class ManagedProfile {
   }
 
   async stop(): Promise<void> {
+    this.updateFence?.close();
     await this.externalChannelRuntime?.close().catch((err) =>
       log.warn('channel-manager', 'external-stop-failed', {
         profile: this.profile,
@@ -710,6 +740,7 @@ class ManagedProfile {
     targetAgentKind: AgentKind,
     actor: ControlActorContext,
   ): Promise<AgentSwitchResult> {
+    if ((await this.updateFence?.refresh())?.length) throw new Error('profile update in progress');
     const switchStartedAt = Date.now();
     const previousAgentKind = this.profileConfig.agentKind;
     if (targetAgentKind === previousAgentKind) {
@@ -973,6 +1004,7 @@ class ManagedProfile {
 
   /** Connect-before-disconnect reconnect for this profile (e.g. after /account). */
   private async restart(): Promise<void> {
+    if ((await this.updateFence?.refresh())?.length) throw new Error('profile update in progress');
     if (this.restarting) return;
     this.restarting = true;
     let nextAppLock: AcquiredRuntimeLock | undefined;
@@ -1118,6 +1150,33 @@ function assertExternalChannelDesiredStateUnchanged(
 export class Supervisor {
   private readonly personalGroupPeers = new PersonalGroupPeers();
   private managed = new Map<string, ManagedProfile>();
+  private hostControl?: RuntimeControlServerHandle;
+  private hostAdmission?: UpdateAdmissionFence;
+  private hostPaused = false;
+  private hostReady = false;
+  private hostStarting?: Promise<void>;
+  private ensureHostControl(): Promise<void> {
+    if (this.opts.persistRunningIntent === false) return Promise.resolve();
+    return this.hostStarting ??= (async () => {
+      const rootDir = this.opts.rootDir ?? dirname(this.opts.configPath);
+      const paths = resolveAppPaths({ rootDir, profile: SUPERVISOR_CONTROL_PROFILE });
+      this.hostAdmission = new UpdateAdmissionFence(paths.profileDir, () => {
+        this.hostPaused = true;
+        return () => { this.hostPaused = false; };
+      });
+      await this.hostAdmission.start();
+      const tracker = new RuntimeActivityTracker(SUPERVISOR_CONTROL_PROFILE, 'host', [{ snapshot: () => ({ quiescing: this.hostPaused }) }]);
+      this.hostControl = await startRuntimeControlServer({
+        profile: SUPERVISOR_CONTROL_PROFILE, endpoint: paths.runtimeControlEndpoint, sidecarFile: paths.runtimeControlFile,
+        snapshot: () => ({ ...tracker.snapshot(), managedProfiles: [...this.managed.keys()].sort() }),
+        ready: () => this.hostReady,
+        updateDrain: async id => {
+          if (!(await this.hostAdmission!.refresh()).includes(id)) throw new Error('host update owner disappeared');
+          await this.lifecycle;
+        },
+      });
+    })();
+  }
   private readonly runIntent: ProfileRunIntentStore;
   private lifecycle: Promise<void> = Promise.resolve();
   private shuttingDown = false;
@@ -1276,6 +1335,7 @@ export class Supervisor {
   }
 
   async restoreProfiles(fallback: string): Promise<void> {
+    await this.ensureHostControl();
     // Queue restoration as one operation so a later explicit stop cannot be
     // overwritten by a stale snapshot of the startup list.
     return this.serializeLifecycle(async () => {
@@ -1283,22 +1343,27 @@ export class Supervisor {
       const profiles = await this.runIntent.running(fallback, Object.keys(root?.profiles ?? {}));
       for (const profile of profiles) {
         try {
-          await this.startProfileNow(profile);
+          await this.startProfileNow(profile, true);
           console.log(`✓ profile「${profile}」已上线`);
         } catch (error) {
           console.warn(`⚠️ profile「${profile}」启动失败：${error instanceof Error ? error.message : String(error)}`);
           log.warn('supervisor', 'restore-start-failed', { profile });
         }
       }
+      this.hostReady = true;
     });
   }
 
   /** Bring a profile online inside this process. Throws on lock/app conflict. */
   async startProfile(profile: string): Promise<void> {
+    await this.ensureHostControl();
+    this.hostReady = true;
     return this.serializeLifecycle(() => this.startProfileNow(profile));
   }
 
-  private async startProfileNow(profile: string): Promise<void> {
+  private async startProfileNow(profile: string, restoring = false): Promise<void> {
+    await this.hostAdmission?.refresh();
+    if (this.hostPaused && !restoring) throw new Error('supervisor update in progress');
     if (this.managed.has(profile)) {
       if (this.opts.persistRunningIntent !== false) await this.runIntent.set(profile, true);
       return;
@@ -1377,6 +1442,7 @@ export class Supervisor {
         this.taskStore,
         this.taskCoordinator,
         spaces,
+        { pause: () => this.triggerManager.pauseProfileAdmission(appPaths.profile), waitIdle: timeout => this.triggerManager.waitProfileIdle(appPaths.profile, timeout) },
       );
       await managed.bringUp(new Date().toISOString());
       this.managed.set(appPaths.profile, managed);
@@ -1393,6 +1459,8 @@ export class Supervisor {
   /** Take a profile offline (in-process). The supervisor keeps running. */
   async stopProfile(profile: string): Promise<void> {
     return this.serializeLifecycle(async () => {
+      await this.hostAdmission?.refresh();
+      if (this.hostPaused) throw new Error('supervisor update in progress');
       if (this.opts.persistRunningIntent !== false) await this.runIntent.set(profile, false);
       await this.stopProfileNow(profile);
     });
@@ -1407,6 +1475,8 @@ export class Supervisor {
   }
 
   async restartProfile(profile: string): Promise<void> {
+    await this.hostAdmission?.refresh();
+    if (this.hostPaused) throw new Error('supervisor update in progress');
     const managed = this.managed.get(profile);
     if (!managed) throw new Error(`profile 未在运行：${profile}`);
     await managed.controls.restart();
@@ -1417,6 +1487,8 @@ export class Supervisor {
     this.shuttingDown = true;
     await this.lifecycle;
     await this.triggerManager.close();
+    await this.hostControl?.close();
+    this.hostAdmission?.close();
     const all = [...this.managed.values()];
     this.managed.clear();
     await Promise.allSettled(all.map((m) => m.stop()));

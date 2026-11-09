@@ -48,7 +48,7 @@ describe('runtime control plane', () => {
       await tmp.cleanup();
     });
 
-    await expect(requestRestartPreflight(sidecarFile, 'aria')).resolves.toEqual(busySnapshot());
+    await expect(requestRestartPreflight(sidecarFile, 'aria')).resolves.toMatchObject({ ...busySnapshot(), instanceId: server.instanceId, runtimeIdentity: { ready: true } });
     await server.close();
     server = undefined;
     await expect(access(sidecarFile)).rejects.toMatchObject({ code: 'ENOENT' });

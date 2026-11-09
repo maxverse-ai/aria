@@ -31,21 +31,24 @@ export async function requestRestartPreflight(
 }
 
 export async function requestRuntimeControl(sidecarFile: string, profile: string,
-  method: RuntimeControlRequestV1['method'], timeoutMs = 60_000): Promise<RuntimeActivitySnapshotV1> {
+  method: RuntimeControlRequestV1['method'], timeoutMs = 60_000, admissionId?: string): Promise<RuntimeActivitySnapshotV1> {
   const sidecar = await readSidecar(sidecarFile, profile);
   const request: RuntimeControlRequestV1 = {
     schemaVersion: RUNTIME_CONTROL_PROTOCOL_VERSION,
-    method, timeoutMs,
+    method, timeoutMs, admissionId,
     profile,
     token: sidecar.token,
   };
-  const response = await exchange(sidecar.endpoint, request, method === 'transition.drain' ? timeoutMs + 2000 : timeoutMs);
+  const response = await exchange(sidecar.endpoint, request, (method === 'transition.drain' || method === 'update.drain') ? timeoutMs + 2000 : timeoutMs);
+  if (!response || response.schemaVersion !== 1 || typeof response.ok !== 'boolean' || (response.ok && !response.result)) throw new RuntimeControlUnavailableError('PROTOCOL_ERROR', 'invalid runtime control response');
   if (!response.ok) {
     throw new RuntimeControlUnavailableError('PROTOCOL_ERROR', response.error.message);
   }
   if (response.result.profile !== profile) {
     throw new RuntimeControlUnavailableError('PROTOCOL_ERROR', 'runtime response profile mismatch');
   }
+  if (response.result.instanceId !== sidecar.instanceId) throw new RuntimeControlUnavailableError('PROTOCOL_ERROR', 'runtime instance mismatch');
+  if (response.result.runtimeIdentity && response.result.runtimeIdentity.pid !== sidecar.pid) throw new RuntimeControlUnavailableError('PROTOCOL_ERROR', 'runtime process identity mismatch');
   return response.result;
 }
 

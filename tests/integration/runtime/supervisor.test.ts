@@ -1,3 +1,5 @@
+import { createAdmissionMarker, SUPERVISOR_CONTROL_PROFILE } from '../../../src/runtime/update-admission';
+import { requestRuntimeControl } from '../../../src/runtime/control-client';
 import { mkdir, mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -181,6 +183,26 @@ afterEach(async () => {
 });
 
 describe('Supervisor', () => {
+  it('authenticates an empty ready host and fences profile lifecycle during update', async () => {
+    await mkdir(join(root, 'supervisor'), { recursive: true });
+    const { writeFile } = await import('node:fs/promises');
+    await writeFile(join(root, 'supervisor', 'profile-run-intent.v1.json'), JSON.stringify({ schema: 'aria.profile-run-intent.v1', profiles: { claude: false, work: false, dup: false } }));
+    await sup.restoreProfiles('claude');
+    const paths = resolveAppPaths({ rootDir: root, profile: SUPERVISOR_CONTROL_PROFILE });
+    const snapshot = await requestRuntimeControl(paths.runtimeControlFile, SUPERVISOR_CONTROL_PROFILE, 'restart.preflight');
+    expect(snapshot.managedProfiles).toEqual([]);
+    expect(snapshot.runtimeIdentity).toMatchObject({ ready: true, pid: process.pid });
+    const hold = await createAdmissionMarker(paths.profileDir);
+    try {
+      expect((await requestRuntimeControl(paths.runtimeControlFile, SUPERVISOR_CONTROL_PROFILE, 'update.drain', 1000, hold.id)).lifecycle).toBe('quiescing');
+      await expect(sup.startProfile('claude')).rejects.toThrow('update in progress');
+      await expect(sup.stopProfile('claude')).rejects.toThrow('update in progress');
+      expect(started).toEqual([]);
+    } finally { await hold.release(); }
+    await sup.startProfile('claude');
+    expect(started).toEqual(['claude']);
+  });
+
   it.each(['shadow', 'opt-in'] as const)(
     'projects schema-v2 channel instances without rewriting profile config in %s mode',
     async (mode) => {

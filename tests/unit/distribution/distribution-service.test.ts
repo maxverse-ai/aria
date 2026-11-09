@@ -55,6 +55,23 @@ describe('DistributionService', () => {
     expect((await fixture.store.readState()).current).toEqual(fixture.installed);
   });
 
+  it('holds admission through rollback and releases it on failure', async () => {
+    const fixture = await createFixture({ failFirstHealthCheck: true });
+    let held = false;
+    const release = vi.fn(async () => { held = false; });
+    vi.mocked(fixture.services.acquireAdmission).mockImplementation(async () => { held = true; return release; });
+    let checks = 0;
+    vi.mocked(fixture.services.restartAndCheck).mockImplementation(async () => {
+      expect(held).toBe(true);
+      if (++checks === 1) throw new Error('health failed');
+    });
+    const plan = await fixture.service.createPlan();
+    await expect(fixture.service.apply(plan.id)).rejects.toThrow('health failed');
+    expect(checks).toBe(2);
+    expect(release).toHaveBeenCalledOnce();
+    expect(held).toBe(false);
+  });
+
   it('cancels a plan by marking it, keeps the plan file, and rejects apply', async () => {
     const fixture = await createFixture();
     const plan = await fixture.service.createPlan();
@@ -171,6 +188,7 @@ async function createFixture(options: { failFirstHealthCheck?: boolean } = {}) {
       profiles: ['profile-a'],
       running: true,
     }]),
+    acquireAdmission: vi.fn(async () => async () => {}),
     assertSafe: vi.fn(async () => {}),
     reconcileLaunchers: vi.fn(async () => {}),
     restartAndCheck: vi.fn(async () => {

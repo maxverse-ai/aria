@@ -170,7 +170,7 @@ tarball bytes. A mismatch fails closed before npm or a service manager runs.
    commit-qualified version directory.
 5. Aria writes stable launcher files, atomically switches `install.json`,
    rewrites existing service definitions to the stable launcher, restarts only
-   services that were running, and checks that they remain alive.
+   services that were running, and checks authenticated runtime build identity and readiness.
 6. Every transition is journaled. A failure after the switch restores the old
    pointer, service definitions, and running version. Installed version
    directories are retained for explicit rollback and forensic inspection.
@@ -217,3 +217,39 @@ adding another service manager or detached execution mechanism is confined to
 platform adapters. The plan and operation schemas are versioned, so future
 channels, rollout rings, signatures, or remote Feishu controls do not require a
 second updater implementation.
+
+### Update admission and runtime identity
+
+A non-force update/rollback acquires durable owner-specific holds for the whole
+running service set before changing the active pointer or any service. The host
+hold freezes explicit profile start/stop/restart; authenticated online inventory
+selects only online profiles. Each profile fences channel ingress and trigger
+admission, drains already admitted work, then fences execution. Holds remain
+through replacement startup, health verification and automatic rollback; startup
+reads them before channels or trigger admission. Previously stopped services and
+profiles are not started for verification. External channel compositions without
+a drain adapter fail closed. Force bypasses activity fencing, not build identity.
+
+Holds use complete hard-link publication under each profile's update-admission
+directory and unique filenames; release removes only its own file. Runtime polling
+releases a hold when its file disappears or its updater PID is confirmed dead
+(ESRCH only). PID reuse or uncertain liveness conservatively retains admission;
+malformed published files fail closed. This assumes local filesystem hard links,
+reliable same-user process liveness and cooperative authenticated lifecycle
+clients; arbitrary manual OS starts/stops and power-loss durability are outside
+the guarantee. An updater crash does not stop other profiles, and does not prove
+that an interrupted pointer/service transaction has completed.
+
+OS process liveness is necessary but insufficient for health. The authenticated
+control endpoint returns its own PID/instance, build-time Git commit, package
+version and startup readiness. The updater requires a replacement instance with
+the exact installed version/commit and the same online host inventory. Readiness
+means runtime composition completed, not that every remote channel is connected.
+Source execution reports development identity and cannot satisfy release health.
+A legacy daemon without these control capabilities fails closed by default. An
+explicit force update can bootstrap it, accepting unknown activity and old online
+inventory; the replacement must still report authenticated readiness and build
+identity for the host and every restored profile. Alternatively safely stop/drain
+it through its supported lifecycle before upgrading. Rolling
+back to a retained legacy build that lacks identity is reported as unverified
+failure, even when the old process starts successfully.

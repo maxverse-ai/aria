@@ -14,7 +14,8 @@ export interface RuntimeControlSidecarV1 {
 
 export interface RuntimeControlRequestV1 {
   schemaVersion: 1;
-  method: 'restart.preflight' | 'transition.drain' | 'transition.resume';
+  method: 'restart.preflight' | 'transition.drain' | 'transition.resume' | 'update.drain';
+  admissionId?: string;
   timeoutMs?: number;
   profile: string;
   token: string;

@@ -1,3 +1,4 @@
+import { runtimeBuildIdentity } from './build-identity';
 import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { chmod, mkdir, readFile, rm } from 'node:fs/promises';
 import { createServer, type Server, type Socket } from 'node:net';
@@ -18,7 +19,9 @@ export interface RuntimeControlServerOptions {
   profile: string;
   endpoint: string;
   sidecarFile: string;
+  ready?: () => boolean;
   snapshot(): RuntimeActivitySnapshotV1;
+  updateDrain?: (admissionId: string, timeoutMs: number) => Promise<void>;
   transition?: { drain(timeoutMs: number): Promise<void>; resume(): void };
   now?: () => Date;
 }
@@ -44,7 +47,7 @@ export async function startRuntimeControlServer(
   const server = createServer((socket) => {
     sockets.add(socket);
     socket.once('close', () => sockets.delete(socket));
-    receiveRequest(socket, options, token);
+    receiveRequest(socket, options, token, instanceId);
   });
   await listen(server, options.endpoint);
   if (process.platform !== 'win32') await chmod(options.endpoint, 0o600);
@@ -78,7 +81,7 @@ export async function startRuntimeControlServer(
   };
 }
 
-function receiveRequest(socket: Socket, options: RuntimeControlServerOptions, token: string): void {
+function receiveRequest(socket: Socket, options: RuntimeControlServerOptions, token: string, instanceId: string): void {
   socket.setEncoding('utf8');
   let body = '';
   socket.on('data', (chunk: string) => {
@@ -101,7 +104,7 @@ function receiveRequest(socket: Socket, options: RuntimeControlServerOptions, to
       writeResponse(socket, errorResponse('UNAUTHORIZED', 'invalid control token'));
       return;
     }
-    if (request.schemaVersion !== RUNTIME_CONTROL_PROTOCOL_VERSION || !['restart.preflight', 'transition.drain', 'transition.resume'].includes(request.method)) {
+    if (request.schemaVersion !== RUNTIME_CONTROL_PROTOCOL_VERSION || !['restart.preflight', 'transition.drain', 'transition.resume', 'update.drain'].includes(request.method)) {
       writeResponse(socket, errorResponse('INVALID_REQUEST', 'unsupported control request'));
       return;
     }
@@ -110,7 +113,12 @@ function receiveRequest(socket: Socket, options: RuntimeControlServerOptions, to
       return;
     }
     void (async () => {
-      if (request.method !== 'restart.preflight') {
+      if (request.method === 'update.drain') {
+        const timeout = request.timeoutMs ?? 60_000;
+        if (!options.updateDrain || typeof request.admissionId !== 'string') throw new Error('update admission control unavailable');
+        if (!Number.isSafeInteger(timeout) || timeout < 1000 || timeout > 300_000) throw new Error('invalid update timeout');
+        await options.updateDrain(request.admissionId, timeout);
+      } else if (request.method !== 'restart.preflight') {
         if (!options.transition) throw new Error('runtime transition control is unavailable');
         if (request.method === 'transition.resume') options.transition.resume();
         else {
@@ -119,7 +127,7 @@ function receiveRequest(socket: Socket, options: RuntimeControlServerOptions, to
           await options.transition.drain(timeout);
         }
       }
-      writeResponse(socket, { schemaVersion: RUNTIME_CONTROL_PROTOCOL_VERSION, ok: true, result: options.snapshot() });
+      writeResponse(socket, { schemaVersion: RUNTIME_CONTROL_PROTOCOL_VERSION, ok: true, result: { ...options.snapshot(), instanceId, runtimeIdentity: { ...runtimeBuildIdentity, pid: process.pid, ready: options.ready?.() ?? true } } });
     })().catch(error => writeResponse(socket, errorResponse('INVALID_REQUEST', error instanceof Error ? error.message : 'runtime transition failed')));
   });
 }
