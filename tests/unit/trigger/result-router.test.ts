@@ -12,6 +12,7 @@ import {
   FileTriggerResultDeliveryStore,
   InMemoryTriggerResultDeliveryStore,
   TriggerResultRouter,
+  TriggerResultRejectedError,
 } from '../../../src/trigger/result';
 import {
   TRIGGER_STATE_SCHEMA_VERSION,
@@ -30,6 +31,49 @@ afterEach(async () => {
 });
 
 describe('TriggerResultRouter', () => {
+  it('quarantines pre-upgrade retry records lacking nonacceptance evidence', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'aria-result-legacy-')); temporaryDirectories.push(directory);
+    const store = new FileTriggerResultDeliveryStore(join(directory, 'results.json'));
+    await store.create({ schemaVersion: 1, deliveryId: 'legacy', occurrenceId: 'old', routeId: 'route',
+      state: 'retry-wait', attempt: 1, createdAt: 1, updatedAt: 2, nextAttemptAt: 3,
+      intent: { abiVersion: 1, deliveryId: 'legacy', profileId: 'p', pluginId: 'fake', instanceId: 'one',
+        scopeId: 's', content: { kind: 'text', text: 'old result' } } });
+    expect(await store.listReady(1000)).toEqual([]);
+    const [unknown] = await store.listUncertain();
+    expect(unknown).toMatchObject({ state: 'uncertain', errorCode: 'legacy-result-outcome-unknown' });
+    expect(await store.settle({ ...unknown!, state: 'failed' }, unknown!.claimToken!)).toBe(true);
+  });
+  it('retains unknown accepted delivery across reconcile and operator resolution never resends', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'aria-result-unknown-')); temporaryDirectories.push(directory);
+    const store = new FileTriggerResultDeliveryStore(join(directory, 'results.json'));
+    const deliver = vi.fn(async () => { throw new Error('timeout after acceptance'); });
+    const router = routerWith(store, deliver, () => 1000);
+    await router.route(definition(), occurrence(), { status: 'succeeded', output: { text: 'done' } });
+    await router.reconcile();
+    const [unknown] = await router.inspectUncertain();
+    if (!unknown) throw new Error('expected uncertain delivery');
+    expect(unknown).toMatchObject({ state: 'uncertain', attempt: 1 });
+    expect(deliver).toHaveBeenCalledOnce();
+    expect(await router.resolveUncertain(unknown.deliveryId, 'wrong-owner', { abandon: true, reason: 'checked' })).toBe(false);
+    expect(await router.resolveUncertain(unknown.deliveryId, unknown.claimToken!, { reason: 'provider confirms delivery',
+      receipt: { deliveryId: unknown.deliveryId, status: 'sent', deliveredAt: 1000 } })).toBe(true);
+    expect(await store.settle({ ...unknown, state: 'failed' }, unknown.claimToken!)).toBe(false);
+    await router.reconcile();
+    expect(deliver).toHaveBeenCalledOnce();
+  });
+
+  it('receipt checkpoint failure keeps durable delivering claim without retrying provider', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'aria-result-checkpoint-')); temporaryDirectories.push(directory);
+    const store = new FileTriggerResultDeliveryStore(join(directory, 'results.json'));
+    const deliver = vi.fn(async intent => ({ deliveryId: intent.deliveryId, status: 'sent' as const, deliveredAt: 1000 }));
+    const router = routerWith(store, deliver, () => 1000);
+    vi.spyOn(store, 'settle').mockRejectedValueOnce(new Error('disk checkpoint failed'));
+    await expect(router.route(definition(), occurrence(), { status: 'succeeded', output: { text: 'done' } })).rejects.toThrow('disk checkpoint');
+    await router.reconcile();
+    expect(deliver).toHaveBeenCalledOnce();
+    expect((await store.listUncertain())[0]).toMatchObject({ state: 'delivering', attempt: 1 });
+  });
+
   it('X3/X4: recovered team results retain the original principal, definition revision and destination epoch', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'aria-trigger-space-')); temporaryDirectories.push(directory);
     const f = await gateFixture(directory, { persistent: true });
@@ -63,7 +107,7 @@ describe('TriggerResultRouter', () => {
         channel: { deliver: output => recoveredBoundary.deliver(output, () => retrySend(output)) }, now: () => restored.state.now, retryDelayMs: 10 });
       await recovered.reconcile();
       expect(retrySend).not.toHaveBeenCalled();
-      expect(await new FileTriggerResultDeliveryStore(storeFile).get('occurrence-a:conversation')).toMatchObject({ state: 'retry-wait', attempt: 2 });
+      expect(await new FileTriggerResultDeliveryStore(storeFile).get('occurrence-a:conversation')).toMatchObject({ state: 'uncertain', attempt: 1 });
     } finally { await restored.services.close(); }
   });
 
@@ -117,7 +161,7 @@ describe('TriggerResultRouter', () => {
     temporaryDirectories.push(directory);
     const path = join(directory, 'deliveries.json');
     const firstDeliver = vi.fn(async () => {
-      throw Object.assign(new Error('offline'), { code: 'provider-offline' });
+      throw new TriggerResultRejectedError('provider-offline');
     });
     const first = routerWith(new FileTriggerResultDeliveryStore(path), firstDeliver, () => now);
 

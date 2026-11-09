@@ -1,4 +1,7 @@
 import { CHANNEL_PLUGIN_ABI_VERSION, type ChannelOutboundIntent } from '../../channel/plugin/types';
+import type { ChannelDeliveryReceipt } from '../../channel/plugin/types';
+import { randomUUID } from 'node:crypto';
+import { TriggerResultRejectedError } from './types';
 import type { ResultRoute } from '../../application/execution-intent';
 import type { TriggerDefinition, TriggerOccurrence } from '../state';
 import type { TriggerExecutionResult } from '../runtime/types';
@@ -57,27 +60,59 @@ export class TriggerResultRouter implements TriggerResultGateway {
     for (const record of await this.options.store.listReady(this.now())) await this.deliver(record);
   }
 
-  private async deliver(record: TriggerResultDeliveryRecord): Promise<void> {
-    const existing = await this.options.store.get(record.deliveryId);
-    if (!existing || existing.state === 'sent' || existing.state === 'failed') return;
-    const attempt = existing.attempt + 1;
-    try {
-      const receipt = await this.options.channel.deliver(existing.intent);
-      await this.options.store.put({
-        ...existing, state: 'sent', attempt, receipt, errorCode: undefined,
-        nextAttemptAt: undefined, updatedAt: this.now(),
-      });
-    } catch (error) {
-      const exhausted = attempt >= this.maxAttempts;
-      await this.options.store.put({
-        ...existing,
-        state: exhausted ? 'failed' : 'retry-wait',
-        attempt,
-        errorCode: stableCode(error),
-        nextAttemptAt: exhausted ? undefined : this.now() + this.retryDelayMs,
-        updatedAt: this.now(),
-      });
+  async inspectUncertain(): Promise<readonly TriggerResultDeliveryRecord[]> {
+    return this.options.store.listUncertain();
+  }
+
+  /** Operator reconciliation never sends. Quiesce the original owner first. */
+  async resolveUncertain(deliveryId: string, token: string,
+    resolution: { reason: string; receipt: ChannelDeliveryReceipt }
+      | { reason: string; abandon: true }
+      | { reason: string; retry: true; ownerStopped: true; confirmedNotAccepted: true },
+  ): Promise<boolean> {
+    if (!resolution.reason.trim()) throw new TypeError('delivery resolution reason is required');
+    if ('retry' in resolution && (resolution.ownerStopped !== true || resolution.confirmedNotAccepted !== true)) {
+      throw new Error('retry requires stopped ownership and confirmed nonacceptance');
     }
+    const current = await this.options.store.get(deliveryId);
+    if (!current || !['delivering', 'uncertain'].includes(current.state) || current.claimToken !== token) return false;
+    if ('receipt' in resolution && resolution.receipt.deliveryId !== deliveryId) throw new Error('delivery receipt ID mismatch');
+    return this.options.store.settle({
+      ...current, state: 'receipt' in resolution ? 'sent' : 'retry' in resolution ? 'retry-wait' : 'failed',
+      receipt: 'receipt' in resolution ? resolution.receipt : undefined,
+      resolutionReason: resolution.reason, updatedAt: this.now(), errorCode: undefined,
+      nextAttemptAt: 'retry' in resolution ? this.now() : undefined,
+      confirmedNotAccepted: 'retry' in resolution ? true : undefined,
+    }, token);
+  }
+
+  private async deliver(record: TriggerResultDeliveryRecord): Promise<void> {
+    const token = randomUUID();
+    const existing = await this.options.store.claim(record.deliveryId, token, this.now());
+    if (!existing) return;
+    let receipt: ChannelDeliveryReceipt;
+    try {
+      receipt = await this.options.channel.deliver(existing.intent);
+    } catch (error) {
+      const rejected = error instanceof TriggerResultRejectedError;
+      const exhausted = existing.attempt >= this.maxAttempts;
+      await this.options.store.settle({
+        ...existing,
+        state: rejected ? (exhausted ? 'failed' : 'retry-wait') : 'uncertain',
+        errorCode: stableCode(error),
+        nextAttemptAt: rejected && !exhausted ? this.now() + this.retryDelayMs : undefined,
+        confirmedNotAccepted: rejected ? true : undefined,
+        updatedAt: this.now(),
+      }, token);
+      return;
+    }
+    // A checkpoint failure is not a provider rejection. Keep the persisted
+    // delivering claim; never turn success + failed persistence into a retry.
+    if (receipt.deliveryId !== existing.deliveryId) throw new Error('delivery receipt ID mismatch');
+    await this.options.store.settle({
+      ...existing, state: 'sent', receipt, errorCode: undefined,
+      nextAttemptAt: undefined, updatedAt: this.now(),
+    }, token);
   }
 }
 

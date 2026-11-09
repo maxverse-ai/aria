@@ -3,7 +3,7 @@ import type { ChannelDeliveryReceipt, ChannelOutboundIntent } from '../../channe
 import type { TriggerDefinition, TriggerOccurrence } from '../state';
 import type { TriggerExecutionResult } from '../runtime/types';
 
-export type TriggerResultDeliveryState = 'pending' | 'retry-wait' | 'sent' | 'failed';
+export type TriggerResultDeliveryState = 'pending' | 'retry-wait' | 'delivering' | 'uncertain' | 'sent' | 'failed';
 
 export interface TriggerResultDeliveryRecord {
   schemaVersion: 1;
@@ -18,6 +18,18 @@ export interface TriggerResultDeliveryRecord {
   nextAttemptAt?: number;
   errorCode?: string;
   receipt?: ChannelDeliveryReceipt;
+  /** Durable ownership token. Never reclaimed by a timeout or restart. */
+  claimToken?: string;
+  resolutionReason?: string;
+  /** Distinguishes safe retries from legacy records that retried any error. */
+  confirmedNotAccepted?: true;
+}
+
+export function normalizeDeliveryRecord(record: TriggerResultDeliveryRecord): TriggerResultDeliveryRecord {
+  return record.state === 'retry-wait' && record.confirmedNotAccepted !== true
+    ? { ...record, state: 'uncertain', nextAttemptAt: undefined, errorCode: 'legacy-result-outcome-unknown',
+      claimToken: record.claimToken ?? `legacy:${record.deliveryId}:${record.attempt}:${record.updatedAt}` }
+    : record;
 }
 
 export interface TriggerResultDeliveryStore {
@@ -25,6 +37,17 @@ export interface TriggerResultDeliveryStore {
   listReady(now: number): Promise<readonly TriggerResultDeliveryRecord[]>;
   create(record: TriggerResultDeliveryRecord): Promise<TriggerResultDeliveryRecord>;
   put(record: TriggerResultDeliveryRecord): Promise<TriggerResultDeliveryRecord>;
+  claim(deliveryId: string, token: string, now: number): Promise<TriggerResultDeliveryRecord | undefined>;
+  settle(record: TriggerResultDeliveryRecord, token: string): Promise<boolean>;
+  listUncertain(): Promise<readonly TriggerResultDeliveryRecord[]>;
+}
+
+/** Only use when the channel can prove this attempt was never accepted. */
+export class TriggerResultRejectedError extends Error {
+  constructor(readonly code: string, options?: ErrorOptions) {
+    super(code, options);
+    this.name = 'TriggerResultRejectedError';
+  }
 }
 
 export interface ResolvedConversationRoute {

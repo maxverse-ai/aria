@@ -3,6 +3,7 @@ import { dirname } from 'node:path';
 import * as lockfile from 'proper-lockfile';
 import { writeFileAtomic } from '../../platform/atomic-write';
 import type { TriggerResultDeliveryRecord, TriggerResultDeliveryStore } from './types';
+import { normalizeDeliveryRecord } from './types';
 
 interface FileState {
   schema: 'aria.trigger-result-deliveries.v1';
@@ -38,15 +39,45 @@ export class FileTriggerResultDeliveryStore implements TriggerResultDeliveryStor
 
   async put(record: TriggerResultDeliveryRecord): Promise<TriggerResultDeliveryRecord> {
     return this.mutate((state) => {
+      if (state.records[record.deliveryId]?.claimToken) throw new Error('claimed delivery requires fenced settlement');
       state.records[record.deliveryId] = clone(record);
       return clone(record);
     });
+  }
+
+  async claim(deliveryId: string, token: string, now: number): Promise<TriggerResultDeliveryRecord | undefined> {
+    if (!token) throw new TypeError('delivery claim token is required');
+    return this.mutate((state) => {
+      const record = state.records[deliveryId];
+      if (!record || !(record.state === 'pending' || (record.state === 'retry-wait' && record.nextAttemptAt! <= now))) return undefined;
+      const claimed: TriggerResultDeliveryRecord = {
+        ...record, state: 'delivering', claimToken: token, attempt: record.attempt + 1,
+        updatedAt: now, nextAttemptAt: undefined,
+      };
+      state.records[deliveryId] = claimed;
+      return claimed;
+    });
+  }
+
+  async settle(record: TriggerResultDeliveryRecord, token: string): Promise<boolean> {
+    return this.mutate((state) => {
+      const current = state.records[record.deliveryId];
+      if (!current || current.claimToken !== token || !['delivering', 'uncertain'].includes(current.state)) return false;
+      state.records[record.deliveryId] = clone({ ...record, claimToken: token });
+      return true;
+    });
+  }
+
+  async listUncertain(): Promise<readonly TriggerResultDeliveryRecord[]> {
+    return Object.values((await this.read()).records)
+      .filter(record => record.state === 'delivering' || record.state === 'uncertain').map(clone);
   }
 
   private async read(): Promise<FileState> {
     await this.ensure();
     const state = JSON.parse(await readFile(this.path, 'utf8')) as FileState;
     if (state.schema !== EMPTY.schema || state.version !== 1 || !state.records) throw new Error('invalid trigger result delivery file');
+    for (const [id, record] of Object.entries(state.records)) state.records[id] = normalizeDeliveryRecord(record);
     return state;
   }
 
