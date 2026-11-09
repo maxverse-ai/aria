@@ -96,14 +96,13 @@ R1–R4、D1–D4、C1–C5、T1–T4 共 17 项问题的验证、修复和集�
 
 ## 当前续跑定位
 
-- 检查点：2026-11-09 15:38 UTC+8；本文件为主任务账本，根目录同名文件仍是初始执行入口。
-- 阶段：已产生阶段性修复；尚无整改集成到主线，17 项均未关闭。
-- 主 worktree：`D:\dev\aria\.worktrees\remediation`，分支 `agent/remediation`，HEAD `973599b6567e69c36f0b750ea4819a39ee68195a`。
-- 待评审提交：R1-R4 `0ce9c69`；C2 `e33584e`；C1+C3 `29a68d96c39b63a598360af6d7d64bfc96eb63b5`。均在各自 worktree，尚未 cherry-pick 或集成；先核对实际提交和证据。
-- 未提交：D1/D4 邮箱所有权与过期处理、T1/T3/T4 trigger 草稿及相关测试/文档、`NoticeOwnership.tla`。必须保留，不能当作已完成修复。
-- 已知验证：邮箱 focused 23 项通过；trigger focused 22 项中 1 项失败（durable retry 改变原 route 次数断言）；最后 typecheck 通过。完整整改门禁尚未运行。子任务验证见下方检查点。
-- 下一步：先核对 Git 状态和子任务状态，修正邮箱 expiry 路径的 claim 释放遗漏，补 D1 联合调用链测试；T1/T3/T4 仍需正确性评审和回归。随后串行评审接收子任务提交、登记 manifest 并运行完整门禁。
-- 工具：wlease 不可用；无虚构 lease。TLC/Java 路径见下方检查点。未发布、部署或操作生产服务。
+- 检查点：2026-11-09 16:57 UTC+8；本文件为主任务账本。
+- 主 worktree：D:/dev/aria/.worktrees/remediation，分支 agent/remediation，HEAD 3204c5a（核对git log）。
+- 所有17项已有修复/正常模型/实现测试；均未推origin/main，不算完成。完整门禁67ba597已通过45formal/357files2250tests/2skip。
+- 当前阻项：C4反向审查发现排空等待中owner消失的pause泄漏及legacy rollback能力核验，fix_updatelock正在自己工作区修复；接收后必须再次完整门禁。
+- 主任务当前tracked干净（见实际git status）；根目录用户快照和.pnpm-store保持保护。
+- 下一步：核对fix_updatelock实际运行状态/提交，接收最终C4修复与明确未受理错误接线，fetch/rebase并完整验证；再按17项逐条验收、正常推送main与清理。
+- goal active，无token预算；未发布、部署、变更版本或操作生产服务。
 
 ## 逐项账本
 
@@ -200,3 +199,10 @@ R1–R4、D1–D4、C1–C5、T1–T4 共 17 项问题的验证、修复和集�
 - 门禁后仅新增API导出TriggerResultRejectedError和修正文档幂等表述/形式化协议映射，待下一轮验证。任务测试生成快照CRLF尚需仅在本worktree还原，根用户快照保持保护。
 - adversarial C4发现drainUpdate等待时owner marker丢失可能导致late execution pause无法释放；子任务fix_updatelock正在修复并补回归。另审查legacy rollback启动后缺身份再停止可能中断新任务，需capability preflight。未修复前不能集成或关闭C4/C5。
 - 下一步：核对fix_updatelock活跃任务与实际提交，接收修复；补完整门禁后正常push main，逐项关闭与清理工作区。goal继续active。
+
+### 2026-11-09 16:59 UTC+8 — 最终C4补丁接收
+
+- e87acde接收524ad11：late drain的execution pause归UpdateAdmissionFence统一所有，失去owner不能迟到安装/泄漏；rollback/非force apply精确执行目标runtime-capabilities预检版本/SHA/admission能力，在pointer/service变更前失败。
+- supervisor实际四处明确未受理路径接入typed errors（profile absent/closed、显式start拒绝、result profile offline），未知异常保留unknown。
+- 更新控制/trigger focused5files37tests通过，实际完整supervisor integration随后包含在full gate，不声称不存在的unit路径已测。
+- 下一步commit当前接线，fetch/rebase，完整ci:local；若通过再逐项验收正常push main。

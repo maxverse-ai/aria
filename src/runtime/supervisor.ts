@@ -74,6 +74,7 @@ import {
 } from '../trigger/state';
 import {
   TriggerManager,
+  TriggerExecutionNotAcceptedError,
   type TriggerExecutionResult,
   type TriggerExecutionSubmission,
   type TriggerManagerSnapshot,
@@ -81,6 +82,7 @@ import {
 import {
   FileTriggerResultDeliveryStore,
   TriggerResultRouter,
+  TriggerResultRejectedError,
 } from '../trigger/result';
 import {
   TriggerManagementApi,
@@ -487,9 +489,7 @@ class ManagedProfile {
   async submitTrigger(intent: RunIntent): Promise<TriggerExecutionSubmission> {
     const owner = this.conversationRuntime;
     if (!owner || owner.isClosed()) {
-      throw Object.assign(new Error(`profile runtime is unavailable: ${this.profile}`), {
-        code: 'profile-runtime-unavailable',
-      });
+      throw new TriggerExecutionNotAcceptedError(`profile runtime is unavailable: ${this.profile}`, 'profile-runtime-unavailable');
     }
     const authorized = await this.spaces?.authorizeIntent(intent);
     const spaceContext = authorized?.operation.context;
@@ -516,9 +516,7 @@ class ManagedProfile {
     });
     const started = authorized ? await authorized.boundary.ledger.gate.run(authorized.operation, start) : await start();
     if (!started.ok) {
-      throw Object.assign(new Error(started.rejectReason.userVisible), {
-        code: started.rejectReason.code,
-      });
+      throw new TriggerExecutionNotAcceptedError(started.rejectReason.userVisible, started.rejectReason.code);
     }
     const complete = async (): Promise<TriggerExecutionResult> => {
       let terminal: TriggerExecutionResult | undefined;
@@ -1208,7 +1206,7 @@ export class Supervisor {
       channel: {
         deliver: (intent) => {
           const profile = this.managed.get(intent.profileId);
-          if (!profile) throw Object.assign(new Error(`profile is offline: ${intent.profileId}`), { code: 'profile-offline' });
+          if (!profile) throw new TriggerResultRejectedError('profile-offline');
           return profile.deliverTriggerResult(intent);
         },
       },
@@ -1222,9 +1220,7 @@ export class Supervisor {
         submit: (profileId, intent) => {
           const profile = this.managed.get(profileId);
           if (!profile) {
-            throw Object.assign(new Error(`profile is offline: ${profileId}`), {
-              code: 'profile-offline',
-            });
+            throw new TriggerExecutionNotAcceptedError(`profile is offline: ${profileId}`, 'profile-offline');
           }
           return profile.submitTrigger(intent);
         },
