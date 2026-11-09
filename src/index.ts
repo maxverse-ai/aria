@@ -105,6 +105,7 @@ export {
   FileTriggerResultDeliveryStore,
   InMemoryTriggerResultDeliveryStore,
   TriggerResultRouter,
+  TriggerResultRejectedError,
   triggerResultDeliveryId,
 } from './trigger/result';
 export type {

@@ -117,18 +117,18 @@ R1–R4、D1–D4、C1–C5、T1–T4 共 17 项问题的验证、修复和集�
 | R3 | 待集成 | 子任务复现证据与正常 fixed/legacy 模型 | 主整改分支 focused 及 TLC 已重跑通过，见 16:25 检查点 | 仅任务分支 | 完整门禁、主线集成 |
 | R4 | 待集成 | 子任务复现证据与正常 fixed/legacy 模型 | 主整改分支 focused 及 TLC 已重跑通过，见 16:25 检查点 | 仅任务分支 | 完整门禁、主线集成 |
 | D1 | 待验证 | NoticeOwnership legacy NoDuplicate 指定反例 | 28 项邮箱/联合调用链/独立进程测试通过；fixed TLC 通过 | 未集成 | 完整门禁及评审 |
-| D2 | 待核实 | 见历史审计 | 无整改证据 | 无 | 明确单/多 live coordinator 合约 |
-| D3 | 待核实 | 见历史审计 | 无整改证据 | 无 | 分类 known rejection 与 unknown |
+| D2 | 待集成 | ReliabilityLease；真实独立进程负向及fixed | 67ba597完整门禁通过，见16:55检查点 | 任务分支450e1ef | 最终评审后主线集成 |
+| D3 | 待集成 | ManagedCardFallback；实际SDK受控provider | 67ba597完整门禁通过，见16:55检查点 | 任务分支9b95283 | 最终评审后主线集成 |
 | D4 | 待验证 | NoticeOwnership；TTL redaction/tombstone | 过期可见且正文清理、防 redeposit 回归通过 | 未集成 | 完整门禁及评审 |
 | C1 | 待集成 | 子任务复现证据与正常 fixed/legacy 模型 | 主整改分支 focused 及 TLC 已重跑通过，见 16:25 检查点 | 仅任务分支 | 完整门禁、主线集成 |
 | C2 | 待集成 | 子任务复现证据与正常 fixed/legacy 模型 | 主整改分支 focused 及 TLC 已重跑通过，见 16:25 检查点 | 仅任务分支 | 完整门禁、主线集成 |
 | C3 | 待集成 | 子任务复现证据与正常 fixed/legacy 模型 | 主整改分支 focused 及 TLC 已重跑通过，见 16:25 检查点 | 仅任务分支 | 完整门禁、主线集成 |
-| C4 | 待核实 | 见历史审计 | 无整改证据 | 无 | 隔离验证准入与 drain/stop 交错 |
-| C5 | 待核实 | 见历史审计 | 无整改证据 | 无 | 定义实际实例健康核验 |
-| T1 | 待核实 | 见历史审计 | 无整改证据 | 无 | 设计成功与 outbox 持久衔接 |
-| T2 | 待核实 | 见历史审计 | 无整改证据 | 无 | 复现并发 reconcile 与 claim |
-| T3 | 待核实 | 见历史审计 | 无整改证据 | 无 | 区分 running/unknown 恢复 |
-| T4 | 待核实 | 见历史审计 | 无整改证据 | 无 | 定义配额计数和原子准入 |
+| C4 | 待集成 | UpdateAdmission；实际控制管道+manager hooks | 67ba597完整门禁通过，见16:55检查点 | 任务分支e713906 | 最终评审后主线集成 |
+| C5 | 待集成 | ExpectedBuild；新实例身份控制回归 | 67ba597完整门禁通过，见16:55检查点 | 任务分支e713906 | 最终评审后主线集成 |
+| T1 | 待集成 | TriggerRecovery；durable outbox重启/工具 | 67ba597完整门禁通过，见16:55检查点 | 任务分支4b35ce1 | 最终评审后主线集成 |
+| T2 | 待集成 | ResultDeliveryClaim；独立进程+owner死亡 | 67ba597完整门禁通过，见16:55检查点 | 任务分支49ac76a | 最终评审后主线集成 |
+| T3 | 待集成 | TriggerRecovery；unknown/overlap/工具CAS | 67ba597完整门禁通过，见16:55检查点 | 任务分支67ba597 | 最终评审后主线集成 |
+| T4 | 待集成 | DailyQuota；同grant双进程与跨日 | 67ba597完整门禁通过，见16:55检查点 | 任务分支d5fc374 | 最终评审后主线集成 |
 
 ## 决策与检查点日志
 
@@ -193,3 +193,10 @@ R1–R4、D1–D4、C1–C5、T1–T4 共 17 项问题的验证、修复和集�
 - 新增normal scan恢复overlap队列：unknown继续占预算，operator resolution释放后队列自动进展。回归通过；这是前次gate之后变更，须重跑完整门禁。
 - T4独立进程测试接入d5fc374：同grant不同定义配额原子竞争/revision取消后保留/未来cutoff保护/UTC跨日；已在父工作区实际重跑。
 - 当前下一步：保存提交，fetch/rebase origin/main，重跑完整ci:local。之前门禁不算验收通过，不标17项完成。
+
+### 2026-11-09 16:55 UTC+8 — 完整门禁通过，保留审查阻项
+
+- 67ba597准确提交在fetch/rebase后完整`pnpm ci:local` exit0；日志scripts/formal-remediation/integration-gates-final.log：45 formal cases预期通过，357files/2250tests通过/2skip，typecheck/build/worker artifact build+verify通过。未发布。
+- 门禁后仅新增API导出TriggerResultRejectedError和修正文档幂等表述/形式化协议映射，待下一轮验证。任务测试生成快照CRLF尚需仅在本worktree还原，根用户快照保持保护。
+- adversarial C4发现drainUpdate等待时owner marker丢失可能导致late execution pause无法释放；子任务fix_updatelock正在修复并补回归。另审查legacy rollback启动后缺身份再停止可能中断新任务，需capability preflight。未修复前不能集成或关闭C4/C5。
+- 下一步：核对fix_updatelock活跃任务与实际提交，接收修复；补完整门禁后正常push main，逐项关闭与清理工作区。goal继续active。

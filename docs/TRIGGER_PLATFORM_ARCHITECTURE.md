@@ -24,8 +24,9 @@ missed daily, weekly, and constrained-cron fires from durable cursors, detects
 wall-clock jumps, restores work when a stopped profile returns, and enforces
 overlap ceilings without blocking future clock scans on long agent runs. Agent
 completion and result delivery are separate durable workflows: deterministic
-delivery ids and a private atomic ledger make proactive sends idempotent and
-restart-recoverable, while channel failure never reruns a successful agent.
+delivery ids and a private atomic ledger preserve delivery identity across restart.
+Durable claims fence concurrent sends; unknown acceptance requires reconciliation.
+Channel failure never reruns a successful agent.
 Conversation anchors stay opaque in trigger state and resolve through the
 profile-owned Channel Manager. The fake non-Lark provider proves the same
 result path is channel-neutral. One versioned `TriggerManagementApi` now owns

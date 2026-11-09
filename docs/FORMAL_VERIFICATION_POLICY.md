@@ -35,6 +35,14 @@ prove semantic impact or exhaustively identify callers.
 | Engine subscription | A new connection owns its notification subscription. External engine continuation is abstracted. |
 | Callback acknowledgement | Acknowledgement precedes handler I/O in the abstraction. Real SDK wire timing needs separate scenario evidence. |
 | Runtime retirement | Disposal waits for borrowers, release is exclusive, and retirement drains under stated weak fairness. Two borrowers; non-releasing borrowers can block progress. |
+| Engine lifecycle | Preparation cancellation fences prompt submission; EOF settles pending requests; turn identity and replay isolation protect current output. Native engines are represented by controlled transports. |
+| Notice ownership | Pull and rejected-notice fallback cannot both deliver one body; expiration retains a redacted stable-ID tombstone. Cross-process claim exclusivity is assumed. |
+| Keystore transaction | Completed writes/removals and salt initialization serialize. Local proper-lockfile heartbeat/stale assumptions apply; arbitrary long process suspension and power-loss durability are not proved. |
+| Update lock/admission | Immutable owner generations fence takeover; each target must install its admission hold before stop and report expected runtime identity. Local atomic hard links, trustworthy death detection and control identity are assumptions. |
+| Reliability lease | Guarded execution is not reassigned merely on expiry. Unknown processing requires authoritative reconciliation; healthy progress has separate weak-fair/no-crash assumptions. |
+| Managed card fallback | Unknown accepted sends never enter raw fallback. The model does not include SDK-internal provider retry behavior. |
+| Result delivery claim | A durable claim fences provider dispatch and settlement. Unknown outcomes retain identity; operator resolution relies on stopped-owner and verified-provider assertions. |
+| Trigger recovery | Successful output remains in outbox or routed; unknown execution is not blindly resubmitted; two finite admissions obey one daily quota. Full scheduling, grant authorization and implementation refinement are outside this model. |
 
 Read the `.tla` and configuration for exact properties, finite bounds and
 fairness. Terminal states explain disabled deadlock checks; this does not prove
