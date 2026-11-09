@@ -159,6 +159,21 @@ source 适配器只通过运行 `gh` 获取凭证。它从不向 `gh` 索要 tok
 `launchctl submit`，Windows 上是 detached 进程。前台模式是显式的恢复
 逃生舱。
 
+### 更新锁恢复
+
+新版更新器通过只追加的 `update.lock.claims` journal 串行执行。
+完整 owner 记录用独占 hard link 发布，代际和释放标记永不删除或复用。
+活跃 PID（包括权限不足等无法确认死亡的情况）阻止接管；只有确认进程死亡才允许恢复。
+这依赖本地文件系统 hard link 原子性和 OS PID 存在性判断；PID 复用可能延迟恢复，
+不会因此接管仍活跃的 owner。journal 有意保留，更新可能运行时不得删除。
+
+`update.lock` 保留为完整的旧版 PID 兼容标记。不要同时运行新旧更新器：
+旧版按路径删除过期锁的行为不受新 journal 约束。先升级调用入口并停止旧更新进程。
+空或损坏的旧版标记无法确认 owner，不能自动删除。错误会给出恢复步骤：停止所有
+安装器和更新器，核实没有 owner 后，仅将 `update.lock` 移走留存检查并重试；
+不得删除 `update.lock.claims`。新版发布不会产生可见空 owner；发布前崩溃只留下
+未引用 candidate 文件，发布后崩溃可由下一个新版更新器在确认 PID 死亡后恢复。
+
 ## 旧版迁移
 
 引导器通过 `PATH` 检测已存在的 npm/pnpm 全局 `aria` 可执行文件，解析其

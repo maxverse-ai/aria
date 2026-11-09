@@ -180,6 +180,27 @@ does not belong to the daemon being restarted: a transient systemd user unit on
 Linux, `launchctl submit` on macOS, or a detached process on Windows. The
 foreground mode is an explicit recovery escape hatch.
 
+### Update-lock recovery
+
+Current updaters serialize through the append-only `update.lock.claims` journal.
+An owner record is published complete using an exclusive hard link; generations
+and release markers are never deleted or reused. A live PID (including uncertain
+liveness such as permission denial) blocks takeover. Only a confirmed dead
+process permits recovery. This assumes local filesystem hard-link atomicity and
+reliable OS PID existence; PID reuse can delay recovery rather than steal a live
+owner. Journal retention is intentional; do not delete it while updates may run.
+
+`update.lock` remains a complete legacy PID bridge. Do not run legacy and current
+installers concurrently: a legacy binary's stale-path deletion is not fenced by
+the new journal. Upgrade the invocation first and stop older updater processes.
+Malformed/empty legacy bridges are never removed automatically because their
+owner cannot be proved dead. The error explains recovery: stop all installers
+and updaters, verify no owner remains, then move only `update.lock` aside for
+inspection and retry. Never remove `update.lock.claims`. New owner publication
+cannot produce an empty visible record; crashes before publication leave only
+unreferenced candidate files, and crashes after publication are recoverable by
+the next current updater after PID death.
+
 ## Legacy migration
 
 The bootstrapper detects an existing npm/pnpm global `aria` executable through

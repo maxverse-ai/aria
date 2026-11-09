@@ -1,6 +1,5 @@
-import { randomBytes } from 'node:crypto';
-import { mkdir, open, readFile, readdir, rm } from 'node:fs/promises';
-import type { FileHandle } from 'node:fs/promises';
+import { randomBytes, randomUUID } from 'node:crypto';
+import { link, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import {
   INSTALL_STATE_SCHEMA_VERSION,
@@ -124,38 +123,87 @@ export class DistributionStore {
 
   async withLock<T>(fn: () => Promise<T>): Promise<T> {
     await mkdir(this.paths.root, { recursive: true });
-    let handle: FileHandle;
+    const claim = await acquireUpdateClaim(this.paths.lockFile);
+    const owner = { pid: process.pid, token: randomUUID(), createdAt: this.now().toISOString() };
+    let bridgeOwned = false;
     try {
-      handle = await open(this.paths.lockFile, 'wx', 0o600);
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
-      if (!(await this.clearStaleLock())) throw new Error('another Aria install or update operation is active');
-      handle = await open(this.paths.lockFile, 'wx', 0o600);
-    }
-    try {
-      await handle.writeFile(`${JSON.stringify({ pid: process.pid, createdAt: this.now().toISOString() })}\n`);
+      // The journal serializes current updaters before examining the legacy bridge.
+      const legacy = await readJsonIfExists(this.paths.lockFile).catch(() => {
+        throw legacyLockNeedsInspection();
+      });
+      if (legacy !== undefined) {
+        const pid = legacy && typeof legacy === 'object' ? (legacy as { pid?: unknown }).pid : undefined;
+        if (!Number.isSafeInteger(pid) || (pid as number) <= 0) throw legacyLockNeedsInspection();
+        if (processAlive(pid as number)) throw new Error('another Aria install or update operation is active');
+        await rm(this.paths.lockFile);
+      }
+      if (!(await publishImmutable(this.paths.lockFile, owner))) {
+        throw new Error('another Aria install or update operation is active');
+      }
+      bridgeOwned = true;
       return await fn();
     } finally {
-      await handle.close();
-      await rm(this.paths.lockFile, { force: true });
+      try {
+        if (bridgeOwned) {
+          const bridge = await readJsonIfExists(this.paths.lockFile) as { token?: unknown } | undefined;
+          if (bridge?.token !== owner.token) throw new Error('Aria update compatibility lock changed; inspect concurrent legacy updater');
+          await rm(this.paths.lockFile);
+        }
+      } finally {
+        await publishImmutable(claim + '.released', true);
+      }
     }
   }
+}
 
-  private async clearStaleLock(): Promise<boolean> {
-    try {
-      const raw = JSON.parse(await readFile(this.paths.lockFile, 'utf8')) as { pid?: unknown };
-      if (typeof raw.pid !== 'number' || raw.pid <= 0) return false;
-      try {
-        process.kill(raw.pid, 0);
-        return false;
-      } catch (err) {
-        if ((err as NodeJS.ErrnoException).code === 'EPERM') return false;
+interface UpdateOwner { pid: number; token: string }
+
+function processAlive(pid: number): boolean {
+  try { process.kill(pid, 0); return true; }
+  catch (error) { return (error as NodeJS.ErrnoException).code !== 'ESRCH'; }
+}
+
+function legacyLockNeedsInspection(): Error {
+  return new Error('legacy Aria update lock is incomplete or invalid; stop all legacy installers/updaters, verify no owner, then move update.lock aside and retry (never remove update.lock.claims)');
+}
+
+async function publishImmutable(path: string, value: unknown): Promise<boolean> {
+  const candidate = path + '.candidate-' + process.pid + '-' + randomUUID();
+  await writeFile(candidate, JSON.stringify(value) + '\n', { flag: 'wx', mode: 0o600 });
+  try {
+    await link(candidate, path);
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'EEXIST') return false;
+    throw error;
+  } finally { await rm(candidate, { force: true }); }
+}
+
+async function acquireUpdateClaim(lockFile: string): Promise<string> {
+  const directory = lockFile + '.claims';
+  await mkdir(directory, { recursive: true });
+  for (;;) {
+    const generations = (await readdir(directory)).filter(name => /^\d{16}$/.test(name)).sort();
+    const latest = generations.at(-1);
+    let next = 0;
+    if (latest) {
+      const path = join(directory, latest);
+      const owner = await readJsonIfExists(path) as UpdateOwner | undefined;
+      if (!owner || !Number.isSafeInteger(owner.pid) || owner.pid <= 0 || typeof owner.token !== 'string') {
+        throw new Error('invalid Aria update claim journal; preserve it for inspection');
       }
-      await rm(this.paths.lockFile, { force: true });
-      return true;
-    } catch {
-      return false;
+      const released = await readJsonIfExists(path + '.released');
+      if (released !== true) {
+        if (processAlive(owner.pid)) throw new Error('another Aria install or update operation is active');
+        // Only this immutable dead generation is released; newer owners cannot be touched.
+        await publishImmutable(path + '.released', true);
+      }
+      next = Number(latest) + 1;
+      if (!Number.isSafeInteger(next) || next >= 1e16) throw new Error('Aria update claim journal exhausted');
     }
+    const path = join(directory, String(next).padStart(16, '0'));
+    if (await publishImmutable(path, { pid: process.pid, token: randomUUID() })) return path;
+    // Another updater atomically published this generation. Re-read its outcome.
   }
 }
 
