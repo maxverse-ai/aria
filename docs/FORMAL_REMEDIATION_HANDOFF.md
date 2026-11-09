@@ -186,3 +186,10 @@ R1–R4、D1–D4、C1–C5、T1–T4 共 17 项问题的验证、修复和集�
 - 最新命令 `pnpm exec vitest run tests/unit/trigger/runtime-manager.test.ts tests/unit/trigger/state-store.test.ts tests/unit/trigger/file-state-store.test.ts tests/unit/docs/documentation-contract.test.ts`：4文件40项通过；`pnpm typecheck`通过。更新联动5文件35项通过（较早revision）；需完整门禁重跑。
 - 未完成：T4真实多进程/grant/revision边界；T3队列resume与未知恢复完整场景；全manifest检查、完整ci:local、review、同步main正常推送与清理。不发布不部署。
 - 下一条命令：git status --short；阅读manager.resumeOverlap和state.resolveExecution后补unknown占用/释放回归，然后运行统一门禁。
+
+### 2026-11-09 16:49 UTC+8 — 首次完整门禁与整改
+
+- 首次完整ci:local（4b35ce1基础，期间新增队列修复未提交）45项formal全部预期通过；测试355文件通过、1文件失败，2247通过/1失败/2跳过。失败为manifest新组误填source路径，不是模型或实现测试失败；已修正为actual application/distribution与platform/distribution路径，formal-check6项通过。
+- 新增normal scan恢复overlap队列：unknown继续占预算，operator resolution释放后队列自动进展。回归通过；这是前次gate之后变更，须重跑完整门禁。
+- T4独立进程测试接入d5fc374：同grant不同定义配额原子竞争/revision取消后保留/未来cutoff保护/UTC跨日；已在父工作区实际重跑。
+- 当前下一步：保存提交，fetch/rebase origin/main，重跑完整ci:local。之前门禁不算验收通过，不标17项完成。

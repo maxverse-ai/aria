@@ -411,7 +411,8 @@
       "tests": [
         "tests/unit/trigger/runtime-manager.test.ts",
         "tests/unit/trigger/state-store.test.ts",
-        "tests/unit/trigger/file-state-store.test.ts"
+        "tests/unit/trigger/file-state-store.test.ts",
+        "tests/process/trigger-quota.test.ts"
       ],
       "cases": [
         {
@@ -442,8 +443,8 @@
     {
       "id": "update-admission",
       "source": [
-        "src/platform/distribution-service.ts",
-        "src/platform/service-orchestrator.ts",
+        "src/application/distribution/distribution-service.ts",
+        "src/platform/distribution/service-orchestrator.ts",
         "src/runtime/update-admission.ts",
         "src/runtime/supervisor.ts",
         "src/runtime/control-server.ts"

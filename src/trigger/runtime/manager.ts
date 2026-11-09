@@ -183,6 +183,12 @@ export class TriggerManager {
     this.state = { ...this.state, lastScanAt: now, lastErrorCode: undefined };
     try {
       await this.materializeDueSchedules(now);
+      // Operator resolution may happen while no local completion observer
+      // exists. Revisit durable overlap queues on every normal scan.
+      const queued = await this.store.listOccurrences({ state: 'deferred' });
+      for (const definitionId of new Set(queued.filter(item => item.blockedCode === 'overlap-active').map(item => item.definitionId))) {
+        await this.resumeOverlap(definitionId);
+      }
       await this.routePendingResults();
       if (!this.admissionHolds.size) await this.results?.reconcile().catch((error) =>
         log.warn('trigger-manager', 'result-reconcile-failed', {

@@ -13,6 +13,35 @@ import {
 const FIRE_AT = Date.parse('2026-09-03T08:00:00Z');
 
 describe('TriggerManager single-run data path', () => {
+  it('keeps unknown execution in the overlap budget until operator resolution then resumes queued work', async () => {
+    const store = new InMemoryTriggerStateStore();
+    await store.createDefinition(definition({ quota: { maxActiveOccurrences: 2, maxRunsPerDay: 24 } }));
+    const submit = vi.fn<TriggerExecutionGateway['submit']>(async () => { throw new Error('acceptance unknown'); });
+    let now = FIRE_AT;
+    const manager = managerFor(store, { isProfileOnline: () => true, submit }, () => now);
+    await manager.reconcile();
+    const first = (await store.listOccurrences())[0]!;
+    const def = (await store.getDefinition('definition-a'))!;
+    await store.replaceDefinition({ ...def, nextFireAt: FIRE_AT, revision: def.revision + 1, updatedAt: FIRE_AT }, def.revision);
+    // A separate logical fire with the same definition exercises overlap,
+    // independent of whether the execution gateway serializes its scopes.
+    const { createPendingOccurrence } = await import('../../../src/trigger/state');
+    await store.materialize({ definitionId: def.id, expectedRevision: def.revision + 1, expectedNextFireAt: FIRE_AT,
+      occurrence: createPendingOccurrence({ id: 'next', profileId: def.profileId, definitionId: def.id,
+        definitionRevision: def.revision + 1, scheduledFor: FIRE_AT + 1, createdAt: FIRE_AT }), advancedAt: FIRE_AT });
+    now++;
+    await manager.reconcile();
+    expect(submit).toHaveBeenCalledOnce();
+    expect(await store.getOccurrence('next')).toMatchObject({ state: 'deferred', blockedCode: 'overlap-active' });
+    await store.resolveExecution({ occurrenceId: first.id, expectedFence: first.fence, intentId: first.dispatch!.intentId,
+      ownerStopped: true, at: FIRE_AT, outcome: { kind: 'succeeded' } });
+    submit.mockImplementation(async () => ({ runId: 'next-run', completion: Promise.resolve({ status: 'succeeded' }) }));
+    await manager.reconcile(); await manager.drain();
+    expect(submit).toHaveBeenCalledTimes(2);
+    expect(await store.getOccurrence('next')).toMatchObject({ state: 'succeeded' });
+    await manager.close();
+  });
+
   it('retains accepted work as unknown when running checkpoint fails and consumes completion rejection', async () => {
     const store = new InMemoryTriggerStateStore();
     await store.createDefinition(definition());
