@@ -598,7 +598,9 @@ export class AppServerRun implements AgentRun {
           return;
         }
         if (params.threadId !== this.threadId) continue;
+        const eventTurn = isRecord(params.turn) ? params.turn : undefined;
         if (typeof params.turnId === 'string' && params.turnId !== this.turnId) continue;
+        if (typeof eventTurn?.id === 'string' && eventTurn.id !== this.turnId) continue;
 
         if (notification.method === 'item/agentMessage/delta' && typeof params.delta === 'string') {
           if (params.delta.length > 0) generation.observeToken(performance.now());

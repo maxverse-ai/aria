@@ -253,6 +253,7 @@ export class DevinAcpClient {
           for (const listener of this.notificationListeners) listener(notification);
         }
       }
+      if (!this.closed) this.closeWithError(new Error('devin acp stdout closed'));
     } catch (error) {
       if (!this.closed) this.closeWithError(error instanceof Error ? error : new Error(String(error)));
     }

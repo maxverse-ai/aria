@@ -32,6 +32,19 @@ terminating the stdio server. If a requested session is missing, Aria starts a
 fresh session and reports its actual id rather than pretending the old session
 was resumed.
 
+Stopping during session preparation aborts the local preparation request and
+prevents a later `session/prompt`; it does not claim the server cancelled its
+session operation. Once a prompt is submitted, stop remains best-effort
+`session/cancel`. Clean stdout EOF drains final responses before closing the
+client and rejecting requests still waiting, including deadline-free prompts.
+
+ACP's [session loading contract](https://agentclientprotocol.com/protocol/session-setup)
+requires conversation replay as `session/update` notifications. Aria marks
+updates observed while `session/load` is pending as history, so they cannot
+become current progress or final output. Model metadata updates remain usable.
+This is protocol-level isolation; tests use controlled ACP streams, not a live
+Grok account or engine session.
+
 Aria deliberately has no headless fallback. Mixing `grok -p` with Agent stdio
 would create two authorities for session state and make prompt delivery
 ambiguous after transport failures.

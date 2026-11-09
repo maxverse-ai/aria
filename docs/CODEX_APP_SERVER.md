@@ -2,6 +2,11 @@
 
 > Status: current
 
+Turn-scoped notifications are correlated using both top-level `turnId` and,
+when present, nested `turn.id`. A completion for an older turn cannot terminate
+the current run on the same thread. Thread-level notifications without a turn
+identity continue to be accepted.
+
 Aria's Codex engine uses one managed `codex app-server --stdio` process per
 profile. The App Server is the only supported Codex execution transport.
 Its runtime descriptor advertises `profile-daemon` topology and only the

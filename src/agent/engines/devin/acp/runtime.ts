@@ -300,6 +300,7 @@ export class DevinAgentRun implements AgentRun {
   private client: DevinAcpClient | undefined;
   private queue: RunQueue | undefined;
   private promptInFlight = false;
+  private readonly preparation = new AbortController();
   private stopRequested = false;
   private turnClosing = false;
   private exited = false;
@@ -542,6 +543,7 @@ export class DevinAgentRun implements AgentRun {
   async stop(): Promise<void> {
     this.stopRequested = true;
     this.turnClosing = true;
+    if (!this.promptInFlight) this.preparation.abort(new Error('run stopped during preparation'));
     if (this.client && this.sessionId && this.promptInFlight && !this.exited) {
       try {
         this.client.notify('session/cancel', { sessionId: this.sessionId });
@@ -586,7 +588,9 @@ export class DevinAgentRun implements AgentRun {
     }
     const model = modelSelection.model;
     try {
+      this.preparation.signal.throwIfAborted();
       this.client = await this.runtime.client();
+      this.preparation.signal.throwIfAborted();
       offNotification = this.client.onNotification((notification) => {
         queue.push({ type: 'notification', notification, replay: loadingSession });
       });
@@ -603,7 +607,7 @@ export class DevinAgentRun implements AgentRun {
         try {
           return requestedSessionId
             ? await this.loadOrCreateSession(requestedSessionId, sessionParams)
-            : await this.client!.request<DevinSessionResult>('session/new', sessionParams);
+            : await this.client!.request<DevinSessionResult>('session/new', sessionParams, 15_000, this.preparation.signal);
         } finally {
           loadingSession = false;
         }
@@ -629,6 +633,7 @@ export class DevinAgentRun implements AgentRun {
         },
         ...await imageBlocks(this.options.images ?? []),
       ];
+      this.preparation.signal.throwIfAborted();
       this.promptInFlight = true;
       // No request deadline: a turn may legitimately run for hours. Its
       // lifecycle is governed by run policy on the event stream (silence
@@ -785,8 +790,9 @@ export class DevinAgentRun implements AgentRun {
       await this.client!.request('session/set_mode', {
         sessionId: this.sessionId,
         modeId: target,
-      }, 10_000);
+      }, 10_000, this.preparation.signal);
     } catch (error) {
+      this.preparation.signal.throwIfAborted();
       log.warn('devin-acp', 'set-mode-failed', {
         modeId: target,
         message: error instanceof Error ? error.message : String(error),
@@ -815,9 +821,10 @@ export class DevinAgentRun implements AgentRun {
         sessionId: this.sessionId,
         configId: option.id,
         value: requested,
-      }, 10_000);
+      }, 10_000, this.preparation.signal);
       return requested;
     } catch (error) {
+      this.preparation.signal.throwIfAborted();
       if (error instanceof DevinRpcError && error.code === -32601) return advertised;
       log.warn('devin-acp', 'set-model-failed', {
         requested,
@@ -832,10 +839,11 @@ export class DevinAgentRun implements AgentRun {
     params: Record<string, unknown>,
   ): Promise<DevinSessionResult> {
     try {
-      return await this.client!.request<DevinSessionResult>('session/load', { sessionId, ...params });
+      return await this.client!.request<DevinSessionResult>('session/load', { sessionId, ...params }, 15_000, this.preparation.signal);
     } catch (error) {
+      this.preparation.signal.throwIfAborted();
       if (!isMissingSessionError(error)) throw error;
-      return this.client!.request<DevinSessionResult>('session/new', params);
+      return this.client!.request<DevinSessionResult>('session/new', params, 15_000, this.preparation.signal);
     }
   }
 }

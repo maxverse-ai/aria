@@ -235,7 +235,7 @@ class GrokAgentStdioAdapter implements AgentAdapter {
 }
 
 type RunSignal =
-  | { type: 'notification'; notification: GrokJsonRpcNotification }
+  | { type: 'notification'; notification: GrokJsonRpcNotification; replay?: boolean }
   | { type: 'prompt-result'; result: GrokPromptResult }
   | { type: 'prompt-error'; error: Error }
   | { type: 'closed'; error: Error };
@@ -247,6 +247,7 @@ export class GrokAgentRun implements AgentRun {
   private sessionId: string | undefined;
   private client: GrokAgentStdioClient | undefined;
   private promptInFlight = false;
+  private readonly preparation = new AbortController();
   private stopRequested = false;
   private turnClosing = false;
   private exited = false;
@@ -277,6 +278,7 @@ export class GrokAgentRun implements AgentRun {
   async stop(): Promise<void> {
     this.stopRequested = true;
     this.turnClosing = true;
+    if (!this.promptInFlight) this.preparation.abort(new Error('run stopped during preparation'));
     if (this.client && this.sessionId && this.promptInFlight && !this.exited) {
       try {
         this.client.notify('session/cancel', { sessionId: this.sessionId });
@@ -338,12 +340,15 @@ export class GrokAgentRun implements AgentRun {
     const messages = new GrokMessageTranslator();
     let offNotification: (() => void) | undefined;
     let offClosed: (() => void) | undefined;
+    let loadingSession = false;
     let model = this.options.model && this.options.model !== 'default' ? this.options.model : undefined;
     try {
+      this.preparation.signal.throwIfAborted();
       this.client = await this.runtime.client();
+      this.preparation.signal.throwIfAborted();
       model ??= this.client.modelState?.currentModelId;
       offNotification = this.client.onNotification((notification) => {
-        queue.push({ type: 'notification', notification });
+        queue.push({ type: 'notification', notification, replay: loadingSession });
       });
       offClosed = this.client.onClosed((error) => queue.push({ type: 'closed', error }));
 
@@ -354,9 +359,14 @@ export class GrokAgentRun implements AgentRun {
         _meta: { yoloMode: this.runtime.fullAccess },
       };
       const requestedSessionId = this.options.sessionId;
-      const session = requestedSessionId
-        ? await this.loadOrCreateSession(requestedSessionId, sessionParams)
-        : await this.client.request<GrokSessionResult>('session/new', sessionParams);
+      loadingSession = Boolean(requestedSessionId);
+      const session = await (async () => {
+        try {
+          return requestedSessionId
+            ? await this.loadOrCreateSession(requestedSessionId, sessionParams)
+            : await this.client!.request<GrokSessionResult>('session/new', sessionParams, 15_000, this.preparation.signal);
+        } finally { loadingSession = false; }
+      })();
       this.sessionId = extractSessionId(session, requestedSessionId);
       if (!this.sessionId) throw new Error('Grok ACP session response did not include sessionId');
       this.runtime.bindSession(this.sessionId, this);
@@ -371,7 +381,7 @@ export class GrokAgentRun implements AgentRun {
           ...(requestedEffort
             ? { _meta: { reasoningEffort: requestedEffort } }
             : {}),
-        });
+        }, 15_000, this.preparation.signal);
       }
 
       yield {
@@ -391,6 +401,7 @@ export class GrokAgentRun implements AgentRun {
         },
         ...await imageBlocks(this.options.images ?? []),
       ];
+      this.preparation.signal.throwIfAborted();
       this.promptInFlight = true;
       // No request deadline: a turn may legitimately run for hours. Its
       // lifecycle is governed by run policy on the event stream (silence
@@ -453,7 +464,7 @@ export class GrokAgentRun implements AgentRun {
           if (typeof params?.currentModelId === 'string') model = params.currentModelId;
           continue;
         }
-        if (notification.method !== 'session/update') continue;
+        if (notification.method !== 'session/update' || signal.replay) continue;
         const params = isRecord(notification.params)
           ? notification.params as GrokSessionUpdateParams
           : undefined;
@@ -492,10 +503,11 @@ export class GrokAgentRun implements AgentRun {
     params: Record<string, unknown>,
   ): Promise<GrokSessionResult> {
     try {
-      return await this.client!.request<GrokSessionResult>('session/load', { sessionId, ...params });
+      return await this.client!.request<GrokSessionResult>('session/load', { sessionId, ...params }, 15_000, this.preparation.signal);
     } catch (error) {
+      this.preparation.signal.throwIfAborted();
       if (!isMissingSessionError(error)) throw error;
-      return this.client!.request<GrokSessionResult>('session/new', params);
+      return this.client!.request<GrokSessionResult>('session/new', params, 15_000, this.preparation.signal);
     }
   }
 }

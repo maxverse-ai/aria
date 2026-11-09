@@ -16,6 +16,13 @@ checks and controlled component reproductions against the audited baseline.
 [Runtime ownership repair evidence](RUNTIME_OWNERSHIP_IMPLEMENTATION.md) records
 the subsequent fixes and the remaining acceptance boundaries.
 
+Grok and Devin use abortable session preparation and check cancellation before
+emitting their initial prompt. A stop before submission cannot become new work;
+after submission it remains a best-effort remote cancellation. Their ACP clients
+drain clean stdout EOF before closing pending requests, so deadline-free prompts
+cannot remain attached to an ended response stream. Controlled-transport
+regressions in `tests/unit/agent/engine-lifecycle.test.ts` exercise these boundaries.
+
 ## Goal
 
 Aria channels and conversation orchestration must not know an engine's native

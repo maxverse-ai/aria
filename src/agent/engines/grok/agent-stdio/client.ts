@@ -251,6 +251,7 @@ export class GrokAgentStdioClient {
           for (const listener of this.notificationListeners) listener(notification);
         }
       }
+      if (!this.closed) this.closeWithError(new Error('grok agent stdio stdout closed'));
     } catch (error) {
       if (!this.closed) this.closeWithError(error instanceof Error ? error : new Error(String(error)));
     }
