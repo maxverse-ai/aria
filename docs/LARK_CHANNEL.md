@@ -35,6 +35,15 @@ The channel owns protocol translation and the Lark-specific presentation
 surfaces. It does not own access policy, workspace validation, permission
 ceilings, or agent execution.
 
+Managed CardKit sends fall back from a card reference to raw CardKit content
+only when the channel SDK reports a first-attempt `format_error` explicitly
+identifying an invalid or unsupported card ID. Unclassified errors, timeouts,
+missing response IDs and errors after an earlier SDK retry propagate without
+another Aria send: the provider may already have accepted the message. The
+helper does not recover a missing message ID or persist uncertain delivery.
+The SDK's own retry policy remains a separate boundary; this fallback guard
+does not guarantee exactly-once provider delivery.
+
 ## lark-cli identity policy
 
 Each profile uses a profile-local lark-cli directory at

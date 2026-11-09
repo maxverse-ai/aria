@@ -1,4 +1,4 @@
-import type { LarkChannel } from '@larksuite/channel';
+import { LarkChannelError, type LarkChannel } from '@larksuite/channel';
 import { log } from '../core/logger';
 
 interface ManagedEntry {
@@ -14,6 +14,16 @@ const byMessageId = new Map<string, ManagedEntry>();
 export interface ManagedCardSendResult {
   messageId: string;
   cardId: string;
+}
+
+function isRejectedCardReference(err: unknown): err is LarkChannelError {
+  // The SDK may retry an unknown outcome before returning a format error.
+  // Only a first-attempt rejection proves there was no earlier accepted send.
+  return err instanceof LarkChannelError
+    && err.code === 'format_error'
+    && err.context?.attempt === 1
+    && /\bcard[_ ]?id\b/i.test(err.message)
+    && /\b(invalid|unsupported|not supported)\b/i.test(err.message);
 }
 
 /**
@@ -40,9 +50,15 @@ export async function sendManagedCard(
   try {
     ({ messageId } = await channel.send(recipientId, { cardId }, sendOpts));
   } catch (err) {
+    if (!isRejectedCardReference(err)) {
+      log.warn('card', 'managed-send-no-fallback', {
+        code: err instanceof LarkChannelError ? err.code : 'unclassified',
+        attempt: err instanceof LarkChannelError ? err.context?.attempt : undefined,
+      });
+      throw err;
+    }
     log.warn('card', 'managed-send-raw-fallback', {
-      err: err instanceof Error ? err.message : String(err),
-      replyTo: opts.replyTo,
+      code: err.code,
       replyInThread: opts.replyInThread === true,
     });
     ({ messageId } = await channel.send(recipientId, { card }, sendOpts));

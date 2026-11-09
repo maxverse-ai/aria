@@ -2,6 +2,12 @@
 
 > Status: current
 
+托管 CardKit 发送只有在 channel SDK 明确报告首次尝试的 `format_error`，且错误指出
+card ID 无效或不受支持时，才会改用原始 CardKit 内容发送。未分类错误、超时、响应缺少
+消息 ID，以及 SDK 曾经重试后的错误均直接向调用方传播，不再由 Aria 补发；服务端可能
+已经接受原消息。此辅助函数不恢复缺失的消息 ID，也不持久化不确定的交付状态。
+SDK 自身的重试策略是独立边界，该保护不构成服务端恰好一次交付保证。
+
 > 本文是 [`LARK_CHANNEL.md`](LARK_CHANNEL.md) 的中文版。
 
 ## 目的
