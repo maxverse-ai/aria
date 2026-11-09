@@ -1,4 +1,5 @@
 import { createInterface } from 'node:readline';
+import { randomUUID } from 'node:crypto';
 import type { Readable, Writable } from 'node:stream';
 import type { SpawnedProcessByStdio } from '../../../../platform/spawn';
 import { log } from '../../../../core/logger';
@@ -14,17 +15,38 @@ export type AppServerChild = SpawnedProcessByStdio<Writable, Readable, Readable>
 type NotificationListener = (notification: JsonRpcNotification) => void;
 type CloseListener = (error: Error) => void;
 
-interface PendingRequest {
+interface RequestMetadata {
+  requestId: JsonRpcId;
+  method: string;
+  threadId?: string;
+  startedAt: number;
+  timeoutMs: number;
+}
+
+interface PendingRequest extends RequestMetadata {
   resolve(value: unknown): void;
   reject(error: Error): void;
   timer: ReturnType<typeof setTimeout>;
   removeAbortListener?: () => void;
 }
 
+const LATE_REQUEST_LIMIT = 256;
+const LATE_REQUEST_TTL_MS = 5 * 60_000;
+
+export class AppServerRequestTimeoutError extends Error {
+  constructor(readonly method: string, readonly timeoutMs: number) {
+    super(`codex app-server request timed out: ${method}`);
+    this.name = 'AppServerRequestTimeoutError';
+  }
+}
+
 /** Minimal newline-delimited JSON-RPC client for `codex app-server --stdio`. */
 export class CodexAppServerClient {
+  private readonly clientId = randomUUID();
   private nextId = 1;
   private readonly pending = new Map<JsonRpcId, PendingRequest>();
+  private readonly late = new Map<JsonRpcId, { metadata: RequestMetadata; outcome: string; expiresAt: number }>();
+  private lateSweep: ReturnType<typeof setTimeout> | undefined;
   private readonly listeners = new Set<NotificationListener>();
   private readonly closeListeners = new Set<CloseListener>();
   private readonly lines;
@@ -59,30 +81,45 @@ export class CodexAppServerClient {
     if (this.closed) return Promise.reject(new Error('codex app-server is closed'));
     if (signal?.aborted) return Promise.reject(abortError(signal));
     const id = this.nextId++;
+    const metadata: RequestMetadata = {
+      requestId: id, method, startedAt: performance.now(), timeoutMs,
+      ...(isRecord(params) && typeof params.threadId === 'string' ? { threadId: params.threadId } : {}),
+    };
+    // This event carries the caller's trace; completion events correlate by clientId/requestId.
+    this.recordRequest(metadata, 'started');
     return new Promise<T>((resolve, reject) => {
       const timer = setTimeout(() => {
-        const pending = this.pending.get(id);
-        this.pending.delete(id);
-        pending?.removeAbortListener?.();
-        reject(new Error(`codex app-server request timed out: ${method}`));
+        const pending = this.takePending(id);
+        if (!pending) return;
+        this.rememberLate(metadata, 'timeout');
+        this.recordRequest(metadata, 'timeout');
+        pending.reject(new AppServerRequestTimeoutError(method, timeoutMs));
       }, timeoutMs);
       const pending: PendingRequest = {
+        ...metadata,
         resolve: (value) => resolve(value as T),
         reject,
         timer,
       };
       if (signal) {
         const onAbort = () => {
-          if (this.pending.delete(id)) {
-            clearTimeout(timer);
-            reject(abortError(signal));
-          }
+          const request = this.takePending(id);
+          if (!request) return;
+          this.rememberLate(metadata, 'aborted');
+          this.recordRequest(metadata, 'aborted');
+          request.reject(abortError(signal));
         };
         signal.addEventListener('abort', onAbort, { once: true });
         pending.removeAbortListener = () => signal.removeEventListener('abort', onAbort);
       }
       this.pending.set(id, pending);
-      this.write({ id, method, params });
+      try {
+        this.write({ id, method, params });
+      } catch (error) {
+        this.takePending(id);
+        this.recordRequest(metadata, 'write-failed');
+        reject(error instanceof Error ? error : new Error(String(error)));
+      }
     });
   }
 
@@ -144,13 +181,13 @@ export class CodexAppServerClient {
           parsed = JSON.parse(trimmed);
         } catch {
           log.warn('codex-app-server', 'invalid-json', {
-            line: trimmed.slice(0, 500),
+            clientId: this.clientId, responseBytes: Buffer.byteLength(line, 'utf8'),
           });
           continue;
         }
         if (!isRecord(parsed)) continue;
         if ('id' in parsed && !('method' in parsed)) {
-          this.handleResponse(parsed);
+          this.handleResponse(parsed, Buffer.byteLength(line, 'utf8'));
         } else if (typeof parsed.method === 'string' && 'id' in parsed) {
           this.handleServerRequest(parsed as unknown as JsonRpcRequest);
         } else if (typeof parsed.method === 'string') {
@@ -158,24 +195,69 @@ export class CodexAppServerClient {
           for (const listener of this.listeners) listener(notification);
         }
       }
+      // Drain complete lines before rejecting requests at EOF.
+      if (!this.closed) this.closeWithError(new Error('codex app-server stdout ended'));
     } catch (error) {
       if (!this.closed) this.closeWithError(error instanceof Error ? error : new Error(String(error)));
     }
   }
 
-  private handleResponse(raw: Record<string, unknown>): void {
+  private handleResponse(raw: Record<string, unknown>, responseBytes: number): void {
     const id = raw.id as JsonRpcId;
-    const pending = this.pending.get(id);
-    if (!pending) return;
-    this.pending.delete(id);
-    clearTimeout(pending.timer);
-    pending.removeAbortListener?.();
+    const pending = this.takePending(id);
+    if (!pending) {
+      const late = this.late.get(id);
+      if (late) {
+        this.late.delete(id);
+        if (late.expiresAt > performance.now()) {
+          this.recordRequest(late.metadata, 'late-response', { previousOutcome: late.outcome, responseBytes });
+        }
+      }
+      return;
+    }
     const error = isRecord(raw.error) ? raw.error : undefined;
+    this.recordRequest(pending, error ? 'rpc-error' : 'success', { responseBytes });
     if (error) {
       pending.reject(new Error(typeof error.message === 'string' ? error.message : 'codex app-server request failed'));
     } else {
       pending.resolve(raw.result);
     }
+  }
+
+  private takePending(id: JsonRpcId): PendingRequest | undefined {
+    const pending = this.pending.get(id);
+    if (!pending) return;
+    this.pending.delete(id);
+    clearTimeout(pending.timer);
+    pending.removeAbortListener?.();
+    return pending;
+  }
+
+  private recordRequest(metadata: RequestMetadata, outcome: string, extra: Record<string, unknown> = {}): void {
+    const { startedAt, requestId, method, threadId, timeoutMs } = metadata;
+    log.info('codex-app-server', 'rpc', {
+      clientId: this.clientId, requestId, method, ...(threadId ? { threadId } : {}), timeoutMs, outcome,
+      durationMs: Math.max(0, performance.now() - startedAt), ...extra,
+    });
+  }
+
+  private rememberLate(metadata: RequestMetadata, outcome: string): void {
+    // Retain metadata only, never a resolver or request/response body.
+    this.late.set(metadata.requestId, { metadata, outcome, expiresAt: performance.now() + LATE_REQUEST_TTL_MS });
+    while (this.late.size > LATE_REQUEST_LIMIT) this.late.delete(this.late.keys().next().value!);
+    this.scheduleLateSweep();
+  }
+
+  private scheduleLateSweep(): void {
+    if (this.lateSweep || this.late.size === 0) return;
+    const first = this.late.values().next().value!;
+    this.lateSweep = setTimeout(() => {
+      this.lateSweep = undefined;
+      const now = performance.now();
+      for (const [id, entry] of this.late) if (entry.expiresAt <= now) this.late.delete(id);
+      this.scheduleLateSweep();
+    }, Math.max(1, first.expiresAt - performance.now()));
+    this.lateSweep.unref();
   }
 
   private handleServerRequest(request: JsonRpcRequest): void {
@@ -204,6 +286,10 @@ export class CodexAppServerClient {
     this.closeError = error;
     this.closed = true;
     this.rejectPending(error);
+    clearTimeout(this.lateSweep);
+    this.lateSweep = undefined;
+    this.late.clear();
+    log.info('codex-app-server', 'closed', { clientId: this.clientId });
     this.emitClosed(error.message);
     for (const listener of this.closeListeners) listener(error);
     this.closeListeners.clear();
@@ -218,9 +304,9 @@ export class CodexAppServerClient {
   }
 
   private rejectPending(error: Error): void {
-    for (const pending of this.pending.values()) {
-      clearTimeout(pending.timer);
-      pending.removeAbortListener?.();
+    for (const [id, request] of this.pending) {
+      const pending = this.takePending(id)!;
+      this.recordRequest(request, 'connection-closed');
       pending.reject(error);
     }
     this.pending.clear();

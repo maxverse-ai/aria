@@ -33,6 +33,39 @@ does not grant a broader sandbox.
 App Server requests that require interactive approval are declined. Other
 unsupported server-initiated requests fail explicitly instead of hanging.
 
+## Session preparation and request deadlines
+
+Before submitting a new turn on an existing thread, Aria resumes it with
+`excludeTurns: true`. Execution consumes the returned metadata, not historical
+turns; Codex still owns the stored conversation context. Resume has a separate
+60-second client deadline. Other RPC deadlines are unchanged. The native import
+path also omits turns and retains its own 30-second verification deadline.
+
+A resume timeout ends this run before `turn/start`; the existing session anchor
+is retained for an explicit subsequent user request. Aria does not automatically
+retry, create a replacement thread, or restart the shared process. A timed-out
+`turn/start` is different: acceptance is unknown and the input is not resent.
+
+Stopping during preparation aborts only the local wait, not the server operation.
+The run checks cancellation again after exposing thread metadata and immediately
+before sending `turn/start`. Once submission has been sent, stop uses the existing
+turn interruption path when its id becomes available. Run cleanup must not leave
+an old preparation continuation able to submit after scope capacity is released.
+Known-thread notification subscriptions discard other threads before queuing.
+
+The RPC client logs `clientId`, `requestId`, method, optional thread id, deadline,
+elapsed time and outcome. Response byte counts measure the UTF-8 JSON line,
+excluding its newline, not the rollout size. The request-start event carries
+the caller's trace; responses correlate through `clientId`/`requestId` because
+the shared read loop does not inherit each caller's trace. No request or response
+body is included. Timeout/abort metadata is capped at 256 entries and expires
+after five minutes via an unreferenced timer; it contains no continuation.
+Late responses are diagnostic only and cannot revive a completed run. Closing
+stdout or the process rejects pending requests and clears diagnostics.
+
+See [the executable lifecycle model and verification evidence](CODEX_RESUME_VERIFICATION.md)
+for the reproduced failure, TLA+ assumptions, test mapping and remaining limits.
+
 ## Active-turn follow-ups
 
 Codex advertises a structured, text-only live-input capability. Aria

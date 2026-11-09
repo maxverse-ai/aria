@@ -20,7 +20,7 @@ import type { AgentSteeringOutcome, AgentSteeringRequest } from '../../../steeri
 import { prefixBridgeSystemPrompt } from '../../../bridge-system-prompt';
 import type { ChannelEnvContext } from '../../../channel-env';
 import { startCodexAppServer } from './process';
-import type { CodexAppServerClient } from './client';
+import { AppServerRequestTimeoutError, type CodexAppServerClient } from './client';
 import { AppServerMessageTranslator } from './message-translator';
 import { CodexGenerationMeter } from './generation-meter';
 import {
@@ -49,6 +49,8 @@ export interface CodexAppServerRuntimeOptions {
   sandbox: SandboxMode;
   ariaChannel?: ChannelEnvContext;
 }
+
+const THREAD_RESUME_TIMEOUT_MS = 60_000;
 
 export class CodexAppServerRuntime implements EngineRuntime {
   readonly engineId = 'codex';
@@ -355,10 +357,12 @@ export class AppServerRun implements AgentRun {
   readonly steering = { mode: 'direct' as const, textOnly: true, mechanism: 'native' as const, delivery: 'confirmed' as const };
   private threadId: string | undefined;
   private turnId: string | undefined;
+  private threadClaimed = false;
   private client: CodexAppServerClient | undefined;
   private queue: NotificationQueue | undefined;
   private unsubscribe: (() => void) | undefined;
   private stopRequested = false;
+  private readonly preparation = new AbortController();
   private interruptSent = false;
   private turnClosing = false;
   private exited = false;
@@ -399,12 +403,24 @@ export class AppServerRun implements AgentRun {
   async attach(): Promise<void> {
     this.client = await this.runtime.client();
     this.queue = new NotificationQueue();
-    this.unsubscribe = this.client.onNotification((notification) => this.queue!.push(notification));
+    this.subscribe();
+  }
+
+  private subscribe(): void {
+    this.unsubscribe = this.client!.onNotification((notification) => {
+      const threadId = this.threadId ?? this.options.threadId;
+      const params = isRecord(notification.params) ? notification.params : {};
+      if (notification.method === 'aria/appServerClosed' || !threadId || params.threadId === threadId) {
+        this.queue!.push(notification);
+      }
+    });
   }
 
   async stop(): Promise<void> {
     this.stopRequested = true;
     this.turnClosing = true;
+    // Only preparation waits are aborted. A sent turn/start may already be accepted.
+    this.preparation.abort(new Error('codex run preparation stopped'));
     if (this.client && this.threadId && this.turnId && !this.exited && !this.interruptSent) {
       this.interruptSent = true;
       await this.client
@@ -472,19 +488,24 @@ export class AppServerRun implements AgentRun {
     let latestContextUsage: TokenUsageBreakdown | undefined;
     let latestContextWindow: number | undefined;
     let model: string | undefined;
+    let stage: 'prepare' | 'resume' | 'start-thread' | 'submit' | 'execute' = 'prepare';
 
     try {
       if (this.adopted) {
         // `attach()` already subscribed and fixed the thread and turn ids.
         this.runtime.claimThread(this.adopted.threadId);
+        this.threadClaimed = true;
         yield { type: 'system', threadId: this.adopted.threadId, cwd: this.options.cwd };
       } else {
       this.client = await this.runtime.client();
+      this.preparation.signal.throwIfAborted();
       this.queue = new NotificationQueue();
-      this.unsubscribe = this.client.onNotification((notification) => this.queue!.push(notification));
+      this.subscribe();
+      stage = this.options.threadId ? 'resume' : 'start-thread';
       const thread = this.options.threadId
         ? await this.client.request<ThreadResumeResponse>('thread/resume', {
             threadId: this.options.threadId,
+            excludeTurns: true,
             cwd: this.options.cwd,
             approvalPolicy: 'never',
             sandbox: this.options.sandbox ?? this.runtime.sandbox,
@@ -492,7 +513,7 @@ export class AppServerRun implements AgentRun {
             ...(this.options.serviceTier !== undefined
               ? { serviceTier: this.options.serviceTier }
               : {}),
-          })
+          }, THREAD_RESUME_TIMEOUT_MS, this.preparation.signal)
         : await this.client.request<ThreadStartResponse>('thread/start', {
             cwd: this.options.cwd,
             approvalPolicy: 'never',
@@ -501,7 +522,7 @@ export class AppServerRun implements AgentRun {
             ...(this.options.serviceTier !== undefined
               ? { serviceTier: this.options.serviceTier }
               : {}),
-          });
+          }, undefined, this.preparation.signal);
       this.threadId = thread.thread.id;
       model = thread.model;
       const threadReasoningEffort = typeof thread.reasoningEffort === 'string'
@@ -532,7 +553,11 @@ export class AppServerRun implements AgentRun {
         })),
       ];
       // Claim before the request: `turn/started` can beat its own response.
+      // No await between this check and sending: stop-before-send cannot submit.
+      this.preparation.signal.throwIfAborted();
+      stage = 'submit';
       this.runtime.claimThread(this.threadId);
+      this.threadClaimed = true;
       const started = await this.client.request<TurnStartResponse>('turn/start', {
         threadId: this.threadId,
         input,
@@ -549,6 +574,8 @@ export class AppServerRun implements AgentRun {
       this.turnId = started.turn.id;
       if (this.stopRequested) await this.stop();
       }
+
+      stage = 'execute';
 
       const queue = this.queue!;
       for await (const notification of queue) {
@@ -663,16 +690,30 @@ export class AppServerRun implements AgentRun {
       };
     } catch (error) {
       for (const event of messages.boundary()) yield event;
+      if (this.stopRequested && stage !== 'submit' && stage !== 'execute') {
+        yield { type: 'done', ...(this.threadId ? { threadId: this.threadId } : {}), terminationReason: 'interrupted' };
+        return;
+      }
+      let message = error instanceof Error ? error.message : String(error);
+      if (error instanceof AppServerRequestTimeoutError) {
+        if (stage === 'resume') {
+          message = '恢复原 Codex 会话超时，本次新任务尚未提交。会话关联已保留，可以发送“继续”重试。';
+        } else if (stage === 'submit') {
+          message = '提交 Codex 任务时等待响应超时，任务是否已受理尚不确定。Aria 未自动重发。';
+        }
+      } else if (stage === 'resume') {
+        message = `恢复原 Codex 会话失败，本次新任务尚未提交。会话关联已保留。原因：${message}`;
+      }
       yield {
         type: 'error',
-        message: error instanceof Error ? error.message : String(error),
+        message,
         terminationReason: this.stopRequested ? 'interrupted' : 'failed',
       };
     } finally {
       this.turnClosing = true;
       this.unsubscribe?.();
       this.queue?.end();
-      if (this.threadId) this.runtime.releaseThread(this.threadId);
+      if (this.threadClaimed && this.threadId) this.runtime.releaseThread(this.threadId);
       this.exited = true;
       this.resolveExit();
       this.runtime.untrack(this);
