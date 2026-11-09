@@ -1,4 +1,4 @@
-import { mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -7,6 +7,8 @@ import {
   formatSteerMailsForAgent,
   listSteerMails,
   markSteerMail,
+  retractSteerMail,
+  claimSteerMails,
   pullSteerMails,
   putSteerMail,
   selfCommandPrefix,
@@ -115,13 +117,58 @@ describe('expiry', () => {
     expect(pullSteerMails(inboxDir, SCOPE, now).map((m) => m.requestId)).toEqual(['im:fresh']);
   });
 
-  it('reaps terminal mail past the TTL from disk', () => {
+  it('redacts expired bodies but retains stable-ID tombstones', () => {
     const now = Date.now();
     putSteerMail(inboxDir, SCOPE, mail('im:m1'), now - STEER_MAIL_TTL_MS - 10);
     markSteerMail(inboxDir, SCOPE, 'im:m1', 'pulled', now - STEER_MAIL_TTL_MS - 5);
     listSteerMails(inboxDir, SCOPE, now);
     const dir = join(inboxDir, encodeURIComponent(SCOPE));
-    expect(readdirSync(dir).filter((n) => n.endsWith('.json'))).toHaveLength(0);
+    const files = readdirSync(dir).filter((n) => n.endsWith('.json'));
+    expect(files).toHaveLength(1);
+    expect(JSON.parse(readFileSync(join(dir, files[0]!), 'utf8')).body).toBe('');
+    putSteerMail(inboxDir, SCOPE, mail('im:m1', 'replay'), now);
+    expect(pullSteerMails(inboxDir, SCOPE, now)).toEqual([]);
+  });
+
+  it('exposes expiration for one observation window without retaining its body', () => {
+    const now = Date.now();
+    putSteerMail(inboxDir, SCOPE, mail('old', 'private expired body'), now);
+    const expiredAt = now + STEER_MAIL_TTL_MS + 1;
+    expect(listSteerMails(inboxDir, SCOPE, expiredAt)).toEqual([
+      expect.objectContaining({ state: 'expired', body: '', stateAt: expiredAt }),
+    ]);
+    expect(listSteerMails(inboxDir, SCOPE, expiredAt + STEER_MAIL_TTL_MS + 1)).toEqual([]);
+    putSteerMail(inboxDir, SCOPE, mail('old', 'new body'), expiredAt + 1);
+    expect(pullSteerMails(inboxDir, SCOPE, expiredAt + 1)).toEqual([]);
+  });
+
+  it('does not expire a live consumer claim or uncertain submission', () => {
+    const now = Date.now();
+    putSteerMail(inboxDir, SCOPE, mail('held'), now);
+    const batch = claimSteerMails(inboxDir, SCOPE, now);
+    expect(listSteerMails(inboxDir, SCOPE, now + STEER_MAIL_TTL_MS + 1)[0]?.body).toBe('body of held');
+    batch.beginSubmission(); batch.uncertain();
+    expect(listSteerMails(inboxDir, SCOPE, now + STEER_MAIL_TTL_MS + 2)[0]).toMatchObject({ state: 'uncertain', body: 'body of held' });
+  });
+});
+
+describe('notice failure rollback', () => {
+  it('revokes an unclaimed body before allowing producer fallback', () => {
+    putSteerMail(inboxDir, SCOPE, mail('notice'));
+    expect(retractSteerMail(inboxDir, SCOPE, 'notice')).toBe(true);
+    expect(pullSteerMails(inboxDir, SCOPE)).toEqual([]);
+    expect(retractSteerMail(inboxDir, SCOPE, 'notice')).toBe(false);
+  });
+
+  it('never requeues a body already pulled or held by another consumer', () => {
+    putSteerMail(inboxDir, SCOPE, mail('pulled'));
+    expect(pullSteerMails(inboxDir, SCOPE)).toHaveLength(1);
+    expect(retractSteerMail(inboxDir, SCOPE, 'pulled')).toBe(false);
+    putSteerMail(inboxDir, SCOPE, mail('held'));
+    const batch = claimSteerMails(inboxDir, SCOPE);
+    expect(retractSteerMail(inboxDir, SCOPE, 'held')).toBe(false);
+    batch.release();
+    expect(pullSteerMails(inboxDir, SCOPE).map(mail => mail.requestId)).toEqual(['held']);
   });
 });
 

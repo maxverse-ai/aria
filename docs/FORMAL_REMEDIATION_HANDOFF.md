@@ -1,6 +1,6 @@
 # Aria 审计整改 Goal 执行提示词与续跑记录
 
-> Status: in progress — execution prompt prepared against audit baseline `3a297061616568123f2451dfed50c3cd9e1c1590`; remediation has not started. Verify current progress in the ledger below.
+> Status: in progress — execution prompt prepared against audit baseline `3a297061616568123f2451dfed50c3cd9e1c1590`; remediation worktrees exist at baseline `973599b`; partial fixes and uncommitted work are recorded below. No remediation has been integrated.
 
 ## 执行提示词
 
@@ -96,14 +96,14 @@ R1–R4、D1–D4、C1–C5、T1–T4 共 17 项问题的验证、修复和集�
 
 ## 当前续跑定位
 
-- 阶段：执行提示词已准备；整改尚未开始。
-- 当前 owner / worktree / 分支：待执行者创建并填写。
-- 当前目标与预算：待执行者核对现有 goal；本文件不指定预算。
-- 最近已集成整改提交：无。
-- 未提交改动：尚无整改改动；执行前检查实际 Git 状态。
-- 最近验证：历史审计证据见审计报告，不能视为整改后验证。
-- 下一步：核对 goal 和最新主线，创建整改 worktree，开始 R1、C1+C3、C2 的复现与协议设计。
-- 阻塞：尚未评估。
+- 检查点：2026-11-09 15:38 UTC+8；本文件为主任务账本，根目录同名文件仍是初始执行入口。
+- 阶段：已产生阶段性修复；尚无整改集成到主线，17 项均未关闭。
+- 主 worktree：`D:\dev\aria\.worktrees\remediation`，分支 `agent/remediation`，HEAD `973599b6567e69c36f0b750ea4819a39ee68195a`。
+- 待评审提交：R1-R4 `0ce9c69`；C2 `e33584e`；C1+C3 `29a68d96c39b63a598360af6d7d64bfc96eb63b5`。均在各自 worktree，尚未 cherry-pick 或集成；先核对实际提交和证据。
+- 未提交：D1/D4 邮箱所有权与过期处理、T1/T3/T4 trigger 草稿及相关测试/文档、`NoticeOwnership.tla`。必须保留，不能当作已完成修复。
+- 已知验证：邮箱 focused 23 项通过；trigger focused 22 项中 1 项失败（durable retry 改变原 route 次数断言）；最后 typecheck 通过。完整整改门禁尚未运行。子任务验证见下方检查点。
+- 下一步：先核对 Git 状态和子任务状态，修正邮箱 expiry 路径的 claim 释放遗漏，补 D1 联合调用链测试；T1/T3/T4 仍需正确性评审和回归。随后串行评审接收子任务提交、登记 manifest 并运行完整门禁。
+- 工具：wlease 不可用；无虚构 lease。TLC/Java 路径见下方检查点。未发布、部署或操作生产服务。
 
 ## 逐项账本
 
@@ -112,17 +112,17 @@ R1–R4、D1–D4、C1–C5、T1–T4 共 17 项问题的验证、修复和集�
 
 | ID | 当前状态 | 复现/前提与模型 | 修复/验证证据 | 集成提交或关闭依据 | 下一步 |
 | --- | --- | --- | --- | --- | --- |
-| R1 | 待核实 | 见历史审计 | 无整改证据 | 无 | 复现 stop-before-submit |
-| R2 | 待核实 | 见历史审计 | 无整改证据 | 无 | 复现 EOF 与 final-response 排空 |
-| R3 | 待核实 | 见历史审计 | 无整改证据 | 无 | 核对有效 turn ID 与迟到通知 |
-| R4 | 待核实 | 见历史审计 | 无整改证据 | 无 | 核实 Grok load replay 契约 |
-| D1 | 待核实 | 见历史审计 | 无整改证据 | 无 | 联合建模 producer/pull/fallback |
+| R1 | 实现中 | subagent remediation-engines | 无整改证据 | 无 | 等待引擎修复提交 |
+| R2 | 实现中 | subagent remediation-engines | 无整改证据 | 无 | 等待引擎修复提交 |
+| R3 | 实现中 | subagent remediation-engines | 无整改证据 | 无 | 等待引擎修复提交 |
+| R4 | 实现中 | subagent remediation-engines | 无整改证据 | 无 | 等待引擎修复提交 |
+| D1 | 待验证 | NoticeOwnership legacy NoDuplicate 指定反例 | 28 项邮箱/联合调用链/独立进程测试通过；fixed TLC 通过 | 未集成 | 完整门禁及评审 |
 | D2 | 待核实 | 见历史审计 | 无整改证据 | 无 | 明确单/多 live coordinator 合约 |
 | D3 | 待核实 | 见历史审计 | 无整改证据 | 无 | 分类 known rejection 与 unknown |
-| D4 | 待核实 | 见历史审计 | 无整改证据 | 无 | 定义 expiry/retention/redeposit |
-| C1 | 待核实 | 见历史审计 | 无整改证据 | 无 | 复现旧锁回收并设计 fencing |
-| C2 | 待核实 | 见历史审计 | 无整改证据 | 无 | 复现 store 并发写及 salt 初始化 |
-| C3 | 待核实 | 见历史审计 | 无整改证据 | 无 | 与 C1 联合设计半初始化锁恢复 |
+| D4 | 待验证 | NoticeOwnership；TTL redaction/tombstone | 过期可见且正文清理、防 redeposit 回归通过 | 未集成 | 完整门禁及评审 |
+| C1 | 实现中 | subagent remediation-updatelock | 无整改证据 | 无 | 等待锁修复提交 |
+| C2 | 实现中 | subagent remediation-keystore | 无整改证据 | 无 | 等待 keystore 修复提交 |
+| C3 | 实现中 | subagent remediation-updatelock | 无整改证据 | 无 | 等待锁修复提交 |
 | C4 | 待核实 | 见历史审计 | 无整改证据 | 无 | 隔离验证准入与 drain/stop 交错 |
 | C5 | 待核实 | 见历史审计 | 无整改证据 | 无 | 定义实际实例健康核验 |
 | T1 | 待核实 | 见历史审计 | 无整改证据 | 无 | 设计成功与 outbox 持久衔接 |
@@ -134,3 +134,26 @@ R1–R4、D1–D4、C1–C5、T1–T4 共 17 项问题的验证、修复和集�
 
 初始记录：仅准备执行提示词和账本；17 项整改均未开始。后续追加日期、涉及 ID、
 决策理由、提交/日志指针、尚未验证项与下一步。不要复制历史审计全文。
+
+
+### 2026-11-09 15:38 UTC+8 — 提示词交付前持久化
+
+当前表格是启动时状态；本检查点更新其证据，续跑时以本检查点和实际 Git 为准，完成评审后同步逐项行。
+
+- R1-R4：子任务提交 `0ce9c69`，6 文件 59 项 focused tests、typecheck/build 及四组 fixed/legacy TLC 由子任务报告通过。证据位于 `remediation-engines/scripts/`；共享 manifest 增量为该目录的 `manifest-additions.json`。原生 Grok 外部场景未验证；主任务尚未重跑和集成。
+- C2：子任务提交 `e33584e`，21 项测试（含独立进程）、typecheck/build 及 KeystoreTransaction fixed/legacy TLC 由子任务报告通过。日志在 `remediation-keystore/scripts/`。需审查 proper-lockfile stale/heartbeat 假设；不声称任意停顿下互斥。
+- C1/C3：子任务提交 `29a68d9`，21 项测试、typecheck/build 及 UpdateLock fixed/legacy TLC 由子任务报告通过。日志在 `remediation-updatelock/scripts/`。依赖本地 hard-link 原子性，混合旧新版 updater 并发不支持；空旧锁 fail-closed。共享 manifest 尚未登记。
+- D1/D4：主任务未提交草稿；23 项 mailbox focused tests 通过，但 channel 联合所有权与跨进程交错仍需验证。NoticeOwnership 尚未 TLC 检查/登记。已知待修：expiry 在取得 claim 后 readMail 缺失时 continue，必须保证 settlement。
+- T1/T3/T4：主任务未提交草稿。outbox 成功快照、unknown execution deferred、UTC 配额原子准入尚未验收。需补成功持久化失败、未知执行的实际协调路径、跨进程配额/cleanup 边界测试。当前有 1 项 focused test 失败，不能视为通过。
+- D2/C4/C5：之前已发送后续委派，但收到的 final 仅覆盖前一子任务；必须核对 agent 状态，不能假设已实现。T2/D3 尚未实现。
+- 工具路径：TLA2TOOLS_JAR=`D:\dev\aria\tools\formal\.toolchain\tla2tools.jar`；JAVA 位于临时目录 `aria-formal-java21/jdk-21.0.13+9-jre/bin/java.exe`，续跑先确认存在。不要把工具缺失当作通过。
+- 保护根目录用户改动：`tests/unit/card/__snapshots__/run-renderer.snapshot.test.ts.snap` 和未跟踪 `.pnpm-store/`；不 stage/reset/删除。AGENTS.md 不修改，skill 保持项目级。
+- 下一条命令：`git -C D:/dev/aria/.worktrees/remediation status --short`，随后读取本账本、各子任务 scripts/progress.md，核对 agent 状态与 manifest 增量；保留全部未提交草稿再继续。
+### 2026-11-09 15:48 UTC+8 — D1/D4 检查点
+
+- 修正过期处理取得 claim 后 readMail 缺失时 settlement 遗漏，使用 finally 保证释放。
+- 联合调用真实 tryMergeLiveFollowup 与 PendingQueue/mailbox，覆盖 unread/pulled/held 三种拒绝通知交错；独立 Node 进程覆盖消费先赢和撤回先赢。
+- 命令：`pnpm exec vitest run tests/process/mailbox-notice-ownership.test.ts tests/unit/bot/mailbox-notice-ownership.test.ts tests/unit/conversation/steer-mailbox.test.ts tests/unit/conversation/steer-mail-claims.test.ts`：4 文件 28 项通过。
+- `node tools/formal/check.mjs notice-ownership --report scripts/formal-remediation/notice-ownership.json`：两项通过（legacy 指定 NoDuplicate 反例、fixed 有限检查）。不宣称 implementation refinement。
+- 修复测试 fixture 类型遗漏后 `pnpm typecheck` 通过；未运行真实飞书场景。
+- C4 联动：manager 已实现未提交 pauseProfileAdmission/waitProfileIdle hooks，3 项新增准入/超时/准备后 hold 测试通过；既有 outbox route 次数测试仍失败，T1 后续改为持久重试验收。

@@ -574,6 +574,18 @@ submission begins becomes uncertain. PID reuse can conservatively delay recovery
 Pull still commits before CLI output and cannot prove the engine consumed that
 output. Disk/power loss durability and exactly-once agent effects are not claimed.
 
+A failed notice does not prove its body was unseen: an earlier scope-wide pull
+may already own it. The producer returns the original input to the next-turn
+queue only after exclusively claiming and retracting its unread mailbox record.
+If a consumer owns it, already committed it, or has an uncertain outcome, the
+producer acknowledges its queue claim and leaves mailbox recovery in charge.
+Ordinary unread records past the TTL transition under the same claim protocol
+to `expired`, with the body redacted. Expiration is visible for one further TTL
+window. Old terminal bodies are also redacted; small stable-ID records and claim
+tombstones remain to prevent late redeposits from resurrecting inputs. Claimed
+and uncertain bodies are never erased by expiration. Tombstone compaction needs
+a separately reconciled deduplication horizon; record metadata can accumulate.
+
 Claim generations are immutable, bounded to 64 per record, and never reused.
 Exhaustion fails visibly with the body retained. Uncertain records are retained
 beyond the normal 30-minute TTL for operator inspection; no expiry can silently

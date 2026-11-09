@@ -182,6 +182,31 @@
           "config": "CONSTANT Consumers = {host, cli}\nINIT Init\nNEXT Next\nINVARIANTS NoBlindReplay AtMostOneAcceptance NoSilentLoss SingleOwner\nCHECK_DEADLOCK FALSE\n"
         }
       ]
+    },
+    {
+      "id": "notice-ownership",
+      "source": [
+        "src/conversation/steer-mailbox.ts",
+        "src/bot/channel.ts"
+      ],
+      "tests": [
+        "tests/unit/bot/mailbox-notice-ownership.test.ts",
+        "tests/unit/conversation/steer-mailbox.test.ts",
+        "tests/process/mailbox-notice-ownership.test.ts"
+      ],
+      "cases": [
+        {
+          "name": "NoticeOwnershipLegacy",
+          "model": "NoticeOwnership.tla",
+          "config": "CONSTANT Guard = FALSE\nINIT Init\nNEXT Next\nINVARIANT NoDuplicate\nINVARIANT NoResurrection\nCHECK_DEADLOCK FALSE\n",
+          "violation": "NoDuplicate"
+        },
+        {
+          "name": "NoticeOwnership",
+          "model": "NoticeOwnership.tla",
+          "config": "CONSTANT Guard = TRUE\nINIT Init\nNEXT Next\nINVARIANT NoDuplicate\nINVARIANT NoResurrection\nCHECK_DEADLOCK FALSE\n"
+        }
+      ]
     }
   ]
 }

@@ -1,4 +1,4 @@
-import { mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync, unlinkSync } from 'node:fs';
+import { mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { currentRuntime, runtimeEntryPath } from '../platform/runtime';
@@ -22,7 +22,7 @@ import { acquireMailClaim, beginMailSubmission, finishMailClaim, mailClaimState,
 
 export const STEER_MAIL_TTL_MS = 30 * 60 * 1000;
 
-export type SteerMailState = 'pending' | 'noticed' | 'pulled' | 'swept' | 'dropped' | 'claimed' | 'uncertain';
+export type SteerMailState = 'pending' | 'noticed' | 'pulled' | 'swept' | 'dropped' | 'expired' | 'claimed' | 'uncertain';
 
 export interface SteerMail {
   v: 1;
@@ -110,6 +110,22 @@ export function markSteerMail(
   } finally { finishMailClaim(claim, 'released'); }
 }
 
+/** Atomically revoke an unconsumed body before returning its producer input to the queue. */
+export function retractSteerMail(inboxDir: string, scope: string, requestId: string, now = Date.now()): boolean {
+  const claim = acquireMailClaim(claimDirectory(inboxDir, scope, requestId));
+  if (!claim) return false; // A consumer owns it, has delivered it, or its outcome is unknown.
+  let committed = false;
+  try {
+    const file = mailFile(inboxDir, scope, requestId);
+    const mail = readMail(file);
+    if (!mail || !UNREAD_STATES.has(mail.state)) return false;
+    writeMail(file, { ...mail, state: 'dropped', stateAt: now });
+    finishMailClaim(claim, 'committed');
+    committed = true;
+    return true;
+  } finally { if (!committed) finishMailClaim(claim, 'released'); }
+}
+
 export function listSteerMails(inboxDir: string, scope: string, now: number = Date.now()): SteerMail[] {
   const dir = scopeDir(inboxDir, scope);
   let names: string[];
@@ -127,18 +143,29 @@ export function listSteerMails(inboxDir: string, scope: string, now: number = Da
       mails.push(claim && UNREAD_STATES.has(mail.state) ? { ...mail, state: claim } : mail);
     }
   }
-  // Reap any mail older than the TTL — terminal records past their
-  // observability window and unread records that expired unclaimed — so the
-  // directory does not grow forever.
-  for (const mail of mails) {
-    if (now - mail.insertedAt > STEER_MAIL_TTL_MS && !UNREAD_STATES.has(mail.state) && mail.state !== 'claimed' && mail.state !== 'uncertain') {
-      try {
-        unlinkSync(mailFile(inboxDir, scope, mail.requestId));
-      } catch { /* concurrent reader — fine */ }
-    }
+  // Expiration uses the same cross-process ownership boundary as consumption.
+  // Keep a small redacted tombstone: removing it would allow redeposit of a stable ID.
+  for (let index = 0; index < mails.length; index++) {
+    const candidate = mails[index]!;
+    if (now - candidate.insertedAt <= STEER_MAIL_TTL_MS || candidate.state === 'claimed' || candidate.state === 'uncertain') continue;
+    if (candidate.state === 'expired' && candidate.body === '') continue;
+    const directory = claimDirectory(inboxDir, scope, candidate.requestId);
+    const claim = acquireMailClaim(directory);
+    if (!claim && UNREAD_STATES.has(candidate.state)) continue;
+    let committed = false;
+    try {
+      const file = mailFile(inboxDir, scope, candidate.requestId);
+      const mail = readMail(file);
+      if (!mail) continue;
+      const expired = UNREAD_STATES.has(mail.state);
+      const updated: SteerMail = { ...mail, body: '', ...(expired ? { state: 'expired', stateAt: now } : {}) };
+      writeMail(file, updated);
+      mails[index] = updated;
+      if (claim) { finishMailClaim(claim, 'committed'); committed = true; }
+    } finally { if (claim && !committed) finishMailClaim(claim, 'released'); }
   }
   return mails
-    .filter((m) => m.state === 'claimed' || m.state === 'uncertain' || now - m.insertedAt <= STEER_MAIL_TTL_MS)
+    .filter((m) => m.state === 'claimed' || m.state === 'uncertain' || now - m.insertedAt <= STEER_MAIL_TTL_MS || (m.state === 'expired' && now - m.stateAt <= STEER_MAIL_TTL_MS))
     .filter((m) => m.state === 'claimed' || m.state === 'uncertain' || UNREAD_STATES.has(m.state) || now - m.stateAt <= STEER_MAIL_TTL_MS)
     .sort((a, b) => a.insertedAt - b.insertedAt);
 }

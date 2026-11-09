@@ -138,6 +138,7 @@ import {
 import {
   buildSteerNoticePrompt,
   markSteerMail,
+  retractSteerMail,
   putSteerMail,
   withSteerMailSweep,
   sweptSteerMailInstruction,
@@ -1665,7 +1666,7 @@ async function intakeMessage(deps: IntakeDeps): Promise<void> {
   });
 }
 
-async function tryMergeLiveFollowup(input: {
+export async function tryMergeLiveFollowup(input: {
   conversations: ConversationRuntime;
   activeRuns: ActiveRuns;
   pending: PendingQueue;
@@ -1768,12 +1769,12 @@ async function tryMergeLiveFollowup(input: {
     return;
   }
 
-  // The notice never landed, so nobody will pull the body — drop the mail
-  // and let the original input flow back through the deferred queue.
+  // An older scope-wide pull may already own this body even if this notice failed.
+  // Requeue only after revoking the mailbox's delivery right atomically.
   if (useMailbox && input.inboxDir) {
-    markSteerMail(input.inboxDir, input.scope, requestId, 'dropped');
-  }
-  input.pending.release(claim);
+    if (retractSteerMail(input.inboxDir, input.scope, requestId)) input.pending.release(claim);
+    else input.pending.acknowledge(claim);
+  } else input.pending.release(claim);
   log.info('followup', result.kind, {
     scope: input.scope,
     reason: result.reason,
