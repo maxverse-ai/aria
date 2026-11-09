@@ -11,6 +11,9 @@ runtime; prepared spaces have their own runtime owners. Public v1 contracts
 remain unchanged. [Evidence and activation limits](EXECUTION_SPACE_IMPLEMENTATION.md)
 distinguish adapter implementation from deployment acceptance.
 
+[Formal audit evidence](FORMAL_AUDIT_IMPLEMENTATION.md) records bounded TLA+
+checks and controlled component reproductions against the audited baseline.
+
 ## Goal
 
 Aria channels and conversation orchestration must not know an engine's native
