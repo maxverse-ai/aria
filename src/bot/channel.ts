@@ -30,6 +30,7 @@ import {
 } from '../agent/prompt';
 import type { AgentAdapter, AgentEvent } from '../agent/types';
 import { handleCardAction } from '../card/dispatcher';
+import { SpawnFailed } from '../runtime/errors';
 import { CallbackAuth } from '../card/callback-auth';
 import { CallbackNonceStore } from '../card/callback-store';
 import { renderCard, type RunCardRenderOptions } from '../card/run-renderer';
@@ -138,7 +139,7 @@ import {
   buildSteerNoticePrompt,
   markSteerMail,
   putSteerMail,
-  sweepSteerMails,
+  withSteerMailSweep,
   sweptSteerMailInstruction,
 } from '../conversation/steer-mailbox';
 import { ObjectiveService } from './objective-service';
@@ -1973,9 +1974,7 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<Terminal | undefined> 
   const freshnessHandoff = finalReplyFreshness.handoff(scope);
   // Reconcile the steer mailbox: bodies the previous turn was notified about
   // but never pulled are re-issued as part of this turn so nothing is lost.
-  const sweptMails = deps.inboxDir ? sweepSteerMails(deps.inboxDir, scope) : [];
   const extraInstructions = [
-    ...(sweptMails.length > 0 ? [sweptSteerMailInstruction(sweptMails)] : []),
     ...(cooperative ? [COOPERATIVE_REPLY_INSTRUCTION] : []),
     ...(modelSwitched
       ? [
@@ -2071,28 +2070,33 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<Terminal | undefined> 
     }
   }
   await refreshPersonalGroup();
-  const flow = await conversations.start({
-    identity: larkParticipantIdentity(controls.cfg.accounts.app.id, channel.botIdentity),
-    channelPrompt: BRIDGE_SYSTEM_PROMPT,
-    ...(gate ? { spaceContext: gate.active().context } : {}),
-    scopeId: scope,
-    scope: scopeContext,
-    prompt,
-    attachments: attachments.map(toPolicyAttachment),
-    access: accessDecision,
-    capability,
-    profileConfig: controls.profileConfig,
-    now: Date.now(),
-    reasoningEffort: reasoning.effective ?? null,
-    serviceTier,
-    stopGraceMs: getAgentStopGraceMs(controls.cfg),
-    observability: {
-      profile: controls.profile,
-      agent: capability.agentId,
-      source: 'im',
-      stage: 'submit',
-    },
-  });
+  const flow = await withSteerMailSweep(deps.inboxDir, scope, async (mails, beginSubmission) => {
+    const submittedPrompt = mails.length ? buildPrompt(batch, attachments, quotes, topicContext,
+      channel.botIdentity, [...extraInstructions, sweptSteerMailInstruction(mails)]) : prompt;
+    beginSubmission();
+    return conversations.start({
+      identity: larkParticipantIdentity(controls.cfg.accounts.app.id, channel.botIdentity),
+      channelPrompt: BRIDGE_SYSTEM_PROMPT,
+      ...(gate ? { spaceContext: gate.active().context } : {}),
+      scopeId: scope,
+      scope: scopeContext,
+      prompt: submittedPrompt,
+      attachments: attachments.map(toPolicyAttachment),
+      access: accessDecision,
+      capability,
+      profileConfig: controls.profileConfig,
+      now: Date.now(),
+      reasoningEffort: reasoning.effective ?? null,
+      serviceTier,
+      stopGraceMs: getAgentStopGraceMs(controls.cfg),
+      observability: {
+        profile: controls.profile,
+        agent: capability.agentId,
+        source: 'im',
+        stage: 'submit',
+      },
+    });
+  }, error => error instanceof SpawnFailed && error.code === 'agent-prepare-failed');
   if (!flow.ok) {
     log.info('run-flow', 'rejected', { scope, code: flow.rejectReason.code });
     log.warn('policy', 'denied', {

@@ -5,17 +5,17 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ProcessPool } from '../../../src/bot/process-pool';
-import { executeCardAction } from '../../../src/card/action-executor';
+import { executeCardAction, waitForCardActions } from '../../../src/card/action-executor';
 import { CodexAppServerClient, type AppServerChild } from '../../../src/agent/engines/codex/app-server/client';
 import { CodexAppServerRuntime } from '../../../src/agent/engines/codex/app-server/runtime';
 import { startCodexAppServer } from '../../../src/agent/engines/codex/app-server/process';
-import { markSteerMail, putSteerMail, pullSteerMails, sweepSteerMails, unreadSteerMails } from '../../../src/conversation/steer-mailbox';
+import { markSteerMail, putSteerMail, pullSteerMails, withSteerMailSweep, unreadSteerMails } from '../../../src/conversation/steer-mailbox';
 
 vi.mock('../../../src/agent/engines/codex/app-server/process', () => ({ startCodexAppServer: vi.fn() }));
 afterEach(() => { vi.restoreAllMocks(); });
 
-describe('formal audit: current behavior evidence (not desired-behavior regressions)', () => {
-  it('reproduces pool oversubscription when a newcomer steals a woken waiter slot', async () => {
+describe('formal audit regression guards', () => {
+  it('reserves the permit for a woken waiter', async () => {
     const pool = new ProcessPool(() => 1);
     const releaseFirst = await pool.acquire();
     const waiting = pool.acquire();
@@ -25,51 +25,54 @@ describe('formal audit: current behavior evidence (not desired-behavior regressi
     const releaseNewcomer = pool.tryAcquire();
     const releaseWaiter = await waiting;
     try {
-      expect(releaseNewcomer).toBeTypeOf('function');
-      expect(pool.snapshot()).toMatchObject({ active: 2, cap: 1 });
+      expect(releaseNewcomer).toBeUndefined();
+      expect(pool.snapshot()).toMatchObject({ active: 1, cap: 1 });
     } finally { releaseWaiter(); releaseNewcomer?.(); }
     expect(pool.snapshot().active).toBe(0);
   });
 
-  it('reproduces an immediate callback waiting for handler I/O before acknowledgement', async () => {
+  it('returns the callback before handler I/O starts or completes', async () => {
     let release!: () => void;
     let acknowledged = false;
     const barrier = new Promise<void>(resolve => { release = resolve; });
     const action = executeCardAction({ action: 'stop', key: 'audit-card', task: () => barrier })
       .then(() => { acknowledged = true; });
     await Promise.resolve();
-    expect(acknowledged).toBe(false);
-    release();
     await action;
+    expect(acknowledged).toBe(true);
+    release();
+    await waitForCardActions();
     expect(acknowledged).toBe(true);
   });
 
-  it('reproduces unread mail removed before a next-turn submission can be accepted', async () => {
+  it('restores mail when next-turn submission is rejected', async () => {
     const root = await mkdtemp(join(tmpdir(), 'aria-audit-mail-'));
     try {
       putSteerMail(root, 'scope', { requestId: 'followup', body: 'must survive rejected preparation' });
       markSteerMail(root, 'scope', 'followup', 'noticed');
-      const preparedPrompt = sweepSteerMails(root, 'scope');
-      expect(preparedPrompt).toHaveLength(1);
-      // runAgentBatch can now return flow.ok=false or throw before engine submission.
-      expect(unreadSteerMails(root, 'scope')).toEqual([]);
-      expect(sweepSteerMails(root, 'scope')).toEqual([]);
-      expect(pullSteerMails(root, 'scope')).toEqual([]);
+      await withSteerMailSweep(root, 'scope', async (mails, begin) => {
+        expect(mails).toHaveLength(1);
+        expect(pullSteerMails(root, 'scope')).toEqual([]);
+        begin();
+        return { ok: false };
+      });
+      expect(unreadSteerMails(root, 'scope')).toHaveLength(1);
+      expect(pullSteerMails(root, 'scope')).toHaveLength(1);
     } finally { await rm(root, { recursive: true, force: true }); }
   });
 
-  it('reproduces resurrection of already consumed mail by a duplicate deposit', async () => {
+  it('does not resurrect consumed mail on duplicate deposit', async () => {
     const root = await mkdtemp(join(tmpdir(), 'aria-audit-duplicate-'));
     try {
       const message = { requestId: 'same-input', body: 'once' };
       putSteerMail(root, 'scope', message);
       expect(pullSteerMails(root, 'scope')).toHaveLength(1);
       putSteerMail(root, 'scope', message);
-      expect(pullSteerMails(root, 'scope')).toHaveLength(1);
+      expect(pullSteerMails(root, 'scope')).toHaveLength(0);
     } finally { await rm(root, { recursive: true, force: true }); }
   });
 
-  it('reproduces engine turn announcements disappearing after client reconnection', async () => {
+  it('announces engine turns after client reconnection', async () => {
     function client() {
       const child = Object.assign(new EventEmitter(), { stdout: new PassThrough(), stdin: new PassThrough(),
         stderr: new PassThrough(), exitCode: 0, signalCode: null });
@@ -97,7 +100,7 @@ describe('formal audit: current behavior evidence (not desired-behavior regressi
       await closed;
       expect(await runtime.client()).toBe(second.client);
       await emit(second, 'after-reconnect');
-      expect(announced).toEqual(['before-reconnect']);
+      expect(announced).toEqual(['before-reconnect', 'after-reconnect']);
     } finally { await runtime.dispose(); await first.client.dispose(); }
   });
 });

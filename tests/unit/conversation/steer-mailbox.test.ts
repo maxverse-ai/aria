@@ -50,12 +50,12 @@ describe('putSteerMail / unreadSteerMails', () => {
     expect(unreadSteerMails(inboxDir, SCOPE_B)).toHaveLength(1);
   });
 
-  it('survives a same-requestId redeposit (last write wins)', () => {
+  it('keeps the first body for a stable request ID', () => {
     putSteerMail(inboxDir, SCOPE, mail('im:m1', 'first'));
     putSteerMail(inboxDir, SCOPE, mail('im:m1', 'second'));
     const unread = unreadSteerMails(inboxDir, SCOPE);
     expect(unread).toHaveLength(1);
-    expect(unread[0]?.body).toBe('second');
+    expect(unread[0]?.body).toBe('first');
   });
 });
 

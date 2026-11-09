@@ -638,8 +638,10 @@ async function createHarness(
         ? { outboundControlChannel: controlChannel as unknown as CommandContext['channel'] }
         : {}),
     });
-  const dispatchResumeArg = (arg: string): Promise<void> =>
-    dispatchCard({ cmd: 'resume.use', arg });
+  const dispatchResumeArg = async (arg: string): Promise<void> => {
+    await dispatchCard({ cmd: 'resume.use', arg });
+    await waitForCardActions();
+  };
 
   cleanups.push(async () => {
     pending.cancelAll();

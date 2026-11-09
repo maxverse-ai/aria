@@ -75,9 +75,11 @@ describe('Card Action Executor', () => {
     await waitForCardActions();
   });
 
-  it('keeps immediate actions synchronous', async () => {
+  it('defers stop until after the callback returns', async () => {
     const task = vi.fn(async () => undefined);
     await executeCardAction({ action: 'stop', key: 'chat:card-stop', task });
+    expect(task).not.toHaveBeenCalled();
+    await waitForCardActions();
     expect(task).toHaveBeenCalledOnce();
   });
 

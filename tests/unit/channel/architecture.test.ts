@@ -38,7 +38,8 @@ describe('channel architecture boundary', () => {
     expect(await readFile('src/conversation/composition.ts', 'utf8')).toContain('new ProfileConversationRuntimeOwner(options)');
     expect(supervisor).toContain('conversationRuntime: this.conversationRuntime');
     expect(channel).toContain('const conversations = conversationRuntime.runtime;');
-    expect(channel).toContain('const flow = await conversations.start({');
+    expect(channel).toContain('return conversations.start({');
+    expect(channel).toContain('const flow = await withSteerMailSweep(');
     expect(channel).toContain('conversations.recordEvent({');
   });
 

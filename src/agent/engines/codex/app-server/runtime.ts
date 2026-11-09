@@ -75,7 +75,7 @@ export class CodexAppServerRuntime implements EngineRuntime {
   private readonly activeRuns = new Set<AppServerRun>();
   private readonly claimedThreads = new Set<string>();
   private readonly engineTurnListeners = new Set<(turn: EngineTurnRef) => void>();
-  private watchingEngineTurns = false;
+  private engineTurnSubscription?: { client: CodexAppServerClient; unsubscribe: () => void };
 
   constructor(private readonly options: CodexAppServerRuntimeOptions) {
     this.execution = new CodexAppServerAdapter(this);
@@ -161,6 +161,10 @@ export class CodexAppServerRuntime implements EngineRuntime {
           this.watchEngineTurns(client);
           client.onClosed(() => {
             if (this.clientPromise === started) this.clientPromise = undefined;
+            if (this.engineTurnSubscription?.client === client) {
+              this.engineTurnSubscription.unsubscribe();
+              this.engineTurnSubscription = undefined;
+            }
           });
         },
         () => {
@@ -194,9 +198,10 @@ export class CodexAppServerRuntime implements EngineRuntime {
   }
 
   private watchEngineTurns(client: CodexAppServerClient): void {
-    if (this.watchingEngineTurns) return;
-    this.watchingEngineTurns = true;
-    client.onNotification((notification) => {
+    if (this.engineTurnSubscription?.client === client) return;
+    this.engineTurnSubscription?.unsubscribe();
+    const unsubscribe = client.onNotification((notification) => {
+      if (this.disposed || this.engineTurnSubscription?.client !== client) return;
       if (notification.method !== 'turn/started') return;
       const params = isRecord(notification.params) ? notification.params : {};
       const threadId = typeof params.threadId === 'string' ? params.threadId : undefined;
@@ -205,6 +210,7 @@ export class CodexAppServerRuntime implements EngineRuntime {
       if (!threadId || !turnId || this.claimedThreads.has(threadId)) return;
       for (const listener of this.engineTurnListeners) listener({ threadId, turnId });
     });
+    this.engineTurnSubscription = { client, unsubscribe };
   }
 
   untrack(run: AppServerRun): void {
@@ -300,6 +306,8 @@ export class CodexAppServerRuntime implements EngineRuntime {
   async dispose(): Promise<void> {
     if (this.disposed) return;
     this.disposed = true;
+    this.engineTurnSubscription?.unsubscribe();
+    this.engineTurnSubscription = undefined;
     const clientPromise = this.clientPromise;
     const runs = [...this.activeRuns];
     await Promise.allSettled(runs.map((run) => run.stop()));

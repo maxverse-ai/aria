@@ -21,6 +21,21 @@ import type { SpaceOperationGate } from '../../../src/space/operation-gate';
 const cleanups: Array<() => Promise<void>> = [];
 
 describe('signed card callback dispatch', () => {
+  it('returns a stop callback before scope lookup I/O and still authorizes the background action', async () => {
+    let release!: () => void;
+    let resolving = false;
+    const barrier = new Promise<void>(resolve => { release = resolve; });
+    const h = await createHarness({ beforeResolve: async () => { resolving = true; await barrier; } });
+    const run = h.agent.run({ runId: 'run-active', scopeId: 'oc_group', prompt: 'running' }) as FakeAgentRun;
+    h.activeRuns.register('oc_group', run);
+    await h.dispatch({ cmd: 'stop', __bridge_cb: true, bridge_token: h.token('stop') }, undefined, false);
+    expect(resolving).toBe(false);
+    expect(run.stopped).toBe(false);
+    release();
+    await waitForCardActions();
+    expect(resolving).toBe(true);
+    expect(run.stopped).toBe(true);
+  });
   it('E5/X4: a topic card uses its original space scope and a changed audience cannot stop another run', async () => {
     const tmp = await createTmpProfile('space-callback-');
     const f = await gateFixture(tmp.root); f.state.humans = ['ou_operator'];
@@ -138,7 +153,7 @@ type Harness = {
   controls: Controls;
   pending: PendingQueue;
   auth: CallbackAuth;
-  dispatch(value: Record<string, unknown>, formValue?: Record<string, unknown>): Promise<void>;
+  dispatch(value: Record<string, unknown>, formValue?: Record<string, unknown>, wait?: boolean): Promise<void>;
   token(
     action: string,
     overrides?: { operatorOpenId?: string; nonce?: string; scope?: string },
@@ -146,7 +161,7 @@ type Harness = {
 };
 
 async function createHarness(
-  opts: { callbackAuth?: boolean; chatMode?: 'p2p' | 'group' | 'topic'; spaceGate?: SpaceOperationGate } = {},
+  opts: { callbackAuth?: boolean; chatMode?: 'p2p' | 'group' | 'topic'; spaceGate?: SpaceOperationGate; beforeResolve?: () => Promise<void> } = {},
 ): Promise<Harness> {
   const tmp = await createTmpProfile('callback-dispatch-test-');
   const channel = createFakeChannel();
@@ -185,7 +200,7 @@ async function createHarness(
     createNonce: () => nonce,
   });
   const chatModeCache = {
-    resolve: async () => opts.chatMode ?? 'group',
+    resolve: async () => { await opts.beforeResolve?.(); return opts.chatMode ?? 'group'; },
   } as unknown as ChatModeCache;
   cleanups.push(async () => {
     pending.cancelAll();
@@ -215,7 +230,7 @@ async function createHarness(
         ttlMs: 60_000,
       });
     },
-    dispatch: async (value, formValue) => {
+    dispatch: async (value, formValue, wait = true) => {
       await handleCardAction({
         channel: opts.spaceGate ? spaceLarkChannel(channel as unknown as Parameters<typeof handleCardAction>[0]['channel'], opts.spaceGate)
           : channel as unknown as Parameters<typeof handleCardAction>[0]['channel'],
@@ -230,7 +245,7 @@ async function createHarness(
         ...(opts.callbackAuth === false ? {} : { callbackAuth: auth }),
         callbackPolicyFingerprint: 'fp-1',
       });
-      await waitForCardActions();
+      if (wait) await waitForCardActions();
     },
   };
 }

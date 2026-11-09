@@ -12,6 +12,7 @@ import { SessionStore } from '../../../src/session/store';
 import { WorkspaceStore } from '../../../src/workspace/store';
 import { FakeAgentAdapter } from '../../helpers/fake-agent';
 import { createTmpProfile, type TmpProfile } from '../../helpers/tmp-profile';
+import { putSteerMail, pullSteerMails, withSteerMailSweep, listSteerMails } from '../../../src/conversation/steer-mailbox';
 
 const cleanups: Array<() => Promise<void>> = [];
 
@@ -20,6 +21,26 @@ afterEach(async () => {
 });
 
 describe('IM run flow', () => {
+  it('retains swept follow-ups after real policy rejection and commits after a successful retry', async () => {
+    const h = await createHarness();
+    const inbox = join(h.tmp.profile, 'inbox');
+    putSteerMail(inbox, 'chat-1', { requestId: 'followup', body: 'preserve this instruction' });
+    const start = () => withSteerMailSweep(inbox, 'chat-1', async (mails, begin) => {
+      begin();
+      return startRunFlow({ scopeId: 'chat-1', scope: { source: 'im', chatId: 'chat-1', actorId: 'ou_user' },
+        prompt: mails.map(mail => mail.body).join('\n'), attachments: [], access: { ok: true, reason: 'allowed-user' },
+        capability: claudeCapability(h.profileConfig), profileConfig: h.profileConfig, sessions: h.sessions,
+        workspaces: h.workspaces, executor: h.executor, now: Date.now() });
+    });
+    expect((await start()).ok).toBe(false);
+    expect(h.agent.runOptions).toEqual([]);
+    expect(listSteerMails(inbox, 'chat-1')[0]?.state).toBe('pending');
+    h.workspaces.setCwd('chat-1', h.tmp.workspace);
+    const accepted = await start(); expect(accepted.ok).toBe(true);
+    expect(h.agent.runOptions[0]?.prompt).toContain('preserve this instruction');
+    expect(pullSteerMails(inbox, 'chat-1')).toEqual([]);
+    if (accepted.ok) { await accepted.execution.stop(); for await (const _ of accepted.execution.subscribe()) { /* cleanup */ } }
+  });
   it('rejects missing cwd without falling back to the user home', async () => {
     const h = await createHarness();
 

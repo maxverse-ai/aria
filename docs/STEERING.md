@@ -546,7 +546,7 @@ Claude/Kimi specifics — the shipped mailbox. Transports reporting
 `delivery: 'none'` take the Raft two-envelope path instead of pushing the
 body: the follow-up prompt is deposited in a per-scope mailbox
 (`<profileDir>/inbox/<scope>/<requestId>.json`, atomic tmp+rename per
-record, 30-minute TTL), and only a content-free `<steer_notice>` — scope,
+record, normally a 30-minute TTL with retained claims described below), and only a content-free `<steer_notice>` — scope,
 unread count, pull command — is written to stdin. The agent pulls bodies
 at a natural breakpoint with `aria inbox pull --scope <scope>` (the
 scope travels inside the notice itself; the mailbox directory resolves
@@ -561,6 +561,26 @@ not a user message — because Aria owns no code inside the engine loop
 notice's own transport evidence stays `none` — the stdin write has no
 acknowledgement, so `accepted` means "written", not "seen". If the
 mailbox write itself fails, the path degrades to the legacy direct push.
+
+Mailbox consumers exclusively claim a record across processes before returning
+its body. Stable request IDs preserve the first deposit and cannot resurrect a
+consumed record. Host sweep holds claims while building the next prompt and
+commits `swept` only after conversation start returns success (local execution
+handoff, not proof the model saw it). Known rejection or preparation failure
+releases the claims. A submission exception with unknown acceptance retains an
+`uncertain` record and logs request IDs without bodies; it is never automatically
+replayed. A dead owner before submission is recoverable; a dead owner after
+submission begins becomes uncertain. PID reuse can conservatively delay recovery.
+Pull still commits before CLI output and cannot prove the engine consumed that
+output. Disk/power loss durability and exactly-once agent effects are not claimed.
+
+Claim generations are immutable, bounded to 64 per record, and never reused.
+Exhaustion fails visibly with the body retained. Uncertain records are retained
+beyond the normal 30-minute TTL for operator inspection; no expiry can silently
+replay them. Do not delete claim metadata or replay uncertain bodies until the
+corresponding execution outcome is reconciled. Mailbox storage requires a local
+filesystem supporting exclusive hard links; unsupported storage fails rather
+than falling back to a non-exclusive consumer.
 
 Rollout order: **(1)** contract fields + the Devin prompt-merge adapter —
 the change that makes Devin steer at all; **(2)** deferred auto-flush in

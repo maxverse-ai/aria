@@ -18,7 +18,7 @@ try {
   for (const [name, flag, invariant] of cases) {
     writeFileSync(join(temporary, `${name}.tla`), readFileSync(join(source, `${name}.tla`)));
     for (const fixed of [false, true]) {
-      const config = `${name}-${fixed ? 'reference' : 'current'}`;
+      const config = `${name}-${fixed ? 'reference' : 'legacy'}`;
       const constants = name === 'MailboxConsumers' ? 'CONSTANT Consumers = {pull, sweep}\n' : '';
       writeFileSync(join(temporary, `${config}.cfg`), `${constants}CONSTANT ${flag} = ${fixed ? 'TRUE' : 'FALSE'}\nINIT Init\nNEXT Next\nINVARIANT ${invariant}\nCHECK_DEADLOCK FALSE\n`);
       check(name, config, fixed ? null : invariant);
@@ -28,6 +28,10 @@ try {
   writeFileSync(join(temporary, `${name}.tla`), readFileSync(join(source, `${name}.tla`)));
   writeFileSync(join(temporary, `${name}.cfg`), 'CONSTANT Borrowers = {a, b}\nSPECIFICATION Spec\nINVARIANTS SafeRetirement NoDoubleRelease\nPROPERTY Drains\nCHECK_DEADLOCK FALSE\n');
   check(name, name, null);
+  const recovery = 'MailboxRecovery';
+  writeFileSync(join(temporary, `${recovery}.tla`), readFileSync(join(source, `${recovery}.tla`)));
+  writeFileSync(join(temporary, `${recovery}.cfg`), 'CONSTANT Consumers = {host, cli}\nINIT Init\nNEXT Next\nINVARIANTS NoBlindReplay AtMostOneAcceptance NoSilentLoss SingleOwner\nCHECK_DEADLOCK FALSE\n');
+  check(recovery, recovery, null);
 } finally { rmSync(temporary, { recursive: true, force: true }); }
 
 function check(name, config, violation) {

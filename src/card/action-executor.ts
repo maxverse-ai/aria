@@ -21,26 +21,23 @@ export const CARD_ACTION_MODES = {
   'effort.set': 'background',
   'fast.refresh': 'background',
   'fast.set': 'background',
-  help: 'immediate',
+  help: 'background',
   'model.refresh': 'background',
   'model.use': 'background',
-  new: 'immediate',
+  new: 'background',
   resume: 'background',
-  'resume.use': 'immediate',
+  'resume.use': 'background',
   status: 'background',
-  stop: 'immediate',
-  'ws.list': 'immediate',
-  'ws.remove': 'immediate',
-  'ws.use': 'immediate',
+  stop: 'background',
+  'ws.list': 'background',
+  'ws.remove': 'background',
+  'ws.use': 'background',
 } as const satisfies Record<string, CardActionMode>;
 
 export type RegisteredCardAction = keyof typeof CARD_ACTION_MODES;
 
 export function cardActionMode(action: string): CardActionMode {
-  // Unknown callbacks stay synchronous so adding a new button cannot silently
-  // change ordering. The registry coverage test prevents Aria-owned cards from
-  // reaching this fallback.
-  return CARD_ACTION_MODES[action as RegisteredCardAction] ?? 'immediate';
+  return CARD_ACTION_MODES[action as RegisteredCardAction] ?? 'background';
 }
 
 const queues = new Map<string, Promise<void>>();
@@ -81,7 +78,10 @@ export async function executeCardAction(input: ExecuteCardActionInput): Promise<
 
   const previous = queues.get(input.key) ?? Promise.resolve();
   const startedAt = Date.now();
-  const current = previous.catch(() => undefined).then(input.task);
+  // A macrotask boundary lets the SDK finish its callback response before any
+  // handler performs I/O, including handlers with synchronous filesystem work.
+  const current = previous.catch(() => undefined)
+    .then(() => new Promise<void>(resolve => setImmediate(resolve))).then(input.task);
   queues.set(input.key, current);
 
   const monitor = () => current

@@ -16,7 +16,7 @@ import { log, reportMetric } from '../core/logger';
  */
 export class ProcessPool {
   private active = 0;
-  private readonly waiters: Array<() => void> = [];
+  private readonly waiters: Array<(release: () => void) => void> = [];
   /** Snapshot of the cap captured at the moment acquire() decided to wait. */
   private cap: () => number;
 
@@ -25,29 +25,36 @@ export class ProcessPool {
   }
 
   async acquire(): Promise<() => void> {
-    if (this.active < this.cap()) {
+    this.drain();
+    if (this.waiters.length === 0 && this.active < this.cap()) {
       this.active++;
       log.info('pool', 'acquired', { active: this.active, cap: this.cap() });
       reportMetric('pool_active', this.active);
-      return () => this.release();
+      return this.permit();
     }
     log.info('pool', 'wait', { active: this.active, cap: this.cap(), waiting: this.waiters.length + 1 });
     reportMetric('pool_waiting', this.waiters.length + 1);
-    await new Promise<void>((resolve) => this.waiters.push(resolve));
-    this.active++;
-    log.info('pool', 'acquired', { active: this.active, cap: this.cap() });
-    reportMetric('pool_active', this.active);
-    return () => this.release();
+    return new Promise<() => void>((resolve) => this.waiters.push(resolve));
   }
 
   tryAcquire(): (() => void) | undefined {
-    if (this.active >= this.cap()) {
+    this.drain();
+    if (this.waiters.length > 0 || this.active >= this.cap()) {
       log.info('pool', 'full', { active: this.active, cap: this.cap() });
       return undefined;
     }
     this.active++;
     log.info('pool', 'acquired', { active: this.active, cap: this.cap() });
-    return () => this.release();
+    return this.permit();
+  }
+
+  private permit(): () => void {
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      this.release();
+    };
   }
 
   private release(): void {
@@ -56,10 +63,17 @@ export class ProcessPool {
     reportMetric('pool_active', this.active);
     // Wake the next waiter if there's headroom. If cap was just lowered
     // via /config, this naturally throttles by not waking.
-    if (this.active < this.cap() && this.waiters.length > 0) {
-      const next = this.waiters.shift();
-      if (next) next();
+    this.drain();
+  }
+
+  private drain(): void {
+    while (this.active < this.cap() && this.waiters.length > 0) {
+      const next = this.waiters.shift()!;
+      this.active++;
+      next(this.permit());
     }
+    reportMetric('pool_active', this.active);
+    reportMetric('pool_waiting', this.waiters.length);
   }
 
   snapshot(): { active: number; waiting: number; cap: number } {

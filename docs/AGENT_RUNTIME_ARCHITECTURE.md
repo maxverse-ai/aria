@@ -13,6 +13,8 @@ distinguish adapter implementation from deployment acceptance.
 
 [Formal audit evidence](FORMAL_AUDIT_IMPLEMENTATION.md) records bounded TLA+
 checks and controlled component reproductions against the audited baseline.
+[Runtime ownership repair evidence](RUNTIME_OWNERSHIP_IMPLEMENTATION.md) records
+the subsequent fixes and the remaining acceptance boundaries.
 
 ## Goal
 

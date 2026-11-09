@@ -492,7 +492,7 @@ turn 事件重复 emit。启用方式是 `agentInfo` 探测 + 配置开关
 Claude/Kimi 的细节——已落地的 mailbox。`delivery: 'none'` 的
 transport 不再直接推正文，改走 Raft 式双信封：follow-up prompt 先存
 进按 scope 分的信箱（`<profileDir>/inbox/<scope>/<requestId>.json`，
-每条记录 tmp+rename 原子写，TTL 30 分钟），stdin 里只推一条无正文的
+每条记录 tmp+rename 原子写，通常 TTL 30 分钟，领取保留规则见下文），stdin 里只推一条无正文的
 `<steer_notice>`——scope、未读数、拉取命令。agent 在自然断点跑
 `aria inbox pull --scope <scope>` 拉正文（scope 写在通知里，信箱目
 录经 agent 环境里已有的 channel env 解析），bridge system prompt
@@ -503,6 +503,20 @@ result 而不是 user 消息——Aria 在引擎循环内没有自己的代码�
 prompt-contract 变体，弱于 Raft 的插件拉取）；notice 自身的送达证
 据仍是 `none`——stdin 写入没有回执，`accepted` 只代表"写了"不代表
 "看到了"。信箱写入本身失败时降级回旧的直接推送。
+
+信箱消费者先跨进程排他领取记录，再返回正文。同一请求 ID 保留首次写入，
+重复写入不能复活已消费记录。宿主构建下轮提示词时持有领取权，只有
+conversation start 返回成功后才提交 `swept`；这代表本地执行交接，
+不代表模型已读。已知拒绝或准备失败会释放领取；提交异常且是否受理未知时，
+保留 `uncertain` 记录，只记录请求 ID，不记录正文，也不会自动重放。
+所有者提交前退出可恢复领取；提交开始后退出则保留为未知。PID 复用可能
+保守地延迟恢复。CLI pull 仍在输出前提交，无法证明引擎已消费输出。
+不声称具备断电持久性或 agent 副作用的恰好一次执行保证。
+
+领取代际不可变、不会复用，每条记录最多 64 代；达到上限会明确失败并保留
+正文。未知记录超过正常 30 分钟 TTL 仍会保留供运维核查，不会因过期而重放。
+核实对应执行结果前，不应删除领取元数据或重放未知正文。信箱必须位于支持
+排他硬链接创建的本地文件系统；不支持时明确失败，不降级为非排他消费。
 
 落地顺序：**(1)** 契约字段 + Devin prompt-merge adapter——让 Devin
 能 steer 的那一刀；**(2)** `TurnCoordinator` 的 deferred 自动
