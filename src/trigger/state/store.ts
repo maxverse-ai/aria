@@ -4,6 +4,7 @@ import type {
   TriggerDefinition,
   TriggerDefinitionFilter,
   TriggerFailureRecord,
+  TriggerExecutionResolution,
   TriggerLeaseRef,
   TriggerMaterializationInput,
   TriggerMaterializationResult,
@@ -28,7 +29,9 @@ export interface TriggerStateStore {
   renewLease(id: string, lease: TriggerLeaseRef, now: number, expiresAt: number): Promise<TriggerOccurrence>;
   beginDispatch(id: string, lease: TriggerLeaseRef, intentId: string, at: number): Promise<TriggerOccurrence>;
   markRunning(id: string, lease: TriggerLeaseRef, runId: string, at: number): Promise<TriggerOccurrence>;
-  markSucceeded(id: string, lease: TriggerLeaseRef, at: number): Promise<TriggerOccurrence>;
+  markSucceeded(id: string, lease: TriggerLeaseRef, at: number, output?: { text: string }): Promise<TriggerOccurrence>;
+  acknowledgeResult(id: string): Promise<void>;
+  resolveExecution(input: TriggerExecutionResolution): Promise<TriggerOccurrence>;
   markSkipped(id: string, lease: TriggerLeaseRef, code: string, at: number): Promise<TriggerOccurrence>;
   scheduleRetry(input: TriggerRetryInput): Promise<TriggerOccurrence>;
   markDeferred(id: string, lease: TriggerLeaseRef, blockedCode: string, at: number): Promise<TriggerOccurrence>;

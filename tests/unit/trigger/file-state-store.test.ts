@@ -1,6 +1,8 @@
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { spawnSync } from 'node:child_process';
+import { resolve } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { TriggerDefinition } from '../../../src/trigger/state';
 import {
@@ -17,6 +19,53 @@ afterEach(async () => {
 });
 
 describe('FileTriggerStateStore', () => {
+  it('uses the built operator recovery port without disclosing task text or replaying execution', async () => {
+    const path = await statePath();
+    const store = new FileTriggerStateStore(path);
+    await store.createDefinition(definition());
+    await store.materialize({ definitionId: 'definition-a', expectedRevision: 1, expectedNextFireAt: 100,
+      occurrence: createPendingOccurrence({ id: 'unknown', profileId: 'profile-a', definitionId: 'definition-a',
+        definitionRevision: 1, scheduledFor: 100, createdAt: 100 }), advancedAt: 100 });
+    const claim = (await store.claimNext({ now: 100, leaseId: 'old', leaseOwner: 'old', leaseDurationMs: 10 }))!;
+    await store.beginDispatch(claim.id, { leaseId: 'old', token: claim.fence }, 'accepted-intent', 101);
+    const tool = resolve('tools/trigger-execution-recovery.mjs');
+    const run = (...args: string[]) => spawnSync(process.execPath, [tool, ...args, '--state', path], { encoding: 'utf8', timeout: 10_000 });
+    const inspected = run('inspect');
+    expect(inspected.status, inspected.stderr).toBe(0);
+    expect(JSON.parse(inspected.stdout)).toMatchObject([{ id: 'unknown', intentId: 'accepted-intent', outcome: 'unknown' }]);
+    expect(inspected.stdout).not.toContain('hello');
+    const args = ['resolve', '--id', 'unknown', '--fence', String(claim.fence), '--intent-id', 'accepted-intent',
+      '--owner-stopped', '--outcome', 'not-accepted'];
+    expect(run(...args).status).toBe(1);
+    const resolved = run(...args, '--confirmed-not-accepted');
+    expect(resolved.status, resolved.stderr).toBe(0);
+    expect(await store.getOccurrence('unknown')).toMatchObject({ state: 'pending', fence: claim.fence + 1 });
+    expect(run(...args, '--confirmed-not-accepted').status).toBe(1);
+  });
+
+  it('persists successful output and the submitted definition across restart until routing acknowledges', async () => {
+    const path = await statePath();
+    const store = new FileTriggerStateStore(path);
+    await store.createDefinition(definition());
+    await store.materialize({ definitionId: 'definition-a', expectedRevision: 1, expectedNextFireAt: 100,
+      occurrence: createPendingOccurrence({ id: 'outbox', profileId: 'profile-a', definitionId: 'definition-a',
+        definitionRevision: 1, scheduledFor: 100, createdAt: 100 }), nextFireAt: 200, advancedAt: 100 });
+    const claimed = (await store.claimNext({ now: 100, leaseId: 'owner', leaseOwner: 'process', leaseDurationMs: 1000 }))!;
+    const lease = { leaseId: 'owner', token: claimed.fence };
+    await store.beginDispatch(claimed.id, lease, 'intent', 101);
+    await store.markRunning(claimed.id, lease, 'run', 102);
+    await store.replaceDefinition({ ...definition(), revision: 2, updatedAt: 103,
+      intentTemplate: { ...definition().intentTemplate, input: { prompt: 'changed', attachments: [] } } }, 1);
+    await store.markSucceeded(claimed.id, lease, 104, { text: 'completed answer' });
+    const restarted = new FileTriggerStateStore(path);
+    expect(await restarted.getOccurrence(claimed.id)).toMatchObject({ state: 'succeeded', resultOutbox: {
+      text: 'completed answer', definition: { revision: 1, intentTemplate: { input: { prompt: 'hello' } } },
+    } });
+    expect(await restarted.cleanup({ completedBefore: 86_400_000, limit: 10 })).toEqual([]);
+    await restarted.acknowledgeResult(claimed.id);
+    expect(await new FileTriggerStateStore(path).getOccurrence(claimed.id)).not.toHaveProperty('resultOutbox');
+  });
+
   it('serializes concurrent materialization and survives a new process adapter', async () => {
     const path = await statePath();
     const left = new FileTriggerStateStore(path);

@@ -112,17 +112,17 @@ R1–R4、D1–D4、C1–C5、T1–T4 共 17 项问题的验证、修复和集�
 
 | ID | 当前状态 | 复现/前提与模型 | 修复/验证证据 | 集成提交或关闭依据 | 下一步 |
 | --- | --- | --- | --- | --- | --- |
-| R1 | 实现中 | subagent remediation-engines | 无整改证据 | 无 | 等待引擎修复提交 |
-| R2 | 实现中 | subagent remediation-engines | 无整改证据 | 无 | 等待引擎修复提交 |
-| R3 | 实现中 | subagent remediation-engines | 无整改证据 | 无 | 等待引擎修复提交 |
-| R4 | 实现中 | subagent remediation-engines | 无整改证据 | 无 | 等待引擎修复提交 |
+| R1 | 待集成 | 子任务复现证据与正常 fixed/legacy 模型 | 主整改分支 focused 及 TLC 已重跑通过，见 16:25 检查点 | 仅任务分支 | 完整门禁、主线集成 |
+| R2 | 待集成 | 子任务复现证据与正常 fixed/legacy 模型 | 主整改分支 focused 及 TLC 已重跑通过，见 16:25 检查点 | 仅任务分支 | 完整门禁、主线集成 |
+| R3 | 待集成 | 子任务复现证据与正常 fixed/legacy 模型 | 主整改分支 focused 及 TLC 已重跑通过，见 16:25 检查点 | 仅任务分支 | 完整门禁、主线集成 |
+| R4 | 待集成 | 子任务复现证据与正常 fixed/legacy 模型 | 主整改分支 focused 及 TLC 已重跑通过，见 16:25 检查点 | 仅任务分支 | 完整门禁、主线集成 |
 | D1 | 待验证 | NoticeOwnership legacy NoDuplicate 指定反例 | 28 项邮箱/联合调用链/独立进程测试通过；fixed TLC 通过 | 未集成 | 完整门禁及评审 |
 | D2 | 待核实 | 见历史审计 | 无整改证据 | 无 | 明确单/多 live coordinator 合约 |
 | D3 | 待核实 | 见历史审计 | 无整改证据 | 无 | 分类 known rejection 与 unknown |
 | D4 | 待验证 | NoticeOwnership；TTL redaction/tombstone | 过期可见且正文清理、防 redeposit 回归通过 | 未集成 | 完整门禁及评审 |
-| C1 | 实现中 | subagent remediation-updatelock | 无整改证据 | 无 | 等待锁修复提交 |
-| C2 | 实现中 | subagent remediation-keystore | 无整改证据 | 无 | 等待 keystore 修复提交 |
-| C3 | 实现中 | subagent remediation-updatelock | 无整改证据 | 无 | 等待锁修复提交 |
+| C1 | 待集成 | 子任务复现证据与正常 fixed/legacy 模型 | 主整改分支 focused 及 TLC 已重跑通过，见 16:25 检查点 | 仅任务分支 | 完整门禁、主线集成 |
+| C2 | 待集成 | 子任务复现证据与正常 fixed/legacy 模型 | 主整改分支 focused 及 TLC 已重跑通过，见 16:25 检查点 | 仅任务分支 | 完整门禁、主线集成 |
+| C3 | 待集成 | 子任务复现证据与正常 fixed/legacy 模型 | 主整改分支 focused 及 TLC 已重跑通过，见 16:25 检查点 | 仅任务分支 | 完整门禁、主线集成 |
 | C4 | 待核实 | 见历史审计 | 无整改证据 | 无 | 隔离验证准入与 drain/stop 交错 |
 | C5 | 待核实 | 见历史审计 | 无整改证据 | 无 | 定义实际实例健康核验 |
 | T1 | 待核实 | 见历史审计 | 无整改证据 | 无 | 设计成功与 outbox 持久衔接 |
@@ -157,3 +157,32 @@ R1–R4、D1–D4、C1–C5、T1–T4 共 17 项问题的验证、修复和集�
 - `node tools/formal/check.mjs notice-ownership --report scripts/formal-remediation/notice-ownership.json`：两项通过（legacy 指定 NoDuplicate 反例、fixed 有限检查）。不宣称 implementation refinement。
 - 修复测试 fixture 类型遗漏后 `pnpm typecheck` 通过；未运行真实飞书场景。
 - C4 联动：manager 已实现未提交 pauseProfileAdmission/waitProfileIdle hooks，3 项新增准入/超时/准备后 hold 测试通过；既有 outbox route 次数测试仍失败，T1 后续改为持久重试验收。
+
+### 2026-11-09 16:25 UTC+8 — 串行接收与 trigger 协议检查点
+
+- 已保存邮箱提交 `c43f7ee`，串行接收 R1-R4 为 `d7a6e8b`、C2 为 `62e9bae`、C1/C3 为 `29cb342`、D3 为 `9b95283`；均未推 main。
+- 主整改分支统一 focused 6 文件 41 项通过。首次沙箱 keystore 6 项 uv_os_get_passwd 失败，主机授权重跑全部通过；不把首次失败隐藏为成功。
+- `node tools/formal/check.mjs engine-lifecycle keystore-transaction update-lock --report scripts/formal-remediation/batch1-models.json` 14 项预期结果全部通过；共享 manifest 已登记这些组及 D3（D3 尚待主任务重跑）。
+- Trigger 草稿仍未提交：成功与 outbox 同事务、原始 definition 快照、success checkpoint 失败不重跑；explicit resolveExecution 校验 unknown/expired+intent+fence，成功可补 outbox，确认未受理才可重新准入，撤销旧 fence。管理工具/文档和模型仍待补。
+- C4 manager hooks 已实现，3 项 pause/drain/临提交 fence 测试通过。T4 UTC 日计数新增原子竞争及跨日测试；cleanup now 与 completedBefore 分离，未来 cutoff 不能删当前日计数。
+- Trigger 三文件 29 项通过；最后 typecheck 在 resolveExecution 后通过，最新新增测试需随后重跑 typecheck。T1/T3/T4 均未验收；跨进程配额、模型、管理入口待补。
+- 子任务实际运行中：fix_keystore=D2（即将提交）；fix_updatelock=C4/C5（即将提交）；fix_engines=T2（设计已接受）。
+- 下一步：补 trigger unknown 管理工具与模型/文档，接收 D2/C4/C5 并实际联动测试，补 T2，运行全套门禁；不得标17项完成。
+
+### 2026-11-09 16:31 UTC+8 — T3 反向评审与检查点
+
+- 子任务 D2 接收为主任务提交450e1ef，manifest 已登记，主任务尚需重跑其门禁。
+- adversarial review 发现 submit timeout/observer rejection 原路径仍会 scheduleRetry；已改为只有显式 TriggerExecutionNotAcceptedError 可自动重试，其他异常持久 deferred unknown。新增2项实现回归均通过。
+- 提供 tools/trigger-execution-recovery.mjs，使用已构建的实际 FileTriggerStateStore 端口 inspect/resolve，不直接改JSON、不发执行请求；成功输出文件可写回 durable outbox。工具集成测试和文档仍待补。
+- `pnpm exec vitest run tests/unit/trigger/runtime-manager.test.ts tests/unit/trigger/state-store.test.ts tests/unit/trigger/file-state-store.test.ts` 3文件31项通过；`pnpm typecheck`通过。
+- 已落盘所有草稿，尚未提交T1/T3/T4；仍需模型、跨进程配额和完整门禁。续跑先git status，接收C4/C5和T2（子任务仍在工作），再审查quota/outbox证据。
+
+### 2026-11-09 16:40 UTC+8 — 全部子任务接入，尚未主线验收
+
+- T2 接入49ac76a，C4/C5接入e713906；全部既有子任务修复已到主整改分支，manifest新增T2/更新准入/TriggerRecovery；均未推主线。
+- T1/T3/T4仍为未提交草稿；新增TriggerRecovery模型 fixed及三个指定负向性质（NoLostOutput/NoBlindReplay/DailyQuota）均通过，报告scripts/formal-remediation/trigger-models.json。该模型是简化协议，不替代实现回归。
+- T3反向评审补丁：未知执行继续占用overlap/active quota；markRunning记账失败立即保留unknown，附加completion拒绝处理并纳入drain等待。新增回归已通过，但未知名额释放后的队列恢复仍需专门验收。
+- 实际构建后的operator工具测试通过：inspect不输出正文、拒绝未确认重试、确认未受理后CAS恢复、旧fence重复恢复被拒绝。
+- 最新命令 `pnpm exec vitest run tests/unit/trigger/runtime-manager.test.ts tests/unit/trigger/state-store.test.ts tests/unit/trigger/file-state-store.test.ts tests/unit/docs/documentation-contract.test.ts`：4文件40项通过；`pnpm typecheck`通过。更新联动5文件35项通过（较早revision）；需完整门禁重跑。
+- 未完成：T4真实多进程/grant/revision边界；T3队列resume与未知恢复完整场景；全manifest检查、完整ci:local、review、同步main正常推送与清理。不发布不部署。
+- 下一条命令：git status --short；阅读manager.resumeOverlap和state.resolveExecution后补unknown占用/释放回归，然后运行统一门禁。

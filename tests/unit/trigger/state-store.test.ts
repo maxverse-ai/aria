@@ -10,6 +10,48 @@ import {
 } from '../../../src/trigger/state';
 
 describe('TriggerStateStore', () => {
+  it('requires a matching explicit outcome to reconcile expired running work without replay', async () => {
+    const store = await materializedStore();
+    const claim = (await store.claimNext({ now: 100, leaseId: 'owner', leaseOwner: 'host', leaseDurationMs: 10 }))!;
+    const lease = { leaseId: 'owner', token: claim.fence };
+    await store.beginDispatch(claim.id, lease, 'submitted-intent', 101);
+    await store.markRunning(claim.id, lease, 'remote-run', 102);
+    const reclaimed = (await store.claimNext({ now: 110, leaseId: 'recovery', leaseOwner: 'recovery-host', leaseDurationMs: 100 }))!;
+    await store.markDeferred(claim.id, { leaseId: 'recovery', token: reclaimed.fence }, 'execution-outcome-unknown', 111);
+    await expect(store.resumeDeferred(claim.id, 112)).rejects.toThrow('explicit outcome');
+    const resolution = { occurrenceId: claim.id, expectedFence: reclaimed.fence, intentId: 'submitted-intent',
+      ownerStopped: true as const, at: 112, outcome: { kind: 'succeeded' as const, text: 'verified remote result' } };
+    await expect(store.resolveExecution({ ...resolution, expectedFence: claim.fence })).rejects.toThrow('matching unknown');
+    expect(await store.resolveExecution(resolution)).toMatchObject({ state: 'succeeded', resultOutbox: { text: 'verified remote result' } });
+    await expect(store.resolveExecution(resolution)).rejects.toThrow('matching unknown');
+    await expect(store.markSucceeded(claim.id, lease, 113)).rejects.toMatchObject({ code: 'stale-lease' });
+  });
+
+  it('atomically enforces UTC daily admissions and retains accounting across retry and cleanup', async () => {
+    const store = new InMemoryTriggerStateStore();
+    await store.createDefinition(definition({ quota: { maxActiveOccurrences: 10, maxRunsPerDay: 1 } }));
+    await store.materialize({ definitionId: 'definition-a', expectedRevision: 1, expectedNextFireAt: 100,
+      occurrence: pending('quota-a', 100), nextFireAt: 200, advancedAt: 100 });
+    await store.materialize({ definitionId: 'definition-a', expectedRevision: 1, expectedNextFireAt: 200,
+      occurrence: pending('quota-b', 200), nextFireAt: 300, advancedAt: 200 });
+    const first = (await store.claimNext({ now: 200, leaseId: 'first', leaseOwner: 'a', leaseDurationMs: 1000 }))!;
+    const second = (await store.claimNext({ now: 200, leaseId: 'second', leaseOwner: 'b', leaseDurationMs: 1000 }))!;
+    const firstLease = { leaseId: 'first', token: first.fence };
+    const secondLease = { leaseId: 'second', token: second.fence };
+    const results = await Promise.allSettled([
+      store.beginDispatch(first.id, firstLease, 'intent-a', 201),
+      store.beginDispatch(second.id, secondLease, 'intent-b', 201),
+    ]);
+    expect(results.filter(item => item.status === 'fulfilled')).toHaveLength(1);
+    expect(results.filter(item => item.status === 'rejected')).toMatchObject([{ reason: { code: 'daily-quota-exceeded' } }]);
+    await store.markRunning(first.id, firstLease, 'run', 202);
+    await store.markSucceeded(first.id, firstLease, 203);
+    expect(await store.cleanup({ completedBefore: 172_800_000, now: 204, limit: 10 })).toEqual([]);
+    await expect(store.beginDispatch(second.id, secondLease, 'intent-b', 205)).rejects.toMatchObject({ code: 'daily-quota-exceeded' });
+    await store.renewLease(second.id, secondLease, 206, 86_400_010);
+    await expect(store.beginDispatch(second.id, secondLease, 'intent-b', 86_400_001)).resolves.toMatchObject({ state: 'dispatching' });
+  });
+
   it('atomically materializes one logical occurrence and advances the schedule cursor', async () => {
     const store = await activeStore();
     const occurrence = pending('occurrence-a', 100);

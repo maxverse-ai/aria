@@ -116,7 +116,7 @@ export function assertTriggerOccurrence(value: unknown): asserts value is Trigge
   exactKeys(raw, [
     'schemaVersion', 'id', 'idempotencyKey', 'profileId', 'definitionId', 'definitionRevision',
     'scheduledFor', 'state', 'attempt', 'fence', 'nextAttemptAt', 'lease', 'dispatch', 'failure',
-    'blockedCode', 'createdAt', 'updatedAt', 'completedAt', 'deadAcknowledgedAt', 'metadata',
+    'blockedCode', 'createdAt', 'updatedAt', 'completedAt', 'deadAcknowledgedAt', 'metadata', 'resultOutbox', 'admissions',
   ], 'trigger occurrence');
   const occurrence = raw as unknown as TriggerOccurrence;
   if (occurrence.schemaVersion !== TRIGGER_STATE_SCHEMA_VERSION) invalid('unsupported trigger occurrence schema version');
@@ -135,6 +135,19 @@ export function assertTriggerOccurrence(value: unknown): asserts value is Trigge
   timestampOptional(occurrence.completedAt, 'completed time');
   timestampOptional(occurrence.deadAcknowledgedAt, 'dead acknowledgement time');
   metadata(occurrence.metadata, 'occurrence metadata');
+  if (occurrence.admissions !== undefined) {
+    if (!Array.isArray(occurrence.admissions)) invalid('invalid trigger admissions');
+    for (const admission of occurrence.admissions) timestamp(admission, 'admission time');
+  }
+  if (occurrence.resultOutbox !== undefined) {
+    const outbox = object(occurrence.resultOutbox, 'result outbox');
+    exactKeys(outbox, ['text', 'definition'], 'result outbox');
+    if (occurrence.state !== 'succeeded' || typeof outbox.text !== 'string') invalid('invalid successful result outbox');
+    assertTriggerDefinition(outbox.definition);
+    const definition = outbox.definition as TriggerDefinition;
+    if (definition.id !== occurrence.definitionId || definition.profileId !== occurrence.profileId
+      || definition.revision !== occurrence.definitionRevision) invalid('result outbox definition mismatch');
+  }
   if (occurrence.updatedAt < occurrence.createdAt) invalid('occurrence update precedes creation');
   if (occurrence.lease !== undefined) {
     exactKeys(object(occurrence.lease, 'lease'), ['leaseId', 'owner', 'token', 'acquiredAt', 'expiresAt'], 'lease');
@@ -149,7 +162,8 @@ export function assertTriggerOccurrence(value: unknown): asserts value is Trigge
   const active = ['leased', 'dispatching', 'running'].includes(occurrence.state);
   if (active !== (occurrence.lease !== undefined)) invalid('active occurrence state requires exactly one lease');
   if (occurrence.dispatch !== undefined) {
-    exactKeys(object(occurrence.dispatch, 'dispatch checkpoint'), ['intentId', 'persistedAt', 'submittedAt', 'runId'], 'dispatch checkpoint');
+    exactKeys(object(occurrence.dispatch, 'dispatch checkpoint'), ['intentId', 'persistedAt', 'submittedAt', 'runId', 'definition'], 'dispatch checkpoint');
+    if (occurrence.dispatch.definition !== undefined) assertTriggerDefinition(occurrence.dispatch.definition);
     id(occurrence.dispatch.intentId, 'dispatch intent id');
     timestamp(occurrence.dispatch.persistedAt, 'dispatch persisted time');
     timestampOptional(occurrence.dispatch.submittedAt, 'dispatch submitted time');

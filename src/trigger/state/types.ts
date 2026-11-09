@@ -100,6 +100,7 @@ export interface TriggerDispatchCheckpoint {
   persistedAt: number;
   submittedAt?: number;
   runId?: string;
+  definition?: TriggerDefinition;
 }
 
 export type TriggerFailureKind =
@@ -137,12 +138,26 @@ export interface TriggerOccurrence {
   updatedAt: number;
   completedAt?: number;
   deadAcknowledgedAt?: number;
+  /** Durable successful output awaiting independent result routing. */
+  resultOutbox?: { text: string; definition: TriggerDefinition };
+  /** UTC admission timestamps, one per submitted attempt, retained for daily quota accounting. */
+  admissions?: number[];
   metadata: Readonly<Record<string, string>>;
 }
 
 export interface TriggerLeaseRef {
   leaseId: string;
   token: number;
+}
+
+/** Trusted operator reconciliation, after stopping the previous execution owner. */
+export interface TriggerExecutionResolution {
+  occurrenceId: string;
+  expectedFence: number;
+  intentId: string;
+  ownerStopped: true;
+  at: number;
+  outcome: { kind: 'succeeded'; text?: string } | { kind: 'not-accepted' } | { kind: 'failed'; code: string };
 }
 
 export interface TriggerDefinitionFilter {
@@ -201,6 +216,8 @@ export interface TriggerRetryInput {
 export interface TriggerCleanupInput {
   completedBefore: number;
   limit: number;
+  /** Logical current time for retention; defaults to the host clock. */
+  now?: number;
 }
 
 export class TriggerStateError extends Error {

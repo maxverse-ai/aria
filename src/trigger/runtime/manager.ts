@@ -12,6 +12,7 @@ import {
 } from '../state';
 import { createTriggerRunIntent } from './intent';
 import type { TriggerExecutionGateway, TriggerExecutionResult, TriggerManagerSnapshot } from './types';
+import { TriggerExecutionNotAcceptedError } from './types';
 import type { TriggerResultGateway } from '../result';
 
 export interface TriggerManagerOptions {
@@ -42,6 +43,10 @@ export class TriggerManager {
   private readonly leaseOwner: string;
   private readonly results?: TriggerResultGateway;
   private readonly inFlight = new Set<Promise<void>>();
+  private readonly routing = new Set<string>();
+  private readonly admissionHolds = new Map<string, number>();
+  private readonly profileTasks = new Map<string, Set<Promise<void>>>();
+  private closing = false;
   private timer?: ReturnType<typeof setInterval>;
   private reconcilePromise?: Promise<void>;
   private lastObservedNow?: number;
@@ -74,6 +79,7 @@ export class TriggerManager {
 
   start(): void {
     if (!this.enabled || this.timer) return;
+    this.closing = false;
     this.state = { ...this.state, running: true };
     this.timer = setInterval(() => void this.reconcile().catch(() => undefined), this.pollIntervalMs);
     this.timer.unref?.();
@@ -81,6 +87,7 @@ export class TriggerManager {
   }
 
   async close(): Promise<void> {
+    this.closing = true;
     if (this.timer) clearInterval(this.timer);
     this.timer = undefined;
     this.state = { ...this.state, running: false };
@@ -104,8 +111,44 @@ export class TriggerManager {
     return { ...this.state };
   }
 
+  /** Install before awaiting drain, so no later dispatch may cross submission. */
+  pauseProfileAdmission(profileId: string): () => void {
+    this.admissionHolds.set(profileId, (this.admissionHolds.get(profileId) ?? 0) + 1);
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      const depth = (this.admissionHolds.get(profileId) ?? 1) - 1;
+      if (depth > 0) this.admissionHolds.set(profileId, depth);
+      else {
+        this.admissionHolds.delete(profileId);
+        void this.resumeProfile(profileId).then(() => this.reconcile()).catch(() => undefined);
+      }
+    };
+  }
+
+  async waitProfileIdle(profileId: string, timeoutMs: number): Promise<void> {
+    positive(timeoutMs, 'profile drain timeout');
+    if (!this.admissionHolds.has(profileId)) throw new Error('profile admission must be paused before drain');
+    const deadline = Date.now() + timeoutMs;
+    for (;;) {
+      const tasks = [...(this.profileTasks.get(profileId) ?? [])];
+      if (this.reconcilePromise) tasks.push(this.reconcilePromise);
+      if (!tasks.length) return;
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) throw new Error('trigger-profile-drain-timeout');
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        await Promise.race([
+          Promise.allSettled(tasks),
+          new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('trigger-profile-drain-timeout')), remaining); }),
+        ]);
+      } finally { if (timer) clearTimeout(timer); }
+    }
+  }
+
   reconcile(): Promise<void> {
-    if (!this.enabled) return Promise.resolve();
+    if (!this.enabled || this.closing) return Promise.resolve();
     if (this.reconcilePromise) return this.reconcilePromise;
     this.reconcilePromise = this.performReconcile().finally(() => {
       this.state = { ...this.state, reconciling: false };
@@ -121,7 +164,8 @@ export class TriggerManager {
     const deferred = await this.store.listOccurrences({ profileId, state: 'deferred' });
     let resumed = 0;
     for (const occurrence of deferred) {
-      if (occurrence.blockedCode !== 'profile-offline') continue;
+      if (this.admissionHolds.has(profileId)) return resumed;
+      if (!['profile-offline', 'profile-updating'].includes(occurrence.blockedCode ?? '')) continue;
       await this.store.resumeDeferred(occurrence.id, this.now());
       resumed += 1;
     }
@@ -139,7 +183,8 @@ export class TriggerManager {
     this.state = { ...this.state, lastScanAt: now, lastErrorCode: undefined };
     try {
       await this.materializeDueSchedules(now);
-      await this.results?.reconcile().catch((error) =>
+      await this.routePendingResults();
+      if (!this.admissionHolds.size) await this.results?.reconcile().catch((error) =>
         log.warn('trigger-manager', 'result-reconcile-failed', {
           code: stableErrorCode(error),
         }));
@@ -210,7 +255,7 @@ export class TriggerManager {
   }
 
   private async dispatchClaimable(): Promise<void> {
-    while (true) {
+    while (!this.closing) {
       const claimed = await this.store.claimNext({
         now: this.now(),
         leaseId: this.createId(),
@@ -218,12 +263,26 @@ export class TriggerManager {
         leaseDurationMs: this.leaseDurationMs,
       });
       if (!claimed) return;
-      await this.dispatch(claimed);
+      const task = this.dispatch(claimed);
+      this.trackProfile(claimed.profileId, task);
+      await task;
     }
   }
 
   private async dispatch(occurrence: TriggerOccurrence): Promise<void> {
     const lease = leaseRef(occurrence);
+    if (this.admissionHolds.has(occurrence.profileId) && !['running', 'dispatching'].includes(occurrence.state)) {
+      await this.store.markDeferred(occurrence.id, lease, 'profile-updating', this.now());
+      this.bump('deferred');
+      return;
+    }
+    if (occurrence.state === 'running' || occurrence.state === 'dispatching') {
+      // We no longer have a trustworthy observer of remote acceptance/completion.
+      // Retain the dispatch identity; never turn an expired lease into new execution.
+      await this.store.markDeferred(occurrence.id, lease, 'execution-outcome-unknown', this.now());
+      this.bump('deferred');
+      return;
+    }
     const definition = await this.store.getDefinition(occurrence.definitionId);
     if (!definition || definition.state === 'canceled') {
       await this.dead(occurrence, lease, 'canceled', 'definition-canceled');
@@ -241,7 +300,7 @@ export class TriggerManager {
 
     const siblings = await this.store.listOccurrences({ definitionId: definition.id });
     const activeCount = siblings.filter((item) => item.id !== occurrence.id
-      && ['leased', 'dispatching', 'running'].includes(item.state)).length;
+      && occupiesExecution(item)).length;
     const queuedCount = siblings.filter((item) => item.state === 'deferred'
       && item.blockedCode === 'overlap-active').length;
     const quotaReached = activeCount >= definition.quota.maxActiveOccurrences;
@@ -270,18 +329,50 @@ export class TriggerManager {
     await this.store.renewLease(occurrence.id, lease, this.now(), extendedExpiry);
     const intentId = occurrence.dispatch?.intentId ?? this.createId();
     const intent = createTriggerRunIntent(definition, occurrence, intentId);
-    await this.store.beginDispatch(occurrence.id, lease, intentId, this.now());
+    try {
+      await this.store.beginDispatch(occurrence.id, lease, intentId, this.now());
+    } catch (error) {
+      if (error instanceof TriggerStateError && error.code === 'daily-quota-exceeded') {
+        await this.store.markSkipped(occurrence.id, lease, 'daily-quota-exceeded', this.now());
+        this.bump('skipped');
+        return;
+      }
+      throw error;
+    }
     let submission;
+    if (this.admissionHolds.has(occurrence.profileId)) {
+      await this.store.markDeferred(occurrence.id, lease, 'profile-updating', this.now());
+      this.bump('deferred');
+      return;
+    }
     try {
       submission = await this.execution.submit(occurrence.profileId, intent);
     } catch (error) {
-      await this.fail(occurrence, lease, error, 'trigger-submit-failed');
+      if (error instanceof TriggerExecutionNotAcceptedError) await this.fail(occurrence, lease, error, 'trigger-submit-failed');
+      else {
+        await this.store.markDeferred(occurrence.id, lease, 'execution-outcome-unknown', this.now());
+        this.bump('deferred');
+      }
       await this.resumeOverlap(definition.id);
       return;
     }
-    await this.store.markRunning(occurrence.id, lease, submission.runId, this.now());
+    // Observe immediately: persistence failure after accepted submission must
+    // not leave a rejecting completion promise unhandled.
+    void submission.completion.catch(() => undefined);
+    try {
+      await this.store.markRunning(occurrence.id, lease, submission.runId, this.now());
+    } catch (error) {
+      log.warn('trigger-manager', 'accepted-checkpoint-uncertain', { occurrenceId: occurrence.id, code: stableErrorCode(error) });
+      await this.store.markDeferred(occurrence.id, lease, 'execution-outcome-unknown', this.now()).catch(() => undefined);
+      const settlement = submission.completion.then(() => undefined, () => undefined);
+      this.trackProfile(occurrence.profileId, settlement);
+      this.track(settlement);
+      return;
+    }
     this.bump('dispatched');
-    this.track(this.observeCompletion(occurrence, lease, submission.completion));
+    const observation = this.observeCompletion(occurrence, lease, submission.completion);
+    this.trackProfile(occurrence.profileId, observation);
+    this.track(observation);
   }
 
   private async observeCompletion(
@@ -289,21 +380,16 @@ export class TriggerManager {
     lease: TriggerLeaseRef,
     completion: Promise<TriggerExecutionResult>,
   ): Promise<void> {
+    let observedSuccess = false;
     try {
       const result = await completion;
       if (result.status === 'succeeded') {
-        await this.store.markSucceeded(occurrence.id, lease, this.now());
+        observedSuccess = true;
+        await this.store.markSucceeded(occurrence.id, lease, this.now(), result.output?.text ? { text: result.output.text } : undefined);
         this.bump('succeeded');
         // Result delivery is an independent durable workflow. A channel outage
         // must never turn a successful agent occurrence back into agent work.
-        const definition = await this.store.getDefinition(occurrence.definitionId);
-        if (definition && this.results) {
-          await this.results.route(definition, occurrence, result).catch((error) =>
-            log.warn('trigger-manager', 'result-route-failed', {
-              occurrenceId: occurrence.id,
-              code: stableErrorCode(error),
-            }));
-        }
+        await this.routePendingResults();
       } else {
         await this.fail(
           occurrence,
@@ -313,8 +399,17 @@ export class TriggerManager {
         );
       }
     } catch (error) {
+      if (observedSuccess) {
+        // The external work succeeded. A failed local checkpoint is never
+        // evidence that replaying those side effects would be safe.
+        log.warn('trigger-manager', 'success-checkpoint-uncertain', {
+          occurrenceId: occurrence.id, code: stableErrorCode(error),
+        });
+        return;
+      }
       try {
-        await this.fail(occurrence, lease, error, 'run-observation-failed');
+        await this.store.markDeferred(occurrence.id, lease, 'execution-outcome-unknown', this.now());
+        this.bump('deferred');
       } catch (stateError) {
         log.warn('trigger-manager', 'completion-persist-failed', {
           occurrenceId: occurrence.id,
@@ -333,14 +428,37 @@ export class TriggerManager {
 
   private async resumeOverlap(definitionId: string): Promise<void> {
     const occurrences = await this.store.listOccurrences({ definitionId });
-    if (occurrences.some((item) => ['leased', 'dispatching', 'running'].includes(item.state))) return;
+    if (occurrences.some(occupiesExecution)) return;
     const queued = occurrences.find((item) => item.state === 'deferred' && item.blockedCode === 'overlap-active');
     if (queued) await this.store.resumeDeferred(queued.id, this.now());
+  }
+
+  private async routePendingResults(): Promise<void> {
+    if (!this.results) return;
+    for (const occurrence of await this.store.listOccurrences({ state: 'succeeded' })) {
+      if (!occurrence.resultOutbox || this.routing.has(occurrence.id) || this.admissionHolds.has(occurrence.profileId)) continue;
+      this.routing.add(occurrence.id);
+      try {
+        const outbox = occurrence.resultOutbox;
+        await this.results.route(outbox.definition, occurrence, { status: 'succeeded', output: { text: outbox.text } });
+        await this.store.acknowledgeResult(occurrence.id);
+      } catch (error) {
+        log.warn('trigger-manager', 'result-route-failed', { occurrenceId: occurrence.id, code: stableErrorCode(error) });
+      } finally { this.routing.delete(occurrence.id); }
+    }
   }
 
   private track(task: Promise<void>): void {
     this.inFlight.add(task);
     void task.finally(() => this.inFlight.delete(task));
+  }
+
+  private trackProfile(profileId: string, task: Promise<void>): void {
+    let tasks = this.profileTasks.get(profileId);
+    if (!tasks) { tasks = new Set(); this.profileTasks.set(profileId, tasks); }
+    tasks.add(task);
+    const settled = () => { tasks.delete(task); if (!tasks.size) this.profileTasks.delete(profileId); };
+    void task.then(settled, settled);
   }
 
   private async fail(
@@ -415,4 +533,9 @@ function normalizeCode(error: unknown, fallback: string): string {
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function occupiesExecution(occurrence: TriggerOccurrence): boolean {
+  return ['leased', 'dispatching', 'running'].includes(occurrence.state)
+    || (occurrence.state === 'deferred' && occurrence.blockedCode === 'execution-outcome-unknown');
 }

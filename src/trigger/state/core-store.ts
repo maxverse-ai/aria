@@ -6,6 +6,7 @@ import {
   type TriggerDefinition,
   type TriggerDefinitionFilter,
   type TriggerFailureRecord,
+  type TriggerExecutionResolution,
   type TriggerLeaseRef,
   type TriggerMaterializationInput,
   type TriggerMaterializationResult,
@@ -194,10 +195,23 @@ export abstract class AbstractTriggerStateStore implements TriggerStateStore {
 
   async beginDispatch(id: string, lease: TriggerLeaseRef, intentId: string, at: number): Promise<TriggerOccurrence> {
     nonEmpty(intentId, 'intent id'); timestamp(at, 'dispatch time');
-    return this.withLease(id, lease, at, (record) => {
+    return this.withLease(id, lease, at, (record, definition, state) => {
       if (record.state !== 'leased' && record.state !== 'dispatching') transition(record.state, 'dispatching');
       if (record.dispatch && record.dispatch.intentId !== intentId) conflict('dispatch checkpoint already has a different intent id');
-      return { ...record, state: 'dispatching', dispatch: record.dispatch ?? { intentId, persistedAt: at }, updatedAt: at };
+      if (!record.dispatch) {
+        const dayStart = Math.floor(at / 86_400_000) * 86_400_000;
+        const grantScoped = definition.authorizationGrantRef.startsWith('agent-trigger-grant:');
+        const related = Object.values(state.definitions).filter(item => item.profileId === definition.profileId
+          && (grantScoped ? item.authorizationGrantRef === definition.authorizationGrantRef : item.id === definition.id));
+        const ids = new Set(related.map(item => item.id));
+        const limit = Math.min(...related.map(item => item.quota.maxRunsPerDay));
+        const used = Object.values(state.occurrences).filter(item => ids.has(item.definitionId))
+          .reduce((sum, item) => sum + (item.admissions ?? (item.dispatch ? [item.dispatch.persistedAt] : []))
+            .filter(time => time >= dayStart && time < dayStart + 86_400_000).length, 0);
+        if (used >= limit) throw new TriggerStateError('trigger daily admission quota exceeded (UTC)', 'daily-quota-exceeded');
+      }
+      return { ...record, state: 'dispatching', dispatch: record.dispatch ?? { intentId, persistedAt: at, definition: clone(definition) },
+        admissions: record.dispatch ? record.admissions : [...(record.admissions ?? []), at], updatedAt: at };
     });
   }
 
@@ -210,11 +224,52 @@ export abstract class AbstractTriggerStateStore implements TriggerStateStore {
     });
   }
 
-  async markSucceeded(id: string, lease: TriggerLeaseRef, at: number): Promise<TriggerOccurrence> {
+  async markSucceeded(id: string, lease: TriggerLeaseRef, at: number, output?: { text: string }): Promise<TriggerOccurrence> {
     timestamp(at, 'completion time');
-    return this.withLease(id, lease, at, (record) => {
+    return this.withLease(id, lease, at, (record, definition) => {
       if (record.state !== 'running') transition(record.state, 'succeeded');
-      return clearLease({ ...record, state: 'succeeded', failure: undefined, blockedCode: undefined, completedAt: at, updatedAt: at });
+      return clearLease({ ...record, state: 'succeeded', failure: undefined, blockedCode: undefined, completedAt: at, updatedAt: at,
+        ...(output?.text ? { resultOutbox: { text: output.text, definition: clone(record.dispatch?.definition ?? definition) } } : {}) });
+    });
+  }
+
+  async acknowledgeResult(id: string): Promise<void> {
+    await this.mutate(state => {
+      const record = requiredOccurrence(state, id);
+      if (record.state !== 'succeeded') conflict('only successful trigger results may be acknowledged');
+      delete record.resultOutbox;
+    });
+  }
+
+  async resolveExecution(input: TriggerExecutionResolution): Promise<TriggerOccurrence> {
+    timestamp(input.at, 'resolution time');
+    if (input.ownerStopped !== true) conflict('previous execution owner must be stopped before reconciliation');
+    return this.mutate(state => {
+      const record = requiredOccurrence(state, input.occurrenceId);
+      const unknown = record.state === 'deferred' && record.blockedCode === 'execution-outcome-unknown';
+      const expired = ['running', 'dispatching'].includes(record.state) && record.lease && record.lease.expiresAt <= input.at;
+      if ((!unknown && !expired) || record.fence !== input.expectedFence || record.dispatch?.intentId !== input.intentId) {
+        conflict('execution resolution requires matching unknown checkpoint and fence');
+      }
+      const definition = record.dispatch.definition ?? requiredDefinition(state, record.definitionId);
+      let updated: TriggerOccurrence;
+      if (input.outcome.kind === 'succeeded') {
+        updated = clearLease({ ...record, state: 'succeeded', blockedCode: undefined, failure: undefined,
+          completedAt: input.at, updatedAt: input.at,
+          ...(input.outcome.text ? { resultOutbox: { text: input.outcome.text, definition: clone(definition) } } : {}) });
+      } else if (input.outcome.kind === 'not-accepted') {
+        updated = clearLease({ ...record, state: 'pending', dispatch: undefined, blockedCode: undefined,
+          failure: undefined, nextAttemptAt: input.at, updatedAt: input.at });
+      } else {
+        stableCode(input.outcome.code);
+        updated = clearLease({ ...record, state: 'dead', blockedCode: undefined,
+          failure: { kind: 'permanent', code: input.outcome.code, recordedAt: input.at }, completedAt: input.at, updatedAt: input.at });
+      }
+      // Revokes any late observer, including a resolution repeated with an old token.
+      updated.fence++;
+      assertTriggerOccurrence(updated);
+      state.occurrences[record.id] = clone(updated);
+      return clone(updated);
     });
   }
 
@@ -256,7 +311,7 @@ export abstract class AbstractTriggerStateStore implements TriggerStateStore {
   async markDeferred(id: string, lease: TriggerLeaseRef, blockedCode: string, at: number): Promise<TriggerOccurrence> {
     stableCode(blockedCode); timestamp(at, 'deferred time');
     return this.withLease(id, lease, at, (record) => {
-      if (!['leased', 'dispatching'].includes(record.state)) transition(record.state, 'deferred');
+      if (!['leased', 'dispatching', 'running'].includes(record.state)) transition(record.state, 'deferred');
       return clearLease({ ...record, state: 'deferred', blockedCode, updatedAt: at });
     });
   }
@@ -266,6 +321,7 @@ export abstract class AbstractTriggerStateStore implements TriggerStateStore {
     return this.mutate((state) => {
       const record = requiredOccurrence(state, id);
       if (record.state !== 'deferred') transition(record.state, 'pending');
+      if (record.blockedCode === 'execution-outcome-unknown') conflict('unknown execution requires explicit outcome reconciliation');
       const updated = { ...record, state: 'pending' as const, blockedCode: undefined, failure: undefined, updatedAt: at };
       assertTriggerOccurrence(updated); state.occurrences[id] = updated; return clone(updated);
     });
@@ -303,10 +359,14 @@ export abstract class AbstractTriggerStateStore implements TriggerStateStore {
 
   async cleanup(input: TriggerCleanupInput): Promise<readonly string[]> {
     timestamp(input.completedBefore, 'cleanup threshold');
+    const now = input.now ?? Date.now();
+    timestamp(now, 'cleanup current time');
     if (!Number.isSafeInteger(input.limit) || input.limit < 1 || input.limit > 10_000) conflict('cleanup limit must be between 1 and 10000');
     return this.mutate((state) => {
       const removed = Object.values(state.occurrences)
-        .filter((item) => item.completedAt !== undefined && item.completedAt < input.completedBefore
+        .filter((item) => !item.resultOutbox && !(item.admissions ?? (item.dispatch ? [item.dispatch.persistedAt] : []))
+          .some(time => time >= Math.floor(Math.min(input.completedBefore, now) / 86_400_000) * 86_400_000)
+          && item.completedAt !== undefined && item.completedAt < input.completedBefore
           && (item.state === 'succeeded' || item.state === 'skipped'
             || (item.state === 'dead' && item.deadAcknowledgedAt !== undefined)))
         .sort((a, b) => a.completedAt! - b.completedAt! || a.id.localeCompare(b.id)).slice(0, input.limit);
@@ -319,7 +379,7 @@ export abstract class AbstractTriggerStateStore implements TriggerStateStore {
     id: string,
     lease: TriggerLeaseRef,
     at: number,
-    update: (record: TriggerOccurrence, definition: TriggerDefinition) => TriggerOccurrence,
+    update: (record: TriggerOccurrence, definition: TriggerDefinition, state: TriggerStateSnapshot) => TriggerOccurrence,
   ): Promise<TriggerOccurrence> {
     return this.mutate((state) => {
       const record = requiredOccurrence(state, id);
@@ -329,7 +389,7 @@ export abstract class AbstractTriggerStateStore implements TriggerStateStore {
       if (record.lease.expiresAt <= at) {
         throw new TriggerStateError('trigger occurrence lease has expired', 'expired-lease');
       }
-      const updated = update(record, requiredDefinition(state, record.definitionId));
+      const updated = update(record, requiredDefinition(state, record.definitionId), state);
       assertTriggerOccurrence(updated); state.occurrences[id] = clone(updated); return clone(updated);
     });
   }

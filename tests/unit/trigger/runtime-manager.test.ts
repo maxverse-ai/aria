@@ -6,12 +6,115 @@ import {
 } from '../../../src/trigger/state';
 import {
   TriggerManager,
+  TriggerExecutionNotAcceptedError,
   type TriggerExecutionGateway,
 } from '../../../src/trigger/runtime';
 
 const FIRE_AT = Date.parse('2026-09-03T08:00:00Z');
 
 describe('TriggerManager single-run data path', () => {
+  it('retains accepted work as unknown when running checkpoint fails and consumes completion rejection', async () => {
+    const store = new InMemoryTriggerStateStore();
+    await store.createDefinition(definition());
+    vi.spyOn(store, 'markRunning').mockRejectedValue(new Error('disk unavailable'));
+    const submit = vi.fn<TriggerExecutionGateway['submit']>(async () => ({ runId: 'accepted-run',
+      completion: Promise.reject(new Error('lost observer')) }));
+    const manager = managerFor(store, { isProfileOnline: () => true, submit });
+    await manager.reconcile(); await manager.drain(); await manager.reconcile();
+    expect(submit).toHaveBeenCalledOnce();
+    expect(await store.listOccurrences()).toMatchObject([{ state: 'deferred', blockedCode: 'execution-outcome-unknown' }]);
+    await manager.close();
+  });
+
+  it.each(['submission', 'observer'])('retains unknown %s outcome without replaying accepted work', async phase => {
+    const store = new InMemoryTriggerStateStore();
+    await store.createDefinition(definition());
+    const submit = vi.fn<TriggerExecutionGateway['submit']>(async () => {
+      if (phase === 'submission') throw new Error('response lost after acceptance');
+      return { runId: 'accepted', completion: Promise.reject(new Error('observer disconnected')) };
+    });
+    const manager = managerFor(store, { isProfileOnline: () => true, submit });
+    await manager.reconcile(); await manager.drain(); await manager.reconcile();
+    expect(submit).toHaveBeenCalledOnce();
+    expect(await store.listOccurrences()).toMatchObject([{ state: 'deferred',
+      blockedCode: 'execution-outcome-unknown', dispatch: { intentId: expect.any(String) } }]);
+    await manager.close();
+  });
+
+  it('never retries agent work when a successful completion checkpoint fails', async () => {
+    const store = new InMemoryTriggerStateStore();
+    await store.createDefinition(definition());
+    vi.spyOn(store, 'markSucceeded').mockRejectedValue(new Error('disk unavailable'));
+    const retry = vi.spyOn(store, 'scheduleRetry');
+    const submit = vi.fn<TriggerExecutionGateway['submit']>(async () => ({
+      runId: 'completed-run', completion: Promise.resolve({ status: 'succeeded', output: { text: 'durable result' } }),
+    }));
+    const manager = managerFor(store, { isProfileOnline: () => true, submit });
+    await manager.reconcile(); await manager.drain();
+    expect(submit).toHaveBeenCalledOnce();
+    expect(retry).not.toHaveBeenCalled();
+    expect((await store.listOccurrences())[0]).toMatchObject({ state: 'running', dispatch: { runId: 'completed-run' } });
+    await manager.close();
+  });
+
+  it('holds profile admission durably until the final owner releases', async () => {
+    const store = new InMemoryTriggerStateStore();
+    await store.createDefinition(definition());
+    const submit = vi.fn<TriggerExecutionGateway['submit']>(async () => ({
+      runId: 'held-run', completion: Promise.resolve({ status: 'succeeded' }),
+    }));
+    const manager = managerFor(store, { isProfileOnline: () => true, submit });
+    const releaseFirst = manager.pauseProfileAdmission('profile-a');
+    const releaseSecond = manager.pauseProfileAdmission('profile-a');
+    await manager.reconcile();
+    await manager.waitProfileIdle('profile-a', 1000);
+    expect(submit).not.toHaveBeenCalled();
+    expect(await store.listOccurrences()).toMatchObject([{ state: 'deferred', blockedCode: 'profile-updating' }]);
+    releaseFirst(); releaseFirst();
+    await manager.reconcile();
+    expect(submit).not.toHaveBeenCalled();
+    releaseSecond();
+    await vi.waitFor(() => expect(submit).toHaveBeenCalledOnce());
+    await manager.close();
+  });
+
+  it('drain waits for submitted completion and rejects rather than claiming idle on timeout', async () => {
+    const store = new InMemoryTriggerStateStore();
+    await store.createDefinition(definition());
+    let finish!: (result: { status: 'succeeded' }) => void;
+    const completion = new Promise<{ status: 'succeeded' }>(resolve => { finish = resolve; });
+    const manager = managerFor(store, { isProfileOnline: () => true,
+      submit: async () => ({ runId: 'active-run', completion }) });
+    await manager.reconcile();
+    const release = manager.pauseProfileAdmission('profile-a');
+    await expect(manager.waitProfileIdle('profile-a', 10)).rejects.toThrow('trigger-profile-drain-timeout');
+    finish({ status: 'succeeded' });
+    await manager.waitProfileIdle('profile-a', 1000);
+    expect(await store.listOccurrences()).toMatchObject([{ state: 'succeeded' }]);
+    release();
+    await manager.close();
+  });
+
+  it('checks the admission hold again after durable preparation before submission', async () => {
+    const store = new InMemoryTriggerStateStore();
+    await store.createDefinition(definition());
+    const submit = vi.fn<TriggerExecutionGateway['submit']>();
+    const manager = managerFor(store, { isProfileOnline: () => true, submit });
+    let release!: () => void;
+    const begin = store.beginDispatch.bind(store);
+    vi.spyOn(store, 'beginDispatch').mockImplementation(async (...args) => {
+      const result = await begin(...args);
+      release = manager.pauseProfileAdmission('profile-a');
+      return result;
+    });
+    await manager.reconcile();
+    await manager.waitProfileIdle('profile-a', 1000);
+    expect(submit).not.toHaveBeenCalled();
+    expect(await store.listOccurrences()).toMatchObject([{ state: 'deferred', blockedCode: 'profile-updating' }]);
+    await manager.close();
+    release();
+  });
+
   it('materializes and dispatches one-time history work through the execution gateway', async () => {
     const store = new InMemoryTriggerStateStore();
     await store.createDefinition(definition());
@@ -197,7 +300,7 @@ describe('TriggerManager single-run data path', () => {
     await store.createDefinition(definition());
     const manager = managerFor(store, {
       isProfileOnline: () => true,
-      submit: async () => { throw Object.assign(new Error('busy'), { code: 'engine-busy' }); },
+      submit: async () => { throw new TriggerExecutionNotAcceptedError('busy', 'engine-busy'); },
     });
 
     await manager.reconcile();
@@ -227,7 +330,7 @@ describe('TriggerManager single-run data path', () => {
       runId: 'run-a',
       completion: Promise.resolve({ status: 'succeeded', output: { text: 'done' } }),
     }));
-    const route = vi.fn(async () => {
+    const route = vi.fn(async (): Promise<void> => {
       throw Object.assign(new Error('offline'), { code: 'channel-offline' });
     });
     let id = 0;
@@ -250,7 +353,12 @@ describe('TriggerManager single-run data path', () => {
       }),
     ]);
     expect(submit).toHaveBeenCalledTimes(1);
-    expect(route).toHaveBeenCalledTimes(1);
+    expect(route).toHaveBeenCalled();
+    expect((await store.listOccurrences())[0]?.resultOutbox).toMatchObject({ text: 'done' });
+    route.mockImplementation(async () => undefined);
+    await manager.reconcile();
+    expect((await store.listOccurrences())[0]?.resultOutbox).toBeUndefined();
+    expect(submit).toHaveBeenCalledTimes(1);
     expect(manager.snapshot()).toMatchObject({ succeeded: 1, failed: 0 });
   });
 });

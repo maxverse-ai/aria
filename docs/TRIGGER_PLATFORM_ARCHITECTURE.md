@@ -691,3 +691,84 @@ The architecture is ready for implementation only after Stage 0 is accepted.
 The architecture is ready for a default-on scheduled-run release only after
 Stages 1 through 8 pass crash/restart, policy-revocation, channel-capability,
 and rollback acceptance tests.
+
+## Successful execution, recovery and daily admission
+
+Successful completion and a result outbox are persisted in the same occurrence
+transaction. The outbox snapshots the submitted definition and output; result
+routing retries after restart until the independent delivery ledger acknowledges
+creation. Delivery identity is deterministic. Cleanup cannot remove an outbox.
+A failed local success checkpoint never schedules another execution. Existing
+pre-upgrade successful records without saved output cannot reconstruct that output.
+
+Expired dispatching/running work becomes deferred with
+`execution-outcome-unknown`, preserving intent and run identity. A submission
+exception or lost completion observer also has unknown acceptance unless the
+gateway explicitly raises `TriggerExecutionNotAcceptedError`. Unknown work never
+automatically becomes a new submission. A trusted operator may reconcile after
+stopping the prior execution owner and inspecting engine/provider evidence:
+
+```text
+node tools/trigger-execution-recovery.mjs inspect --state <state.v1.json>
+node tools/trigger-execution-recovery.mjs resolve --state <file> --id <id> --fence <fence> --intent-id <intent> --owner-stopped --outcome succeeded --confirmed-succeeded --output-file <verified-output>
+node tools/trigger-execution-recovery.mjs resolve --state <file> --id <id> --fence <fence> --intent-id <intent> --owner-stopped --outcome not-accepted --confirmed-not-accepted
+node tools/trigger-execution-recovery.mjs resolve --state <file> --id <id> --fence <fence> --intent-id <intent> --owner-stopped --outcome failed --confirmed-failed --code <stable-code>
+```
+
+Build the checkout first (`pnpm build`). The tool calls the actual store port,
+never submits work, prints no task bodies, and rejects stale intent/fence
+resolution. Flags are trusted operator assertions, not automatic provider proof.
+Keep unknown outcomes retained when evidence is missing. Verified success can
+restore output to the outbox; omit output only if none needs delivery.
+
+Daily quota admission is atomic with `beginDispatch` and uses UTC calendar days.
+Every fresh dispatch attempt consumes one admission; replaying the same durable
+intent does not consume twice. Agent-issued grant definitions share their grant
+ceiling; other definitions have independent quotas. Current-day accounting
+survives terminal cleanup, including a requested future retention cutoff.
+During update drain, a synchronous refcount profile hold prevents submission,
+preserves unsent occurrences as `profile-updating`, and resumes after final
+release. Drain includes preparation and completion and rejects on timeout.
+
+### Result delivery ownership and operator recovery
+
+`FileTriggerResultDeliveryStore` claims a ready delivery inside its cross-process
+file transaction before provider I/O. A unique claim token fences settlement;
+neither elapsed time nor restart reassigns a delivering claim. This assumes the
+existing local filesystem/`proper-lockfile` transaction contract, including
+heartbeat scheduling; it does not establish multi-host storage safety or safety
+under arbitrary process pauses beyond that lock's stale threshold.
+Exceptions without a proven nonacceptance contract become `uncertain`; a crash
+or failed receipt checkpoint leaves `delivering`, also an unknown outcome.
+Both are excluded from automatic reconcile. Only `TriggerResultRejectedError`,
+whose caller guarantees the attempt was not accepted, permits bounded retry.
+Generic channel transient errors do not supply that guarantee.
+Pre-upgrade `retry-wait` records without recorded nonacceptance evidence are
+classified as uncertain on read and require the same operator flow; upgrading
+must not silently resend a previously accepted delivery.
+
+From an installed source checkout with repository dependencies, inspect without
+revealing delivery bodies or targets:
+
+```text
+node tools/trigger-result-recovery.mjs inspect <delivery-store-file>
+```
+
+Stop the original daemon/owner before any resolution. Consult provider evidence
+using the delivery ID and available provider logs. Use the reported claim token
+for one of these fenced resolutions; all require `--owner-stopped` and a
+nonempty `--reason` (never put task bodies, secrets or personal data there):
+
+```text
+node tools/trigger-result-recovery.mjs sent <file> --id <id> --token <token> --reason <reason> --owner-stopped --provider-message-id <provider-id>
+node tools/trigger-result-recovery.mjs abandon <file> --id <id> --token <token> --reason <reason> --owner-stopped
+node tools/trigger-result-recovery.mjs retry <file> --id <id> --token <token> --reason <reason> --owner-stopped --confirmed-not-accepted
+```
+
+`sent` records verified acceptance; `abandon` explicitly closes an unresolved
+delivery as failed; `retry` makes it ready for a later normal reconcile only
+after confirmed nonacceptance and stopped ownership. The tool itself never
+sends. These flags are operator assertions, not automatic provider verification.
+If acceptance cannot be established or ruled out, retain uncertainty. Do not
+retry merely because the daemon died. Keep the daemon stopped until the tool
+finishes; settlement and subsequent claims reject stale owner tokens.

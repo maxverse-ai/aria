@@ -13,6 +13,11 @@ export interface TriggerExecutionSubmission {
   completion: Promise<TriggerExecutionResult>;
 }
 
+/** A gateway may retry only when it can prove no execution was accepted. */
+export class TriggerExecutionNotAcceptedError extends Error {
+  constructor(message: string, readonly code: string) { super(message); this.name = 'TriggerExecutionNotAcceptedError'; }
+}
+
 /** Narrow port implemented by Supervisor; TriggerManager never imports it. */
 export interface TriggerExecutionGateway {
   isProfileOnline(profileId: string): boolean;

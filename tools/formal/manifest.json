@@ -207,6 +207,271 @@
           "config": "CONSTANT Guard = TRUE\nINIT Init\nNEXT Next\nINVARIANT NoDuplicate\nINVARIANT NoResurrection\nCHECK_DEADLOCK FALSE\n"
         }
       ]
+    },
+    {
+      "id": "engine-lifecycle",
+      "source": [
+        "src/agent/engines/grok/agent-stdio/",
+        "src/agent/engines/devin/acp/",
+        "src/agent/engines/codex/app-server/runtime.ts"
+      ],
+      "tests": [
+        "tests/unit/agent/engine-lifecycle.test.ts"
+      ],
+      "cases": [
+        {
+          "name": "EnginePreparation-SafeSubmission-legacy",
+          "model": "EnginePreparation.tla",
+          "config": "CONSTANT Guard = FALSE\nINIT Init\nNEXT Next\nINVARIANT SafeSubmission\nCHECK_DEADLOCK FALSE\n",
+          "violation": "SafeSubmission"
+        },
+        {
+          "name": "EnginePreparation-SafeSubmission-fixed",
+          "model": "EnginePreparation.tla",
+          "config": "CONSTANT Guard = TRUE\nINIT Init\nNEXT Next\nINVARIANT SafeSubmission\nCHECK_DEADLOCK FALSE\n"
+        },
+        {
+          "name": "EngineTransport-SettledAtEOF-legacy",
+          "model": "EngineTransport.tla",
+          "config": "CONSTANT GuardEOF = FALSE\nINIT Init\nNEXT Next\nINVARIANT SettledAtEOF\nCHECK_DEADLOCK FALSE\n",
+          "violation": "SettledAtEOF"
+        },
+        {
+          "name": "EngineTransport-SettledAtEOF-fixed",
+          "model": "EngineTransport.tla",
+          "config": "CONSTANT GuardEOF = TRUE\nINIT Init\nNEXT Next\nINVARIANT SettledAtEOF\nCHECK_DEADLOCK FALSE\n"
+        },
+        {
+          "name": "EngineEventIdentity-CurrentTurnOnly-legacy",
+          "model": "EngineEventIdentity.tla",
+          "config": "CONSTANT Guard = FALSE\nINIT Init\nNEXT Next\nINVARIANT CurrentTurnOnly\nCHECK_DEADLOCK FALSE\n",
+          "violation": "CurrentTurnOnly"
+        },
+        {
+          "name": "EngineEventIdentity-CurrentTurnOnly-fixed",
+          "model": "EngineEventIdentity.tla",
+          "config": "CONSTANT Guard = TRUE\nINIT Init\nNEXT Next\nINVARIANT CurrentTurnOnly\nCHECK_DEADLOCK FALSE\n"
+        },
+        {
+          "name": "EngineEventIdentity-NoReplayOutput-legacy",
+          "model": "EngineEventIdentity.tla",
+          "config": "CONSTANT Guard = FALSE\nINIT Init\nNEXT Next\nINVARIANT NoReplayOutput\nCHECK_DEADLOCK FALSE\n",
+          "violation": "NoReplayOutput"
+        },
+        {
+          "name": "EngineEventIdentity-NoReplayOutput-fixed",
+          "model": "EngineEventIdentity.tla",
+          "config": "CONSTANT Guard = TRUE\nINIT Init\nNEXT Next\nINVARIANT NoReplayOutput\nCHECK_DEADLOCK FALSE\n"
+        }
+      ]
+    },
+    {
+      "id": "keystore-transaction",
+      "source": [
+        "src/config/keystore.ts"
+      ],
+      "tests": [
+        "tests/unit/config/keystore.test.ts",
+        "tests/process/keystore-transactions.test.ts"
+      ],
+      "cases": [
+        {
+          "name": "KeystoreTransaction",
+          "model": "KeystoreTransaction.tla",
+          "configFile": "KeystoreTransaction.cfg"
+        },
+        {
+          "name": "KeystoreTransactionLegacy",
+          "model": "KeystoreTransaction.tla",
+          "configFile": "KeystoreTransactionLegacy.cfg",
+          "violation": "NoLostCompletedWrite"
+        },
+        {
+          "name": "KeystoreSaltLegacy",
+          "model": "KeystoreTransaction.tla",
+          "configFile": "KeystoreSaltLegacy.cfg",
+          "violation": "ConsistentSalt"
+        },
+        {
+          "name": "KeystoreRemovalLegacy",
+          "model": "KeystoreTransaction.tla",
+          "configFile": "KeystoreRemovalLegacy.cfg",
+          "violation": "NoResurrectedRemoval"
+        }
+      ]
+    },
+    {
+      "id": "update-lock",
+      "source": [
+        "src/platform/distribution/store.ts"
+      ],
+      "tests": [
+        "tests/unit/distribution/update-lock.test.ts",
+        "tests/process/update-lock.test.ts"
+      ],
+      "cases": [
+        {
+          "name": "UpdateLock",
+          "model": "UpdateLock.tla",
+          "configFile": "UpdateLock.cfg"
+        },
+        {
+          "name": "UpdateLockLegacy",
+          "model": "UpdateLock.tla",
+          "configFile": "UpdateLockLegacy.cfg",
+          "violation": "SingleUpdater"
+        }
+      ]
+    },
+    {
+      "tests": [
+        "tests/unit/card/managed.test.ts"
+      ],
+      "source": [
+        "src/card/managed.ts"
+      ],
+      "cases": [
+        {
+          "name": "ManagedCardFallback-NoDuplicateAcceptance-legacy",
+          "model": "ManagedCardFallback.tla",
+          "config": "CONSTANT Guard = FALSE\nINIT Init\nNEXT Next\nINVARIANT NoDuplicateAcceptance\nCHECK_DEADLOCK FALSE\n",
+          "violation": "NoDuplicateAcceptance"
+        },
+        {
+          "name": "ManagedCardFallback-NoDuplicateAcceptance-fixed",
+          "model": "ManagedCardFallback.tla",
+          "config": "CONSTANT Guard = TRUE\nINIT Init\nNEXT Next\nINVARIANT NoDuplicateAcceptance\nCHECK_DEADLOCK FALSE\n"
+        }
+      ],
+      "id": "managed-card-fallback"
+    },
+    {
+      "id": "reliability-lease",
+      "tests": [
+        "tests/unit/channel/reliability-ownership.test.ts",
+        "tests/unit/channel/reliability-coordinator.test.ts",
+        "tests/unit/channel/wechat-kf-reliable-message-sink.test.ts",
+        "tests/process/reliability-ownership.test.ts",
+        "tests/process/reliability-reconcile-tool.test.ts"
+      ],
+      "cases": [
+        {
+          "name": "ReliabilityLease-fixed",
+          "model": "ReliabilityLease.tla",
+          "configFile": "ReliabilityLease.cfg"
+        },
+        {
+          "name": "ReliabilityLease-legacy",
+          "model": "ReliabilityLease.tla",
+          "configFile": "ReliabilityLeaseLegacy.cfg",
+          "violation": "NoDuplicateProcessor"
+        },
+        {
+          "name": "ReliabilityLease-progress",
+          "model": "ReliabilityLease.tla",
+          "configFile": "ReliabilityLeaseProgress.cfg"
+        }
+      ],
+      "source": [
+        "src/channel/reliability/coordinator.ts",
+        "src/channel/reliability/types.ts",
+        "src/channel/reliability/file-store.ts",
+        "src/channel/reliability/memory-store.ts"
+      ]
+    },
+    {
+      "source": [
+        "src/trigger/result/"
+      ],
+      "cases": [
+        {
+          "name": "ResultDeliveryClaim-SingleDispatch-legacy",
+          "model": "ResultDeliveryClaim.tla",
+          "config": "CONSTANT Guard = FALSE\nINIT Init\nNEXT Next\nINVARIANT SingleDispatch\nCHECK_DEADLOCK FALSE\n",
+          "violation": "SingleDispatch"
+        },
+        {
+          "name": "ResultDeliveryClaim-SingleDispatch-fixed",
+          "model": "ResultDeliveryClaim.tla",
+          "config": "CONSTANT Guard = TRUE\nINIT Init\nNEXT Next\nINVARIANT SingleDispatch\nCHECK_DEADLOCK FALSE\n"
+        }
+      ],
+      "id": "result-delivery-claim",
+      "tests": [
+        "tests/unit/trigger/result-router.test.ts",
+        "tests/process/trigger-result-ownership.test.ts"
+      ]
+    },
+    {
+      "id": "trigger-recovery",
+      "source": [
+        "src/trigger/runtime/manager.ts",
+        "src/trigger/state/"
+      ],
+      "tests": [
+        "tests/unit/trigger/runtime-manager.test.ts",
+        "tests/unit/trigger/state-store.test.ts",
+        "tests/unit/trigger/file-state-store.test.ts"
+      ],
+      "cases": [
+        {
+          "name": "TriggerRecovery",
+          "model": "TriggerRecovery.tla",
+          "config": "CONSTANTS DurableOutput = TRUE\nGuardUnknown = TRUE\nEnforceQuota = TRUE\nINIT Init\nNEXT Next\nINVARIANT NoLostOutput\nINVARIANT NoBlindReplay\nINVARIANT DailyQuota\nCHECK_DEADLOCK FALSE\n"
+        },
+        {
+          "name": "TriggerRecoveryLegacy0",
+          "model": "TriggerRecovery.tla",
+          "config": "CONSTANTS DurableOutput = FALSE\nGuardUnknown = TRUE\nEnforceQuota = TRUE\nINIT Init\nNEXT Next\nCHECK_DEADLOCK FALSE\nINVARIANT NoLostOutput\n",
+          "violation": "NoLostOutput"
+        },
+        {
+          "name": "TriggerRecoveryLegacy1",
+          "model": "TriggerRecovery.tla",
+          "config": "CONSTANTS DurableOutput = TRUE\nGuardUnknown = FALSE\nEnforceQuota = TRUE\nINIT Init\nNEXT Next\nCHECK_DEADLOCK FALSE\nINVARIANT NoBlindReplay\n",
+          "violation": "NoBlindReplay"
+        },
+        {
+          "name": "TriggerRecoveryLegacy2",
+          "model": "TriggerRecovery.tla",
+          "config": "CONSTANTS DurableOutput = TRUE\nGuardUnknown = TRUE\nEnforceQuota = FALSE\nINIT Init\nNEXT Next\nCHECK_DEADLOCK FALSE\nINVARIANT DailyQuota\n",
+          "violation": "DailyQuota"
+        }
+      ]
+    },
+    {
+      "id": "update-admission",
+      "source": [
+        "src/platform/distribution-service.ts",
+        "src/platform/service-orchestrator.ts",
+        "src/runtime/update-admission.ts",
+        "src/runtime/supervisor.ts",
+        "src/runtime/control-server.ts"
+      ],
+      "tests": [
+        "tests/unit/runtime/update-admission.test.ts",
+        "tests/integration/runtime/update-admission-control.test.ts",
+        "tests/unit/distribution/service-orchestrator.test.ts"
+      ],
+      "cases": [
+        {
+          "name": "UpdateAdmission",
+          "model": "UpdateAdmission.tla",
+          "configFile": "UpdateAdmission.cfg"
+        },
+        {
+          "name": "UpdateAdmissionLegacy",
+          "model": "UpdateAdmission.tla",
+          "configFile": "UpdateAdmissionLegacy.cfg",
+          "violation": "SafeStop"
+        },
+        {
+          "name": "UpdateIdentityLegacy",
+          "model": "UpdateAdmission.tla",
+          "configFile": "UpdateIdentityLegacy.cfg",
+          "violation": "ExpectedBuild"
+        }
+      ]
     }
   ]
 }
