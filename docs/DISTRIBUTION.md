@@ -50,6 +50,10 @@ global command still wins, move the installer-reported command directory ahead
 of that global bin directory in `PATH` and open a new shell. The installer
 retains an adopted legacy version as a rollback baseline; it does not delete
 legacy files.
+Legacy adoption probes the actual entry with `--version` and records that
+version, rather than trusting package metadata left by a different build.
+It rejects invalid version output or an entry that changes during the probe;
+the updater still smoke-tests the retained baseline before switching.
 
 ### Upgrade and rollback
 

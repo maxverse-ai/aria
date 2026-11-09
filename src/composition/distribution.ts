@@ -15,6 +15,9 @@ import { StableLauncher } from '../platform/distribution/stable-launcher';
 import { DistributionStore } from '../platform/distribution/store';
 import { NpmTarballVersionInstaller } from '../platform/distribution/version-installer';
 import { resolveExecutablePath } from '../platform/executable';
+import { ProcessCommandRunner, type CommandRunner } from '../platform/distribution/command-runner';
+import { currentRuntime } from '../platform/runtime';
+import { parseStableVersion } from '../application/distribution/semver';
 
 export interface DistributionRuntimeOptions {
   includeLegacyCurrent?: boolean;
@@ -48,8 +51,11 @@ export async function createDistributionRuntime(options: DistributionRuntimeOpti
   return { service, executor, store, paths: installPaths };
 }
 
-async function detectInvokingInstallation(): Promise<InstalledVersion | null> {
-  const invokingEntry = process.argv[1] ? resolve(process.argv[1]) : null;
+export async function detectInvokingInstallation(
+  invokedEntry = process.argv[1],
+  runner: CommandRunner = new ProcessCommandRunner(),
+): Promise<InstalledVersion | null> {
+  const invokingEntry = invokedEntry ? resolve(invokedEntry) : null;
   const invokingPackage = invokingEntry ? await findAriaPackage(invokingEntry) : null;
   let entryPath = invokingEntry;
   let packageInfo = invokingPackage;
@@ -57,16 +63,30 @@ async function detectInvokingInstallation(): Promise<InstalledVersion | null> {
     try {
       entryPath = await realpath(await resolveExecutablePath('aria'));
       packageInfo = await findAriaPackage(entryPath);
+      if (!packageInfo) {
+        // npm on Windows exposes a command shim, not a symlink to the JS
+        // entry. Resolve its standard package layout without executing or
+        // parsing shell text as JavaScript.
+        const packageEntry = join(dirname(entryPath), 'node_modules', ...pkg.name.split('/'), 'bin', 'aria.mjs');
+        packageInfo = await findAriaPackage(packageEntry);
+        if (packageInfo) entryPath = await realpath(packageEntry);
+      }
     } catch {
       return null;
     }
   }
   if (!entryPath || !packageInfo) return null;
+  // Legacy directories can contain metadata from a different build. The
+  // rollback baseline must describe the executable that smokeTest will run.
+  const before = await sha256File(entryPath);
+  const reported = await runner.run(currentRuntime.execPath, [entryPath, '--version'], { cwd: packageInfo.root });
+  const version = parseStableVersion(reported.stdout.trim()).raw;
+  if (await sha256File(entryPath) !== before) throw new Error('legacy Aria entry changed while probing its version');
   return {
-    version: packageInfo.version,
-    tag: `legacy-v${packageInfo.version}`,
+    version,
+    tag: `legacy-v${version}`,
     commit: '0'.repeat(40),
-    sha256: await sha256File(entryPath),
+    sha256: before,
     installDir: packageInfo.root,
     entryPath,
     installedAt: new Date().toISOString(),
