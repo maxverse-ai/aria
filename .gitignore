@@ -23,3 +23,7 @@ web/dist/
 /scripts/
 CHANGELOG.md
 tests-smoke/
+
+# Task workspaces and local formal toolchain
+.worktrees/
+tools/formal/.toolchain/

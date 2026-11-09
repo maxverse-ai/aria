@@ -99,7 +99,8 @@ point. It must:
 1. Reject CI execution, validate the expected repository origin and `gh` access,
    acquire an exclusive lock shared by linked worktrees, fetch main and tags,
    and require a clean checkout at the exact latest `origin/main` commit.
-2. Run `release:validate` (diff, toolchain, policy, build, full tests, typecheck,
+2. Run `release:validate` (diff, [formal models](FORMAL_VERIFICATION_POLICY.md),
+   toolchain, policy, build, full tests, typecheck,
    worker packaging and verification), then package the already-built output
    and inspect the package and standalone worker
    on that exact commit. Candidates are not releases and must not be pinned by

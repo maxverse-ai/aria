@@ -1,0 +1,187 @@
+{
+  "toolchain": {
+    "release": "v1.7.4",
+    "url": "https://github.com/tlaplus/tlaplus/releases/download/v1.7.4/tla2tools.jar",
+    "sha256": "936a262061c914694dfd669a543be24573c45d5aa0ff20a8b96b23d01e050e88",
+    "javaMinimum": 21,
+    "timeoutMs": 120000
+  },
+  "groups": [
+    {
+      "id": "codex-resume",
+      "source": [
+        "src/agent/engines/codex/app-server/",
+        "src/agent/engines/codex/session-import.ts"
+      ],
+      "tests": [
+        "tests/process/codex-resume-safety.test.ts",
+        "tests/unit/agent/codex-app-server-client.test.ts"
+      ],
+      "cases": [
+        {
+          "name": "CodexResumeLegacy",
+          "model": "CodexResume.tla",
+          "configFile": "CodexResumeLegacy.cfg",
+          "violation": "SafeSubmission"
+        },
+        {
+          "name": "CodexResume",
+          "model": "CodexResume.tla",
+          "configFile": "CodexResume.cfg"
+        },
+        {
+          "name": "CodexResumeConcurrent",
+          "model": "CodexResume.tla",
+          "configFile": "CodexResumeConcurrent.cfg"
+        }
+      ]
+    },
+    {
+      "id": "pool",
+      "source": [
+        "src/bot/process-pool.ts"
+      ],
+      "tests": [
+        "tests/unit/runtime/process-pool.test.ts"
+      ],
+      "cases": [
+        {
+          "name": "PoolHandoff-legacy",
+          "model": "PoolHandoff.tla",
+          "config": "CONSTANT TransferPermit = FALSE\nINIT Init\nNEXT Next\nINVARIANT Capacity\nCHECK_DEADLOCK FALSE\n",
+          "violation": "Capacity"
+        },
+        {
+          "name": "PoolHandoff-reference",
+          "model": "PoolHandoff.tla",
+          "config": "CONSTANT TransferPermit = TRUE\nINIT Init\nNEXT Next\nINVARIANT Capacity\nCHECK_DEADLOCK FALSE\n"
+        }
+      ]
+    },
+    {
+      "id": "mailbox-handoff",
+      "source": [
+        "src/conversation/steer-mailbox.ts",
+        "src/bot/channel.ts"
+      ],
+      "tests": [
+        "tests/unit/conversation/steer-mail-claims.test.ts",
+        "tests/integration/bot/im-run-flow.test.ts"
+      ],
+      "cases": [
+        {
+          "name": "MailboxHandoff-legacy",
+          "model": "MailboxHandoff.tla",
+          "config": "CONSTANT Transactional = FALSE\nINIT Init\nNEXT Next\nINVARIANT NoLostMail\nCHECK_DEADLOCK FALSE\n",
+          "violation": "NoLostMail"
+        },
+        {
+          "name": "MailboxHandoff-reference",
+          "model": "MailboxHandoff.tla",
+          "config": "CONSTANT Transactional = TRUE\nINIT Init\nNEXT Next\nINVARIANT NoLostMail\nCHECK_DEADLOCK FALSE\n"
+        }
+      ]
+    },
+    {
+      "id": "subscription",
+      "source": [
+        "src/agent/engines/codex/app-server/runtime.ts"
+      ],
+      "tests": [
+        "tests/unit/runtime/formal-audit-evidence.test.ts"
+      ],
+      "cases": [
+        {
+          "name": "EngineSubscription-legacy",
+          "model": "EngineSubscription.tla",
+          "config": "CONSTANT PerConnection = FALSE\nINIT Init\nNEXT Next\nINVARIANT WatchMatchesConnection\nCHECK_DEADLOCK FALSE\n",
+          "violation": "WatchMatchesConnection"
+        },
+        {
+          "name": "EngineSubscription-reference",
+          "model": "EngineSubscription.tla",
+          "config": "CONSTANT PerConnection = TRUE\nINIT Init\nNEXT Next\nINVARIANT WatchMatchesConnection\nCHECK_DEADLOCK FALSE\n"
+        }
+      ]
+    },
+    {
+      "id": "callback",
+      "source": [
+        "src/card/action-executor.ts",
+        "src/card/dispatcher.ts"
+      ],
+      "tests": [
+        "tests/integration/card/callback-dispatch.test.ts"
+      ],
+      "cases": [
+        {
+          "name": "CallbackAck-legacy",
+          "model": "CallbackAck.tla",
+          "config": "CONSTANT Background = FALSE\nINIT Init\nNEXT Next\nINVARIANT AckBeforeIO\nCHECK_DEADLOCK FALSE\n",
+          "violation": "AckBeforeIO"
+        },
+        {
+          "name": "CallbackAck-reference",
+          "model": "CallbackAck.tla",
+          "config": "CONSTANT Background = TRUE\nINIT Init\nNEXT Next\nINVARIANT AckBeforeIO\nCHECK_DEADLOCK FALSE\n"
+        }
+      ]
+    },
+    {
+      "id": "mailbox-consumers",
+      "source": [
+        "src/conversation/steer-mailbox.ts"
+      ],
+      "tests": [
+        "tests/process/formal-audit-mailbox.test.ts"
+      ],
+      "cases": [
+        {
+          "name": "MailboxConsumers-legacy",
+          "model": "MailboxConsumers.tla",
+          "config": "CONSTANT Consumers = {pull, sweep}\nCONSTANT AtomicClaim = FALSE\nINIT Init\nNEXT Next\nINVARIANT SingleConsumer\nCHECK_DEADLOCK FALSE\n",
+          "violation": "SingleConsumer"
+        },
+        {
+          "name": "MailboxConsumers-reference",
+          "model": "MailboxConsumers.tla",
+          "config": "CONSTANT Consumers = {pull, sweep}\nCONSTANT AtomicClaim = TRUE\nINIT Init\nNEXT Next\nINVARIANT SingleConsumer\nCHECK_DEADLOCK FALSE\n"
+        }
+      ]
+    },
+    {
+      "id": "runtime",
+      "source": [
+        "src/runtime/runtime-provider.ts"
+      ],
+      "tests": [
+        "tests/unit/runtime/runtime-provider.test.ts"
+      ],
+      "cases": [
+        {
+          "name": "RuntimeRetirement",
+          "model": "RuntimeRetirement.tla",
+          "config": "CONSTANT Borrowers = {a, b}\nSPECIFICATION Spec\nINVARIANTS SafeRetirement NoDoubleRelease\nPROPERTY Drains\nCHECK_DEADLOCK FALSE\n"
+        }
+      ]
+    },
+    {
+      "id": "mailbox-recovery",
+      "source": [
+        "src/conversation/steer-mailbox.ts",
+        "src/bot/channel.ts"
+      ],
+      "tests": [
+        "tests/unit/conversation/steer-mail-claims.test.ts",
+        "tests/process/formal-audit-mailbox.test.ts"
+      ],
+      "cases": [
+        {
+          "name": "MailboxRecovery",
+          "model": "MailboxRecovery.tla",
+          "config": "CONSTANT Consumers = {host, cli}\nINIT Init\nNEXT Next\nINVARIANTS NoBlindReplay AtMostOneAcceptance NoSilentLoss SingleOwner\nCHECK_DEADLOCK FALSE\n"
+        }
+      ]
+    }
+  ]
+}
