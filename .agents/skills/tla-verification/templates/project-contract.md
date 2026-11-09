@@ -9,4 +9,3 @@
 - Evidence: revision, command, outcome, counterexample or explored states, uncovered scenarios.
 
 Keep this contract in the project; link the reusable skill without embedding project details in it.
-

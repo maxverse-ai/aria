@@ -9,4 +9,3 @@ Turn a demonstrated failure into a desired-behavior regression after repair. Che
 Run complete external scenarios only in isolated data or authorized environments. Do not inject work into production sessions to strengthen a report. Separate model success, component/process success and external scenario success. Local handoff is not remote acceptance, and neither proves exactly-once external side effects.
 
 For extraction into a standalone skill repository, copy this entire skill directory. Keep target-specific commands and model mappings in the target project. Validate portability by applying the workflow to a second small protocol without importing the original project's paths or assumptions.
-

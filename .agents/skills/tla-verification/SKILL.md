@@ -16,4 +16,3 @@ Read the target project's formal verification contract first. Use its model inve
 A finite passing model does not establish implementation refinement or unrestricted correctness. Explain reductions in properties, bounds or coverage; do not adjust assumptions solely to obtain a pass. Preserve useful negative controls and require their specific expected failure, not merely a nonzero exit.
 
 This directory is portable. Resolve these resources relative to this file; obtain repository paths and commands from the target project's contract. It requires no particular agent host, repository layout or automatic discovery mechanism.
-

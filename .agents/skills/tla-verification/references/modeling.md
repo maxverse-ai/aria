@@ -9,4 +9,3 @@ Choose the smallest finite bounds that expose meaningful contention, then explai
 State invariants and temporal properties separately. Liveness needs explicit environment and fairness assumptions; a retained uncertain outcome can preserve safety while preventing progress. Explain disabled deadlock checking when terminal states intentionally have no successors. Review state constraints for excluded failure paths and vacuous properties.
 
 Keep buggy variants as negative controls where useful. A repair should preserve the same safety obligation. Record every removed property, reduced bound, new atomic operation or stronger fairness assumption and why the implementation supports it.
-
