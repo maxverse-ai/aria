@@ -14,6 +14,7 @@ import type {
   ChannelCompletionReceipt,
   ChannelDeliveryLedgerEntry,
   ChannelInboxRecord,
+  ChannelLeaseFence,
   ChannelReliabilityKey,
   ChannelReliabilityStores,
   ChannelRetryRecord,
@@ -72,17 +73,37 @@ export class FileChannelReliabilityStores implements ChannelReliabilityStores {
       now: number,
       leaseUntil: number,
       leaseId: string,
+      guarded = false,
     ) => {
       assertLease(now, leaseUntil, leaseId);
       return this.mutate((state) => {
         const stableKey = channelReliabilityKey(key);
         const existing = state.inbox[stableKey];
-        if (!existing || (existing.leaseUntil !== undefined && existing.leaseUntil > now)) {
+        if (!existing || existing.guarded || (existing.leaseUntil !== undefined && existing.leaseUntil > now)) {
           return undefined;
         }
-        const claimed = { ...existing, leaseId, leaseUntil };
+        const claimed = { ...existing, leaseId, leaseUntil, ...(guarded ? { guarded: true } : {}) };
         state.inbox[stableKey] = claimed;
         return clone(claimed);
+      });
+    },
+    reconcile: async (keys: readonly ChannelReliabilityKey[], leaseId: string, requireAnswer: boolean) => this.mutate((state) => {
+      if (!keys.length || !leaseId) return false;
+      const records = keys.map(key => state.inbox[channelReliabilityKey(key)]);
+      const primary = records[0];
+      if (!primary?.guarded || primary.leaseId !== leaseId) return false;
+      if (records.some(item => item && (!item.guarded || item.leaseId !== leaseId))) return false;
+      if (requireAnswer && !state.answers[channelReliabilityKey(keys[0]!)]) return false;
+      for (const record of records) if (record) state.inbox[channelReliabilityKey(record.key)] = withoutLease(record);
+      return true;
+    }),
+    renew: async (key: ChannelReliabilityKey, leaseId: string, now: number, leaseUntil: number) => {
+      assertLease(now, leaseUntil, leaseId);
+      return this.mutate((state) => {
+        const existing = state.inbox[channelReliabilityKey(key)];
+        if (!existing || existing.leaseId !== leaseId) return false;
+        existing.leaseUntil = leaseUntil;
+        return true;
       });
     },
     release: async (key: ChannelReliabilityKey, leaseId: string) => {
@@ -93,8 +114,9 @@ export class FileChannelReliabilityStores implements ChannelReliabilityStores {
         if (existing?.leaseId === leaseId) state.inbox[stableKey] = withoutLease(existing);
       });
     },
-    remove: async (key: ChannelReliabilityKey) => {
+    remove: async (key: ChannelReliabilityKey, fence?: ChannelLeaseFence) => {
       await this.mutate((state) => {
+        assertFence(state.inbox[channelReliabilityKey(key)], fence);
         delete state.inbox[channelReliabilityKey(key)];
       });
     },
@@ -103,7 +125,8 @@ export class FileChannelReliabilityStores implements ChannelReliabilityStores {
   readonly receipts = {
     get: async (key: ChannelReliabilityKey) => this.read((state) =>
       cloneOptional(state.receipts[channelReliabilityKey(key)])),
-    complete: async (receipt: ChannelCompletionReceipt) => this.mutate((state) => {
+    complete: async (receipt: ChannelCompletionReceipt, fence?: ChannelLeaseFence) => this.mutate((state) => {
+      assertFence(state.inbox[channelReliabilityKey(receipt.key)], fence);
       const key = channelReliabilityKey(receipt.key);
       const existing = state.receipts[key];
       if (existing) return clone(existing);
@@ -115,7 +138,8 @@ export class FileChannelReliabilityStores implements ChannelReliabilityStores {
   readonly answers = {
     get: async (key: ChannelReliabilityKey) => this.read((state) =>
       cloneOptional(state.answers[channelReliabilityKey(key)])),
-    create: async (checkpoint: ChannelAnswerCheckpoint) => this.mutate((state) => {
+    create: async (checkpoint: ChannelAnswerCheckpoint, fence?: ChannelLeaseFence) => this.mutate((state) => {
+      assertFence(state.inbox[channelReliabilityKey(checkpoint.key)], fence);
       const key = channelReliabilityKey(checkpoint.key);
       const existing = state.answers[key];
       if (existing) return clone(existing);
@@ -133,7 +157,8 @@ export class FileChannelReliabilityStores implements ChannelReliabilityStores {
         batch.keys.some((member) => channelReliabilityKey(member) === stableKey)));
     }),
     list: async () => this.read((state) => Object.values(state.batches).map(clone)),
-    create: async (checkpoint: ChannelBatchCheckpoint) => this.mutate((state) => {
+    create: async (checkpoint: ChannelBatchCheckpoint, fence?: ChannelLeaseFence) => this.mutate((state) => {
+      assertFence(state.inbox[channelReliabilityKey(checkpoint.key)], fence);
       const key = channelReliabilityKey(checkpoint.key);
       const existing = state.batches[key];
       if (existing) return clone(existing);
@@ -144,8 +169,9 @@ export class FileChannelReliabilityStores implements ChannelReliabilityStores {
       state.batches[key] = clone(checkpoint);
       return clone(checkpoint);
     }),
-    remove: async (key: ChannelReliabilityKey) => {
+    remove: async (key: ChannelReliabilityKey, fence?: ChannelLeaseFence) => {
       await this.mutate((state) => {
+        assertFence(state.inbox[channelReliabilityKey(key)], fence);
         delete state.batches[channelReliabilityKey(key)];
       });
     },
@@ -154,7 +180,8 @@ export class FileChannelReliabilityStores implements ChannelReliabilityStores {
   readonly deliveries = {
     get: async (key: ChannelReliabilityKey, deliveryId: string) => this.read((state) =>
       cloneOptional(state.deliveries[deliveryKey(key, deliveryId)])),
-    record: async (entry: ChannelDeliveryLedgerEntry) => this.mutate((state) => {
+    record: async (entry: ChannelDeliveryLedgerEntry, fence?: ChannelLeaseFence) => this.mutate((state) => {
+      assertFence(state.inbox[channelReliabilityKey(entry.key)], fence);
       const key = deliveryKey(entry.key, entry.deliveryId);
       const existing = state.deliveries[key];
       if (existing) return clone(existing);
@@ -166,13 +193,15 @@ export class FileChannelReliabilityStores implements ChannelReliabilityStores {
   readonly retries = {
     get: async (key: ChannelReliabilityKey) => this.read((state) =>
       cloneOptional(state.retries[channelReliabilityKey(key)])),
-    put: async (record: ChannelRetryRecord) => {
+    put: async (record: ChannelRetryRecord, fence?: ChannelLeaseFence) => {
       await this.mutate((state) => {
+        assertFence(state.inbox[channelReliabilityKey(record.key)], fence);
         state.retries[channelReliabilityKey(record.key)] = clone(record);
       });
     },
-    remove: async (key: ChannelReliabilityKey) => {
+    remove: async (key: ChannelReliabilityKey, fence?: ChannelLeaseFence) => {
       await this.mutate((state) => {
+        assertFence(state.inbox[channelReliabilityKey(key)], fence);
         delete state.retries[channelReliabilityKey(key)];
       });
     },
@@ -247,7 +276,8 @@ function assertFileReliabilityState(value: unknown): asserts value is FileReliab
       || !isTimestamp(record.acceptedAt)
       || ((record.leaseId === undefined) !== (record.leaseUntil === undefined))
       || (record.leaseId !== undefined && !isString(record.leaseId))
-      || (record.leaseUntil !== undefined && !isTimestamp(record.leaseUntil))) invalidState();
+      || (record.leaseUntil !== undefined && !isTimestamp(record.leaseUntil))
+      || (record.guarded !== undefined && (record.guarded !== true || record.leaseId === undefined))) invalidState();
   }
   for (const [stableKey, receipt] of Object.entries(typed.receipts)) {
     if (!receipt || stableKey !== checkedKey(receipt.key)
@@ -327,7 +357,7 @@ function assertLease(now: number, leaseUntil: number, leaseId: string): void {
 }
 
 function withoutLease(record: ChannelInboxRecord): ChannelInboxRecord {
-  const { leaseId: _leaseId, leaseUntil: _leaseUntil, ...released } = record;
+  const { leaseId: _leaseId, leaseUntil: _leaseUntil, guarded: _guarded, ...released } = record;
   return clone(released);
 }
 
@@ -337,4 +367,8 @@ function clone<T>(value: T): T {
 
 function cloneOptional<T>(value: T | undefined): T | undefined {
   return value === undefined ? undefined : clone(value);
+}
+
+function assertFence(record: ChannelInboxRecord | undefined, fence: ChannelLeaseFence | undefined): void {
+  if (fence && (!record || record.leaseId !== fence.leaseId)) throw new Error('channel reliability lease ownership lost');
 }

@@ -88,6 +88,24 @@ describe('FileChannelReliabilityStores', () => {
     expect(await stores.inbox.get(key)).not.toHaveProperty('leaseId');
   });
 
+  it('reconciles all batch fences atomically across independent adapters', async () => {
+    const path = await statePath();
+    const left = new FileChannelReliabilityStores(path), right = new FileChannelReliabilityStores(path);
+    const a = envelope('a'), b = envelope('b');
+    const keys = [reliabilityKeyFromEnvelope(a), reliabilityKeyFromEnvelope(b)];
+    for (const input of [a,b]) await left.inbox.accept({ key: reliabilityKeyFromEnvelope(input), envelope: input, receiptId: input.sourceMessageId, acceptedAt: 0 });
+    await left.inbox.claim(keys[0]!, 0, 10, 'batch', true);
+    await right.inbox.claim(keys[1]!, 0, 10, 'other', true);
+    await expect(right.inbox.reconcile(keys, 'batch', false)).resolves.toBe(false);
+    expect((await left.inbox.get(keys[0]!))?.guarded).toBe(true);
+    await right.inbox.release(keys[1]!, 'other');
+    await right.inbox.claim(keys[1]!, 10, 20, 'batch', true);
+    await expect(left.answers.create({ key: keys[0]!, createdAt: 10, intents: [] }, { leaseId: 'stale' })).rejects.toThrow('ownership lost');
+    await left.answers.create({ key: keys[0]!, createdAt: 10, intents: [] }, { leaseId: 'batch' });
+    await expect(right.inbox.reconcile(keys, 'batch', true)).resolves.toBe(true);
+    expect((await left.inbox.list()).every(item => item.leaseId === undefined)).toBe(true);
+  });
+
   it('resumes a partial delivery after process restart without rerunning the answer', async () => {
     const path = await statePath();
     const input = envelope();

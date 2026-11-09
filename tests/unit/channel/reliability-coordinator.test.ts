@@ -7,7 +7,7 @@ import type {
   ChannelOutboundIntent,
 } from '../../../src/channel/plugin/types';
 import type { ChannelDeliveryReceipt } from '../../../src/channel/plugin/types';
-import { ChannelReliabilityCoordinator } from '../../../src/channel/reliability/coordinator';
+import { ChannelReliabilityCoordinator, KnownUnacceptedChannelProcessingError } from '../../../src/channel/reliability/coordinator';
 import {
   channelReceiptId,
   reliabilityKeyFromEnvelope,
@@ -301,7 +301,7 @@ describe('ChannelReliabilityCoordinator', () => {
       });
       if (crashDuringProcessing) {
         crashDuringProcessing = false;
-        throw new Error('process exited during batch processing');
+        throw new KnownUnacceptedChannelProcessingError('batch was not accepted', { kind: 'transient', code: 'batch-not-accepted' });
       }
       return [] as readonly ChannelOutboundIntent[];
     });

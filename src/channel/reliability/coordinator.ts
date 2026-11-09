@@ -27,6 +27,7 @@ import type {
   ChannelAnswerProcessor,
   ChannelCompletionReceipt,
   ChannelInboxRecord,
+  ChannelLeaseFence,
   ChannelIntentDeliverer,
   ChannelReliabilityKey,
   ChannelReliabilityRunResult,
@@ -116,20 +117,25 @@ export class ChannelReliabilityCoordinator {
       throw new TypeError('channel reliability lease exceeds the safe timestamp range');
     }
     const leaseId = randomUUID();
-    const inbox = await this.options.stores.inbox.claim(key, now, leaseUntil, leaseId);
+    const inbox = await this.options.stores.inbox.claim(key, now, leaseUntil, leaseId, true);
     if (!inbox) {
-      return (await this.options.stores.inbox.get(key)) ? { status: 'busy' } : { status: 'missing' };
+      return this.unclaimedResult(key);
     }
 
+    const fence = { leaseId };
+    const stopRenewal = this.renewClaims([{ key, leaseId }]);
     try {
-      const answer = await this.getOrCreateAnswer(key, inbox.envelope);
+      const answer = await this.getOrCreateAnswer(key, inbox.envelope, fence);
       for (const intent of answer.intents) {
         const recorded = await this.options.stores.deliveries.get(key, intent.deliveryId);
         if (recorded) {
           assertChannelDeliveryReceipt(recorded.receipt, intent.deliveryId);
           continue;
         }
-        const send = () => this.options.deliverer.deliver(intent);
+        const send = async () => {
+          await this.assertOwner(key, fence);
+          return this.options.deliverer.deliver(intent);
+        };
         const deliveryReceipt = this.options.spaceBoundary ? await this.options.spaceBoundary.deliver(intent, send) : await send();
         assertChannelDeliveryReceipt(deliveryReceipt, intent.deliveryId);
         await this.options.stores.deliveries.record({
@@ -137,17 +143,19 @@ export class ChannelReliabilityCoordinator {
           deliveryId: intent.deliveryId,
           receipt: deliveryReceipt,
           recordedAt: this.currentTime(),
-        });
+        }, fence);
       }
 
       const receipt = await this.options.stores.receipts.complete({
         key,
         receiptId: inbox.receiptId,
         completedAt: this.currentTime(),
-      });
-      await this.tryCleanupCompleted(key);
+      }, fence);
+      await this.tryCleanupCompleted(key, fence);
       return { status: 'completed', receipt };
     } catch (error) {
+      if (error instanceof UnknownProcessingOutcome) return this.uncertainResult(key, leaseId);
+      if (!await this.isOwner(key, leaseId)) return this.unclaimedResult(key);
       const failure = classifyFailure(error);
       const attempt = (retry?.attempt ?? 0) + 1;
       const updatedAt = this.currentTime();
@@ -158,13 +166,13 @@ export class ChannelReliabilityCoordinator {
         updatedAt,
         policy: this.retryPolicy,
       });
-      await this.options.stores.retries.put(record);
+      await this.options.stores.retries.put(record, fence);
       await this.options.stores.inbox.release(key, leaseId);
       if (record.state === 'waiting') {
         return { status: 'waiting', nextAttemptAt: record.nextAttemptAt! };
       }
       return { status: record.state, retry: record };
-    }
+    } finally { stopRenewal(); }
   }
 
   /**
@@ -224,18 +232,21 @@ export class ChannelReliabilityCoordinator {
       leaseId: string;
       inbox: ChannelInboxRecord;
     }> = [];
+    const batchLeaseId = randomUUID();
     for (const key of pendingKeys) {
-      const leaseId = randomUUID();
-      const inbox = await this.options.stores.inbox.claim(key, now, leaseUntil, leaseId);
+      const leaseId = batchLeaseId;
+      const inbox = await this.options.stores.inbox.claim(key, now, leaseUntil, leaseId, true);
       if (!inbox) {
         await this.releaseClaims(claimed);
-        return (await this.options.stores.inbox.get(key)) ? { status: 'busy' } : { status: 'missing' };
+        return this.unclaimedResult(key);
       }
       claimed.push({ key, leaseId, inbox });
     }
 
+    const stopRenewal = this.renewClaims(claimed);
     const primary = claimed.find(({ key }) =>
       channelReliabilityKey(key) === channelReliabilityKey(primaryKey));
+    const fence = { leaseId: primary?.leaseId ?? '' };
     try {
       if (!primary) {
         throw invalidAnswer('reliable batch primary completed before its followers');
@@ -248,11 +259,12 @@ export class ChannelReliabilityCoordinator {
         key: primaryKey,
         createdAt: this.currentTime(),
         keys: uniqueKeys,
-      });
+      }, fence);
       this.assertBatchCheckpoint(batch, primaryKey, uniqueKeys);
       const answer = await this.getOrCreateBatchAnswer(
         primaryKey,
         claimed.map((item) => item.inbox.envelope),
+        fence,
       );
       for (const intent of answer.intents) {
         const recorded = await this.options.stores.deliveries.get(primaryKey, intent.deliveryId);
@@ -260,7 +272,10 @@ export class ChannelReliabilityCoordinator {
           assertChannelDeliveryReceipt(recorded.receipt, intent.deliveryId);
           continue;
         }
-        const send = () => this.options.deliverer.deliver(intent);
+        const send = async () => {
+          await this.assertOwner(primaryKey, fence);
+          return this.options.deliverer.deliver(intent);
+        };
         const deliveryReceipt = this.options.spaceBoundary ? await this.options.spaceBoundary.deliver(intent, send) : await send();
         assertChannelDeliveryReceipt(deliveryReceipt, intent.deliveryId);
         await this.options.stores.deliveries.record({
@@ -268,7 +283,7 @@ export class ChannelReliabilityCoordinator {
           deliveryId: intent.deliveryId,
           receipt: deliveryReceipt,
           recordedAt: this.currentTime(),
-        });
+        }, fence);
       }
 
       // Complete followers first. The primary is the durable recovery anchor
@@ -279,6 +294,8 @@ export class ChannelReliabilityCoordinator {
       const receipt = await this.completeClaim(primary);
       return { status: 'completed', receipt };
     } catch (error) {
+      if (error instanceof UnknownProcessingOutcome) return this.uncertainResult(primaryKey, primary!.leaseId);
+      if (primary && !await this.isOwner(primaryKey, primary.leaseId)) return this.unclaimedResult(primaryKey);
       const failure = classifyFailure(error);
       const attempt = Math.max(
         0,
@@ -292,14 +309,31 @@ export class ChannelReliabilityCoordinator {
         updatedAt,
         policy: this.retryPolicy,
       }));
-      for (const record of records) await this.options.stores.retries.put(record);
+      for (const record of records) {
+        const claim = claimed.find(item => channelReliabilityKey(item.key) === channelReliabilityKey(record.key))!;
+        if (await this.isOwner(claim.key, claim.leaseId)) await this.options.stores.retries.put(record, claim);
+      }
       await this.releaseClaims(claimed);
       const primaryRecord = records[0]!;
       if (primaryRecord.state === 'waiting') {
         return { status: 'waiting', nextAttemptAt: primaryRecord.nextAttemptAt! };
       }
       return { status: primaryRecord.state, retry: primaryRecord };
-    }
+    } finally { stopRenewal(); }
+  }
+
+  /** Trusted reconciliation only: the prior local worker must be permanently stopped.
+   * Never infer remote rejection from lease expiry or a client timeout.
+   */
+  async reconcile(
+    key: ChannelReliabilityKey,
+    evidence: { leaseId: string; ownerTerminated: true; outcome: 'not-accepted' | 'checkpointed' },
+  ): Promise<boolean> {
+    if (evidence.ownerTerminated !== true || !evidence.leaseId
+      || !['not-accepted', 'checkpointed'].includes(evidence.outcome)) throw new TypeError('invalid reconciliation evidence');
+    const batch = await this.options.stores.batches.findByMember(key);
+    const primary = batch?.key ?? key;
+    return this.options.stores.inbox.reconcile(batch?.keys ?? [primary], evidence.leaseId, evidence.outcome === 'checkpointed');
   }
 
   async recover(limit = 100): Promise<readonly ChannelReliabilityRunResult[]> {
@@ -340,6 +374,7 @@ export class ChannelReliabilityCoordinator {
   private async getOrCreateAnswer(
     key: ChannelReliabilityKey,
     envelope: ChannelInboundEnvelope,
+    fence: ChannelLeaseFence,
   ): Promise<ChannelAnswerCheckpoint> {
     const existing = await this.options.stores.answers.get(key);
     if (existing) {
@@ -347,19 +382,20 @@ export class ChannelReliabilityCoordinator {
       return existing;
     }
 
-    const process = () => this.options.processor.process(envelope);
-    const intents = this.options.spaceBoundary ? await this.options.spaceBoundary.execute([envelope], process) : await process();
+    const process = () => this.processOwned(key, fence, () => this.options.processor.process(envelope));
+    const intents = await this.executeAnswer([envelope], process);
     this.assertAnswerIntents(intents, key, envelope);
-    return this.options.stores.answers.create({
+    try { return await this.options.stores.answers.create({
       key,
       createdAt: this.currentTime(),
       intents,
-    });
+    }, fence); } catch { throw new UnknownProcessingOutcome(); }
   }
 
   private async getOrCreateBatchAnswer(
     key: ChannelReliabilityKey,
     envelopes: readonly ChannelInboundEnvelope[],
+    fence: ChannelLeaseFence,
   ): Promise<ChannelAnswerCheckpoint> {
     const primary = envelopes.find((envelope) => envelope.sourceMessageId === key.sourceMessageId);
     const existing = await this.options.stores.answers.get(key);
@@ -373,28 +409,29 @@ export class ChannelReliabilityCoordinator {
     if (envelopes.length > 1 && !this.options.processor.processBatch) {
       throw invalidAnswer('reliable batch processor capability is unavailable');
     }
-    const process = () => this.options.processor.processBatch
+    const process = () => this.processOwned(key, fence, () => this.options.processor.processBatch
       ? this.options.processor.processBatch(envelopes)
-      : this.options.processor.process(primary);
-    const intents = this.options.spaceBoundary ? await this.options.spaceBoundary.execute(envelopes, process) : await process();
+      : this.options.processor.process(primary));
+    const intents = await this.executeAnswer(envelopes, process);
     this.assertAnswerIntents(intents, key, primary);
-    return this.options.stores.answers.create({
+    try { return await this.options.stores.answers.create({
       key,
       createdAt: this.currentTime(),
       intents,
-    });
+    }, fence); } catch { throw new UnknownProcessingOutcome(); }
   }
 
   private async completeClaim(item: {
     key: ChannelReliabilityKey;
     inbox: { receiptId: string };
+    leaseId: string;
   }): Promise<ChannelCompletionReceipt> {
     const receipt = await this.options.stores.receipts.complete({
       key: item.key,
       receiptId: item.inbox.receiptId,
       completedAt: this.currentTime(),
-    });
-    await this.tryCleanupCompleted(item.key);
+    }, item);
+    await this.tryCleanupCompleted(item.key, item);
     return receipt;
   }
 
@@ -476,19 +513,75 @@ export class ChannelReliabilityCoordinator {
     }
   }
 
-  private async cleanupCompleted(key: ChannelReliabilityKey): Promise<void> {
-    await this.options.stores.retries.remove(key);
-    await this.options.stores.inbox.remove(key);
-    await this.options.stores.batches.remove(key);
+  private async cleanupCompleted(key: ChannelReliabilityKey, fence?: ChannelLeaseFence): Promise<void> {
+    await this.options.stores.retries.remove(key, fence);
+    await this.options.stores.batches.remove(key, fence);
+    await this.options.stores.inbox.remove(key, fence);
   }
 
-  private async tryCleanupCompleted(key: ChannelReliabilityKey): Promise<void> {
+  private async tryCleanupCompleted(key: ChannelReliabilityKey, fence?: ChannelLeaseFence): Promise<void> {
     try {
-      await this.cleanupCompleted(key);
+      await this.cleanupCompleted(key, fence);
     } catch {
       // Completion is the dominant durable milestone. Leaving the inbox item
       // lets a later recovery pass retry cleanup without rerunning the answer.
     }
+  }
+
+  private uncertainResult(key: ChannelReliabilityKey, leaseId: string): ChannelReliabilityRunResult {
+    return { status: 'uncertain', key, leaseId };
+  }
+
+  private async unclaimedResult(key: ChannelReliabilityKey): Promise<ChannelReliabilityRunResult> {
+    const record = await this.options.stores.inbox.get(key);
+    if (!record) return { status: 'missing' };
+    if (record.guarded && record.leaseUntil! <= this.currentTime()) return this.uncertainResult(key, record.leaseId!);
+    return { status: 'busy' };
+  }
+
+  private async isOwner(key: ChannelReliabilityKey, leaseId: string): Promise<boolean> {
+    return (await this.options.stores.inbox.get(key))?.leaseId === leaseId;
+  }
+
+  private async assertOwner(key: ChannelReliabilityKey, fence: ChannelLeaseFence): Promise<void> {
+    if (!await this.isOwner(key, fence.leaseId)) throw new Error('channel reliability lease ownership lost');
+  }
+
+  private async executeAnswer(envelopes: readonly ChannelInboundEnvelope[], process: () => Promise<readonly ChannelOutboundIntent[]>): Promise<readonly ChannelOutboundIntent[]> {
+    let accepted = false;
+    const tracked = async () => { const result = await process(); accepted = true; return result; };
+    try {
+      return this.options.spaceBoundary ? await this.options.spaceBoundary.execute(envelopes, tracked) : await tracked();
+    } catch (error) {
+      // A post-process boundary/checkpoint failure must not rerun business work.
+      if (accepted) throw new UnknownProcessingOutcome();
+      throw error;
+    }
+  }
+
+  private async processOwned<T>(key: ChannelReliabilityKey, fence: ChannelLeaseFence, process: () => Promise<T>): Promise<T> {
+    await this.assertOwner(key, fence);
+    try { return await process(); }
+    catch (error) {
+      // Only an explicit no-acceptance attestation permits retry. Unknown
+      // outcomes may already have performed business effects and cannot replay.
+      if (error instanceof KnownUnacceptedChannelProcessingError) throw error;
+      throw new UnknownProcessingOutcome();
+    }
+  }
+
+  private renewClaims(claims: readonly { key: ChannelReliabilityKey; leaseId: string }[]): () => void {
+    let stopped = false;
+    let running = false;
+    const timer = setInterval(() => {
+      if (running || stopped) return;
+      running = true;
+      const now = this.currentTime();
+      void Promise.allSettled(claims.map(item => this.options.stores.inbox.renew(item.key, item.leaseId, now, now + this.leaseMs)))
+        .finally(() => { running = false; });
+    }, Math.max(1, Math.floor(this.leaseMs / 3)));
+    timer.unref();
+    return () => { stopped = true; clearInterval(timer); };
   }
 
   private currentTime(): number {
@@ -592,3 +685,7 @@ function invalidAnswer(message: string): ChannelPluginError {
     code: 'invalid-channel-contract',
   });
 }
+
+/** Adapter attests that no business task/effect was accepted before this failure. */
+export class KnownUnacceptedChannelProcessingError extends ChannelPluginError {}
+class UnknownProcessingOutcome extends Error {}

@@ -39,8 +39,8 @@ The ordering defines restart behavior:
 - a ledgered delivery is skipped after restart;
 - the completion receipt is written before inbox cleanup, so a crash during
   cleanup remains completed;
-- a crashed worker lease becomes claimable when the persisted lease expires;
-  lease ids fence release, so the expired worker cannot unlock its successor;
+- expired unguarded idle leases can be reclaimed; guarded coordinator runs
+  remain uncertain until their owner settles or a trusted operator reconciles;
 - a plugin must pass the checkpointed `deliveryId` to the provider as its
   idempotency key. No local transaction can atomically cover a remote provider
   acceptance and the local delivery ledger.
@@ -52,11 +52,12 @@ and have a unique delivery id.
 
 ## Store ports
 
-`ChannelReliabilityStores` groups five independently replaceable contracts:
+`ChannelReliabilityStores` groups six independently replaceable contracts:
 
 - `ChannelInboxStore`: durable acceptance, listing, leasing, release, cleanup;
 - `ChannelReceiptStore`: first-write-wins business completion;
 - `ChannelAnswerStore`: first-write-wins normalized outbound answer;
+- `ChannelBatchStore`: durable ordered membership and primary recovery anchor;
 - `ChannelDeliveryStore`: idempotent per-intent delivery ledger;
 - `ChannelRetryStore`: persisted retry or operator-visible terminal state.
 
@@ -78,7 +79,7 @@ every unfinished message without a data conversion.
 
 ## Retry and terminal states
 
-Transient and unknown failures are retried with restart-stable bounded
+Known unaccepted processor failures and checkpointed idempotent delivery failures use restart-stable bounded
 exponential backoff and deterministic jitter. Provider `retryAfterMs` hints are
 honored up to the configured maximum. Attempts are persisted; exhausting the
 limit produces `failed`.
@@ -92,7 +93,7 @@ Typed plugin failures map as follows:
 | `configuration` | `failed` |
 | `unsupported-capability` | `failed` |
 | `permanent` | `failed` |
-| untyped/unknown | transient `unexpected-channel-error` |
+| processor failure without explicit nonacceptance | `uncertain`; no automatic replay |
 
 Only stable codes are stored. Provider payloads, exception messages, raw user
 ids, and credentials do not enter reliability records.
@@ -122,3 +123,57 @@ after the deployment-specific idle guard confirms that no agent run or message
 delivery is active. Draining with durable or retrying inbox work reports
 `drained: false`; an operator must wait or use the unchanged `off` rollback path,
 never interrupt active work to force a restart.
+
+## Guarded ownership and maintenance recovery
+
+Coordinator runs acquire a durable guarded lease, including one shared fence
+for all members of a batch. A heartbeat renews it every third of the lease
+period. Expiry is a diagnostic deadline, not evidence that the old worker or
+its remote operation stopped. A competing coordinator returns `uncertain`
+with the key and lease id once a guarded lease expires; it never starts a
+second processor. An unchanged original owner may still finish and checkpoint.
+All coordinator checkpoint, retry, completion and cleanup mutations carry a
+lease fence checked atomically by the memory/file stores. Custom adapters must
+implement the same checks; a read-then-write ownership check is insufficient.
+Optional fences preserve direct fixture/maintenance store calls, which are
+trusted and must not bypass an active coordinator.
+
+A processor exception is acceptance-unknown even when it is a typed
+`ChannelPluginError`. Only `KnownUnacceptedChannelProcessingError` explicitly
+attests no business task or effect was accepted and permits the existing retry
+classification. Failure to persist a returned answer also retains uncertainty.
+The compatibility processor can execute business work internally; its generic
+failure therefore cannot safely trigger automatic replay. Delivery retries
+continue using checkpointed provider idempotency keys, and retain that provider
+contract rather than claiming exactly-once remote effects.
+
+After a crash, uncertainty intentionally blocks automatic progress. A trusted
+operator can use the repository maintenance entrypoint after `pnpm build`:
+
+```text
+node tools/reconcile-channel-reliability.mjs --store <absolute-snapshot-path>
+node tools/reconcile-channel-reliability.mjs --store <absolute-snapshot-path> --key '<JSON ChannelReliabilityKey>' --lease-id <exact-fence> --owner-terminated --outcome not-accepted
+```
+
+Listing emits only keys, fences and deadlines, never input/answer bodies. Before
+resolving, stop the previous local worker permanently and verify its remote
+outcome using the engine/provider's authoritative records. `not-accepted` means
+verified no business acceptance/effect, not a timeout or absent local receipt.
+If an answer checkpoint is already durable, `--outcome checkpointed` releases
+ownership for recovery from that answer without rerunning the processor. It
+does not prove remote deliveries were rejected: unledgered sends still depend
+on the original stable provider idempotency key. If neither outcome can be
+established, leave the record uncertain. Never use rollback or raw snapshot
+edits to replay it. Resolution atomically checks all surviving batch members
+against the same fence, requires the primary, and only then releases ownership;
+completed followers remain completed. A stale resolution returns exit code 2.
+The next normal recovery pass resumes work; the maintenance command never
+processes or sends messages itself.
+
+`ReliabilityLease.tla` checks two competing owners, expiry, crash, checkpoint,
+completion and authoritative recovery from a checkpoint. The legacy variant
+violates `NoDuplicateProcessor`; the guarded variant retains it. The healthy
+progress configuration excludes crashes and assumes weak fairness of the
+finite healthy transition relation. Unknown crashed processing has no claimed
+liveness guarantee. The model abstracts storage transactions and provider
+idempotency; separate independent-process tests exercise the real file adapter.

@@ -539,6 +539,7 @@ export type {
 } from './channel/lark-ownership';
 export {
   ChannelReliabilityCoordinator,
+  KnownUnacceptedChannelProcessingError,
   DEFAULT_CHANNEL_RELIABILITY_LEASE_MS,
 } from './channel/reliability/coordinator';
 export {

@@ -237,7 +237,7 @@ describe('WechatKfReliableMessageSink', () => {
     expect(await h.inbox.list()).toEqual([]);
   });
 
-  it('persists retry state, keeps rollback work, and recovers without duplicate acceptance', async () => {
+  it('retains unknown work without automatic compatibility replay', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(1_000);
     const handler = { accept: vi.fn()
@@ -248,17 +248,16 @@ describe('WechatKfReliableMessageSink', () => {
     await h.sink.accept(message('retry-me'));
     await h.sink.waitForIdle();
     expect(await h.inbox.list()).toHaveLength(1);
-    expect((await h.stores.retries.get({
-      profileId: 'profile-a', pluginId: 'wechat-kf', instanceId: 'customer-service', sourceMessageId: 'retry-me',
-    }))?.state).toBe('waiting');
-
-    await vi.advanceTimersByTimeAsync(10);
+    const [record] = await h.stores.inbox.list();
+    expect(record?.guarded).toBe(true);
+    await vi.advanceTimersByTimeAsync(100);
     await h.sink.waitForIdle();
-    expect(handler.accept).toHaveBeenCalledTimes(2);
-    expect(await h.inbox.list()).toEqual([]);
+    expect(handler.accept).toHaveBeenCalledOnce();
+    expect(await h.inbox.list()).toHaveLength(1);
+    expect(h.sink.snapshot().scheduledRetries).toBe(0);
   });
 
-  it('retries a mixed turn as the same batch', async () => {
+  it('retains the entire unknown mixed turn without replay', async () => {
     const handler = {
       accept: vi.fn(async (_message: WechatKfMessage) => undefined),
       acceptTurn: vi.fn(async (_messages: readonly WechatKfMessage[]) => undefined)
@@ -275,13 +274,12 @@ describe('WechatKfReliableMessageSink', () => {
     await new Promise((resolve) => setTimeout(resolve, 25));
     await h.sink.waitForIdle();
 
-    expect(handler.acceptTurn).toHaveBeenCalledTimes(2);
-    expect(handler.acceptTurn.mock.calls.map(([messages]) => messages.map(({ msgid }) => msgid)))
-      .toEqual([
-        ['m-retry-image', 'm-retry-text'],
-        ['m-retry-image', 'm-retry-text'],
-      ]);
-    expect(await h.inbox.list()).toEqual([]);
+    expect(handler.acceptTurn).toHaveBeenCalledOnce();
+    expect(await h.inbox.list()).toHaveLength(2);
+    const records = await h.stores.inbox.list();
+    expect(records.every(record => record.guarded)).toBe(true);
+    expect(new Set(records.map(record => record.leaseId)).size).toBe(1);
+    expect(h.sink.snapshot().scheduledRetries).toBe(0);
   });
 
   it('recovers the checkpointed batch without absorbing newly accepted messages', async () => {
