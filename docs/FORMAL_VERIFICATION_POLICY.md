@@ -44,6 +44,10 @@ Historical context: [audit](FORMAL_AUDIT_IMPLEMENTATION.md) and
 [repair evidence](RUNTIME_OWNERSHIP_IMPLEMENTATION.md). Mailbox semantics remain
 owned by [Steering](STEERING.md), not this document.
 
+The subsequent [system audit](FORMAL_SYSTEM_AUDIT_IMPLEMENTATION.md) records
+additional baseline findings and reproducible counterexamples; it is historical
+evidence, not a claim that those findings have been repaired.
+
 ## Toolchain and execution
 
 Download the official jar from the URL pinned in the manifest and set
