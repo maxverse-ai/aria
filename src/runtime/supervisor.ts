@@ -253,8 +253,7 @@ class ManagedProfile {
       if (Date.now() >= deadline) throw new Error('update waiting for active work');
       await new Promise(resolve => setTimeout(resolve, 50));
     }
-    this.updateExecutionResume ??= this.conversationRuntime.runtime.pauseNewRuns('update');
-    if (!(await this.updateFence.refresh()).includes(admissionId)) throw new Error('update admission owner disappeared');
+    await this.updateFence.pauseExecution(admissionId, () => this.conversationRuntime!.runtime.pauseNewRuns('update'));
   }
   private transitionResume?: () => void;
   private transitionIngressResume?: () => void;

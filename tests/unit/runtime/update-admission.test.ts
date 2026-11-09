@@ -28,6 +28,30 @@ describe('update admission generation ownership', () => {
       expect(pause).toHaveBeenCalledOnce();
     } finally { fence.close(); }
   });
+  it('rejects a late drain after release and always releases its execution pause', async () => {
+    const path = await directory();
+    const marker = await createAdmissionMarker(path);
+    let executionPauses = 0;
+    let finishDrain!: () => void;
+    const drainBarrier = new Promise<void>(resolve => { finishDrain = resolve; });
+    const fence = new UpdateAdmissionFence(path, () => () => {});
+    await fence.start();
+    const pause = () => { executionPauses++; return () => { executionPauses--; }; };
+    try {
+      const lateDrain = (async () => { await drainBarrier; await fence.pauseExecution(marker.id, pause); })();
+      await marker.release();
+      await fence.refresh();
+      finishDrain();
+      await expect(lateDrain).rejects.toThrow('owner disappeared');
+      expect(executionPauses).toBe(0);
+      const next = await createAdmissionMarker(path);
+      await fence.pauseExecution(next.id, pause);
+      expect(executionPauses).toBe(1);
+      await next.release(); await fence.refresh();
+      expect(executionPauses).toBe(0);
+    } finally { fence.close(); }
+  });
+
   it('automatically ignores only confirmed-dead owners and fails closed on uncertain files', async () => {
     const path = await directory();
     await mkdir(admissionDirectory(path), { recursive: true });

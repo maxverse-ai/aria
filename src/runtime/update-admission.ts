@@ -43,6 +43,7 @@ export class UpdateAdmissionFence {
   private resume?: () => void;
   private timer?: ReturnType<typeof setInterval>;
   private closed = false;
+  private readonly executionResumes = new Set<() => void>();
   private refreshTail: Promise<unknown> = Promise.resolve();
   constructor(private readonly profileDir: string, private readonly pause: () => () => void) {}
   refresh(): Promise<string[]> {
@@ -50,11 +51,26 @@ export class UpdateAdmissionFence {
     this.refreshTail = result.catch(() => undefined);
     return result;
   }
+  pauseExecution(admissionId: string, pause: () => () => void): Promise<void> {
+    const result = this.refreshTail.then(async () => {
+      const markers = await this.refreshNow();
+      if (!markers.includes(admissionId)) throw new Error('update admission owner disappeared');
+      // No await between validation and registering cleanup. Refresh/close own
+      // every execution pause, including a drain that settles after client exit.
+      this.executionResumes.add(pause());
+    });
+    this.refreshTail = result.catch(() => undefined);
+    return result;
+  }
+  private releaseExecution(): void {
+    for (const resume of this.executionResumes) resume();
+    this.executionResumes.clear();
+  }
   private async refreshNow(): Promise<string[]> {
     const markers = await activeAdmissionMarkers(this.profileDir);
     if (this.closed) return [];
     if (markers.length) this.resume ??= this.pause();
-    else { this.resume?.(); this.resume = undefined; }
+    else { this.releaseExecution(); this.resume?.(); this.resume = undefined; }
     return markers;
   }
   async start(): Promise<void> {
@@ -62,5 +78,5 @@ export class UpdateAdmissionFence {
     this.timer = setInterval(() => { void this.refresh().catch(() => { if (!this.closed) this.resume ??= this.pause(); }); }, 250);
     this.timer.unref();
   }
-  close(): void { this.closed = true; clearInterval(this.timer); this.resume?.(); this.resume = undefined; }
+  close(): void { this.closed = true; clearInterval(this.timer); this.releaseExecution(); this.resume?.(); this.resume = undefined; }
 }

@@ -1,5 +1,6 @@
 import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
+import type { InstalledVersion } from '../../../src/application/distribution/types';
 import { dirname, join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import type { VerifiedRelease } from '../../../src/application/distribution/types.js';
@@ -8,6 +9,20 @@ import { resolveInstallPaths } from '../../../src/platform/distribution/install-
 import { NpmTarballVersionInstaller } from '../../../src/platform/distribution/version-installer.js';
 
 describe('NpmTarballVersionInstaller', () => {
+  it('executes isolated target capability probes and rejects legacy or mismatched identity', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'aria-capability-'));
+    const entryPath = join(root, 'cli.mjs');
+    const paths = resolveInstallPaths({ installRoot: root });
+    const installer = new NpmTarballVersionInstaller(paths);
+    const version = { version: '0.2.0', commit: 'a'.repeat(40), installDir: root, entryPath } as InstalledVersion;
+    await writeFile(entryPath, "process.stdout.write(JSON.stringify({version:'0.2.0',commit:'" + 'a'.repeat(40) + "',updateAdmission:1}))");
+    await expect(installer.assertUpdateCapable(version)).resolves.toBeUndefined();
+    await writeFile(entryPath, "process.stdout.write('0.2.0')");
+    await expect(installer.assertUpdateCapable(version)).rejects.toThrow('capabilities');
+    await writeFile(entryPath, "process.stdout.write(JSON.stringify({version:'0.2.0',commit:'other',updateAdmission:1}))");
+    await expect(installer.assertUpdateCapable(version)).rejects.toThrow('identity mismatch');
+  });
+
   it('installs into staging then promotes an immutable version directory', async () => {
     const root = await mkdtemp(join(tmpdir(), 'aria-install-'));
     const paths = resolveInstallPaths({ installRoot: join(root, 'cli'), binRoot: join(root, 'bin') });

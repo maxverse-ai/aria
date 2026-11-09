@@ -250,6 +250,9 @@ A legacy daemon without these control capabilities fails closed by default. An
 explicit force update can bootstrap it, accepting unknown activity and old online
 inventory; the replacement must still report authenticated readiness and build
 identity for the host and every restored profile. Alternatively safely stop/drain
-it through its supported lifecycle before upgrading. Rolling
-back to a retained legacy build that lacks identity is reported as unverified
-failure, even when the old process starts successfully.
+it through its supported lifecycle before upgrading. Before stopping services, the installer executes the exact target CLI
+runtime-capabilities probe and verifies its version/commit and update-admission
+contract. Non-force apply also probes the retained rollback baseline. A legacy
+rollback target is rejected before switching or stopping anything; stop affected
+services first for an offline legacy switch. This prevents a legacy process that
+ignores holds from accepting work before a failed health check triggers restore.

@@ -63,6 +63,17 @@ export class NpmTarballVersionInstaller implements VersionInstaller {
     }
   }
 
+  async assertUpdateCapable(version: InstalledVersion): Promise<void> {
+    let value: { version?: unknown; commit?: unknown; updateAdmission?: unknown };
+    try {
+      const result = await this.runner.run(currentRuntime.execPath, [version.entryPath, 'runtime-capabilities'], { cwd: version.installDir });
+      value = JSON.parse(result.stdout);
+    } catch (error) { throw new Error('installed build lacks verified update admission capabilities; stop affected services before switching to this build', { cause: error }); }
+    if (value.version !== version.version || value.commit !== version.commit || value.updateAdmission !== 1) {
+      throw new Error('installed build update admission capabilities or identity mismatch');
+    }
+  }
+
   async smokeTest(version: InstalledVersion): Promise<void> {
     const result = await this.runner.run(currentRuntime.execPath, [version.entryPath, '--version'], {
       cwd: version.installDir,

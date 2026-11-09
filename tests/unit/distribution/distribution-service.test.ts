@@ -72,6 +72,27 @@ describe('DistributionService', () => {
     expect(held).toBe(false);
   });
 
+  it('rejects a legacy rollback target before changing pointer or stopping services', async () => {
+    const fixture = await createFixture();
+    const plan = await fixture.service.createPlan(); await fixture.service.apply(plan.id);
+    vi.mocked(fixture.services.restartAndCheck).mockClear();
+    vi.mocked(fixture.services.acquireAdmission).mockClear();
+    vi.mocked(fixture.installer.assertUpdateCapable).mockRejectedValueOnce(new Error('legacy build lacks admission'));
+    await expect(fixture.service.rollback()).rejects.toThrow('legacy build lacks admission');
+    expect((await fixture.store.readState()).current).toEqual(fixture.installed);
+    expect(fixture.services.restartAndCheck).not.toHaveBeenCalled();
+    expect(fixture.services.acquireAdmission).not.toHaveBeenCalled();
+  });
+
+  it('rejects unsupported automatic rollback baseline before stopping services', async () => {
+    const fixture = await createFixture();
+    const plan = await fixture.service.createPlan();
+    vi.mocked(fixture.installer.assertUpdateCapable).mockRejectedValueOnce(new Error('legacy baseline'));
+    await expect(fixture.service.apply(plan.id)).rejects.toThrow('legacy baseline');
+    expect(fixture.services.restartAndCheck).not.toHaveBeenCalled();
+    expect(fixture.services.acquireAdmission).not.toHaveBeenCalled();
+  });
+
   it('cancels a plan by marking it, keeps the plan file, and rejects apply', async () => {
     const fixture = await createFixture();
     const plan = await fixture.service.createPlan();
@@ -178,6 +199,7 @@ async function createFixture(options: { failFirstHealthCheck?: boolean } = {}) {
   const verifier: ReleaseVerifier = { verify: vi.fn(async () => verified) };
   const installer: VersionInstaller = {
     install: vi.fn(async () => installed),
+    assertUpdateCapable: vi.fn(async () => {}),
     smokeTest: vi.fn(async () => {}),
   };
   let healthChecks = 0;
@@ -210,5 +232,5 @@ async function createFixture(options: { failFirstHealthCheck?: boolean } = {}) {
     legacy,
     now,
   );
-  return { service, store, services, launcher, legacy, installed };
+  return { service, store, services, launcher, legacy, installed, installer };
 }

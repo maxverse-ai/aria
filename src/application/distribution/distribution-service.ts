@@ -196,6 +196,7 @@ export class DistributionService {
         throw new Error('services appeared after planning but no rollback baseline exists; create a new plan from the active aria command');
       }
       await this.services.assertSafe(targets, plan.force);
+      if (!plan.force && previous && targets.some(target => target.running)) await this.installer.assertUpdateCapable(previous);
 
       transition(operation, 'installing', this.now());
       await this.store.writeOperation(operation);
@@ -212,6 +213,7 @@ export class DistributionService {
       }
       await this.services.assertSafe(targets, plan.force);
 
+      if (targets.some(target => target.running)) await this.installer.assertUpdateCapable(installed);
       releaseAdmission = await this.services.acquireAdmission(targets, plan.force);
 
       transition(operation, 'switching', this.now());
@@ -290,6 +292,7 @@ export class DistributionService {
     try {
       await this.services.assertSafe(targets, force);
       await this.installer.smokeTest(target);
+      if (targets.some(item => item.running)) await this.installer.assertUpdateCapable(target);
       await this.launcher.write();
       releaseAdmission = await this.services.acquireAdmission(targets, force);
       transition(operation, 'rolling-back', this.now());

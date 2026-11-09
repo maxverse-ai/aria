@@ -132,6 +132,7 @@ export interface ReleaseVerifier {
 export interface VersionInstaller {
   install(release: VerifiedRelease): Promise<InstalledVersion>;
   smokeTest(version: InstalledVersion): Promise<void>;
+  assertUpdateCapable(version: InstalledVersion): Promise<void>;
 }
 
 export interface ServiceOrchestrator {

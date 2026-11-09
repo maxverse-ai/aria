@@ -1,3 +1,4 @@
+import { runtimeBuildIdentity } from '../runtime/build-identity';
 import { Command } from 'commander';
 import pkg from '../../package.json';
 import { runtimeNotice } from './node-version';
@@ -108,6 +109,10 @@ program
   .name('aria')
   .description('Aria — a local-first control plane for CLI coding agents')
   .version(pkg.version, '-v, --version');
+
+program.command('runtime-capabilities', { hidden: true })
+  .description('Report static runtime build and update admission capabilities')
+  .action(() => { process.stdout.write(JSON.stringify({ ...runtimeBuildIdentity, updateAdmission: 1 }) + '\n'); });
 
 // === process-level commands (work directly on bridge processes) ===
 
