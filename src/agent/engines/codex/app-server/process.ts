@@ -6,6 +6,7 @@ import { log } from '../../../../core/logger';
 import { spawnProcess } from '../../../../platform/spawn';
 import { CodexAppServerClient, type AppServerChild } from './client';
 import { buildAgentLaunchEnv } from '../../../launch-env';
+import { resolveCodexExecutable } from '../executable';
 
 export interface StartCodexAppServerOptions {
   binary: string;
@@ -25,7 +26,7 @@ export async function startCodexAppServer(
   else if (!options.inheritCodexHome) envOverrides.CODEX_HOME = join(options.profileStateDir, 'codex-home');
 
   const child = spawnProcess(
-    options.binary,
+    await resolveCodexExecutable(options.binary),
     [
       'app-server',
       '--stdio',

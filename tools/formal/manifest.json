@@ -8,6 +8,15 @@
   },
   "groups": [
     {
+      "id": "daemon-host",
+      "source": ["src/daemon/host.ts", "src/daemon/health.ts"],
+      "tests": ["tests/unit/daemon/health.test.ts", "tests/unit/daemon/host.test.ts"],
+      "cases": [
+        {"name": "DaemonHost", "model": "DaemonHost.tla", "configFile": "DaemonHost.cfg"},
+        {"name": "DaemonHostLegacy", "model": "DaemonHost.tla", "configFile": "DaemonHostLegacy.cfg", "violation": "NoHealthKill"}
+      ]
+    },
+    {
       "id": "codex-resume",
       "source": [
         "src/agent/engines/codex/app-server/",

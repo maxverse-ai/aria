@@ -20,6 +20,7 @@ import type { AgentSteeringOutcome, AgentSteeringRequest } from '../../../steeri
 import { prefixBridgeSystemPrompt } from '../../../bridge-system-prompt';
 import type { ChannelEnvContext } from '../../../channel-env';
 import { startCodexAppServer } from './process';
+import { resolveCodexExecutable } from '../executable';
 import { AppServerRequestTimeoutError, type CodexAppServerClient } from './client';
 import { AppServerMessageTranslator } from './message-translator';
 import { CodexGenerationMeter } from './generation-meter';
@@ -317,12 +318,17 @@ export class CodexAppServerRuntime implements EngineRuntime {
     this.activeRuns.clear();
   }
 
-  availability(): Promise<AgentAvailability> {
+  async availability(): Promise<AgentAvailability> {
+    // Resolve for each new preparation; an existing connected process retains
+    // ownership of its active work across desktop updates.
+    let realpath: string | undefined;
+    try { realpath = await resolveCodexExecutable(this.options.binary); } catch { /* Preserve the structured preflight diagnostic below. */ }
     return checkAgentAvailability({
       agentId: 'codex',
       agentName: 'Codex App Server',
       command: this.options.binary,
       binaryPath: this.options.binary,
+      ...(realpath ? { realpath } : {}),
     });
   }
 

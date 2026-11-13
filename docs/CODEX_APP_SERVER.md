@@ -30,6 +30,15 @@ Profiles only need to identify the Codex binary:
 
 ## Lifecycle and permissions
 
+Bootstrap validates the executable but preserves the requested command (`codex`
+by default), rather than saving the discovered desktop version directory. Each
+new App Server launch resolves it again. On Windows only, a missing command or
+retired hash path in the current user's `LOCALAPPDATA/OpenAI/Codex/bin` may
+rediscover a regular executable in that same installation. Explicit independent
+paths remain pinned; Aria never silently replaces them with another installation.
+Existing connected App Servers and active requests are not restarted by discovery.
+For unattended operation, prefer a separately maintained CLI at a stable path.
+
 The profile owns the App Server process. Aria closes it on failed startup,
 profile restart, engine switch, shutdown, and failed replacement. All turns use
 the profile's configured sandbox. Approval policy remains `never`; App Server

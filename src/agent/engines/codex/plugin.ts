@@ -4,7 +4,7 @@ import { CODEX_MODELS, registerModelOptions } from '../../models';
 import { AgentPreflightError } from '../../preflight';
 import type { EnginePlugin } from '../../plugin/types';
 import { defineEngineRuntimeFactory } from '../../runtime/construction';
-import { resolveExecutablePath } from '../../../platform/executable';
+import { resolveCodexExecutable } from './executable';
 import { listCodexThreadHistory } from '../../../session/codex-history';
 import { CodexAppServerRuntime } from './app-server/runtime';
 import { importCodexSessions } from './session-import';
@@ -45,9 +45,8 @@ export const codexEnginePlugin: EnginePlugin = {
   importSessions: importCodexSessions,
   bootstrapConfig: async ({ binaryPath }) => {
     const command = binaryPath ?? process.env.LARK_CHANNEL_CODEX_BIN ?? 'codex';
-    let resolvedBinary: string;
     try {
-      resolvedBinary = await resolveExecutablePath(command);
+      await resolveCodexExecutable(command);
     } catch (err) {
       const errno = (err as NodeJS.ErrnoException).code;
       throw new AgentPreflightError({
@@ -63,13 +62,15 @@ export const codexEnginePlugin: EnginePlugin = {
         errno,
       });
     }
-    return { binaryPath: resolvedBinary };
+    // Preserve discovery intent. Persisting its result pins a replaceable
+    // desktop version directory and breaks the next unattended startup.
+    return { binaryPath: binaryPath ?? process.env.LARK_CHANNEL_CODEX_BIN ?? 'codex' };
   },
   listHistory: async ({ cwd, limit, profileConfig, profileDir }) => {
     const codex = profileConfig.codex;
     if (!codex?.binaryPath) return [];
     const threads = await listCodexThreadHistory({
-      binary: codex.binaryPath,
+      binary: await resolveCodexExecutable(codex.binaryPath),
       cwd,
       limit,
       profileStateDir: profileDir,

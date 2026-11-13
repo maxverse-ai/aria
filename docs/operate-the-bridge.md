@@ -192,5 +192,36 @@ input or `aria secrets set` on shared machines.
 
 ## Troubleshooting
 
+### Windows background health and alerts
+
+New or refreshed Node/Bun-script service launchers run the packaged independent
+daemon host. It owns one bridge child, retries an exited child with 15-second to
+5-minute backoff, and checks the child's authenticated runtime control endpoint
+every 30 seconds. It does not kill an unresponsive child, replay failed tasks, or
+bypass restart safety. Compiled/older distributions without `dist/daemon.js`
+retain their original service behavior. Existing launchers take effect only after
+an explicit `aria start` refresh and a safe service restart; installation alone
+does not interrupt a running bot.
+
+`logs/daemon/health.json` under the profile directory records readiness, child PID,
+last exit and incident state. Two consecutive failures create an alert, with one
+reminder per 30 minutes and a recovery notification. Delivery failure remains
+retryable. Alerts are always written to `logs/daemon/alerts.jsonl`; Windows
+Application event 4100 is attempted as a secondary destination. Host output is
+kept separately in `host-stdout.log` and `host-stderr.log`.
+
+Remote notification is opt-in: create `logs/daemon/alerts.json` in the same
+directory with `{"webhookUrl":"https://open.feishu.cn/open-apis/bot/v2/hook/REPLACE"}`.
+Use an operator-owned Feishu custom bot webhook and restrict file access to the
+service account; the URL is a credential. Aria sends text directly from the host,
+without the bridge or coding agent. It never infers recipients or copies chat
+credentials. Redirects, non-HTTPS URLs and provider rejection fail delivery.
+Omit the file for local-only alerts. After configuring the URL, test it in a
+non-production profile before relying on it.
+
+These checks establish process/control readiness, not a successful model call or
+end-to-end chat delivery. The host cannot alert if the host itself, the machine,
+or its network is down; use external heartbeat monitoring for that boundary.
+
 See the [troubleshooting guide](troubleshooting.md) for silent bots, frozen
 runs, stale `aria` commands, and log locations.

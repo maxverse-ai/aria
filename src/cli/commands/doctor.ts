@@ -7,6 +7,7 @@ import { loadRootConfig, readActiveProfile } from '../../config/profile-store';
 import { SUPERVISOR_SERVICE_ID } from '../../daemon/paths';
 import { getServiceAdapter } from '../../daemon/service-adapter';
 import { resolveExecutablePath } from '../../platform/executable';
+import { resolveCodexExecutable } from '../../agent/engines/codex/executable';
 import { spawnProcessSync } from '../../platform/spawn';
 import { checkRuntimeLock } from '../../runtime/locks';
 import { readAndPrune } from '../../runtime/registry';
@@ -178,7 +179,7 @@ async function engineCheck(
     return { id: 'engine', status: 'fail', message: `${kind}: no binary configured or probed` };
   }
   try {
-    const binary = await resolveExecutablePath(command);
+    const binary = await (kind === 'codex' ? resolveCodexExecutable(command) : resolveExecutablePath(command));
     return { id: 'engine', status: 'ok', message: `${kind} (${plugin.displayName}): ${binary}` };
   } catch {
     return { id: 'engine', status: 'fail', message: `${kind}: engine CLI not found on PATH (${command})` };

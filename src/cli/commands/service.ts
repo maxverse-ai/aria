@@ -2,7 +2,9 @@ import { isComplete } from '../../config/schema';
 import { createInterface } from 'node:readline';
 import { paths } from '../../config/paths';
 import { loadRootConfig, readActiveProfile } from '../../config/profile-store';
-import { daemonStderrPath, daemonStdoutPath, SUPERVISOR_SERVICE_ID } from '../../daemon/paths';
+import { daemonLogDir, daemonStderrPath, daemonStdoutPath, SUPERVISOR_SERVICE_ID } from '../../daemon/paths';
+import { join } from 'node:path';
+import { readDaemonHealth } from '../../daemon/health';
 import {
   getServiceAdapter,
   type ServiceAdapter,
@@ -643,6 +645,10 @@ function printAutostartStatus(adapter: ServiceAdapter): void {
 export async function runServiceStatus(opts: ServiceProfileOptions = {}): Promise<void> {
   const { serviceId, profile, webUi } = await resolveServiceTarget(opts);
   const adapter = requireAdapter('status', serviceId);
+  const daemonHealth = await readDaemonHealth(join(daemonLogDir(serviceId), 'health.json'));
+  if (!opts.json && daemonHealth && (daemonHealth.stale || daemonHealth.status === 'unavailable')) {
+    console.log(`⚠ daemon: ${daemonHealth.stale ? 'stale health state' : daemonHealth.status}; inspect daemon health.json and alerts.jsonl`);
+  }
   const snapshot = (state: 'not-installed' | 'stopped' | 'running', extra: Record<string, unknown> = {}) =>
     JSON.stringify(
       {
@@ -651,6 +657,7 @@ export async function runServiceStatus(opts: ServiceProfileOptions = {}): Promis
         serviceId,
         target: webUi ? 'supervisor' : 'profile',
         state,
+          ...(daemonHealth ? { daemonHealth } : {}),
         ...(adapter.autostartStatus ? { autostart: adapter.autostartStatus() } : {}),
         logs: { stdout: daemonStdoutPath(serviceId), stderr: daemonStderrPath(serviceId) },
         ...extra,

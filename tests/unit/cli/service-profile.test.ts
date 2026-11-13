@@ -51,6 +51,7 @@ vi.mock('../../../src/config/paths', () => ({
 }));
 
 vi.mock('../../../src/daemon/paths', () => ({
+  daemonLogDir: (profile: string) => `/tmp/lark-channel-home/profiles/${profile}/logs/daemon`,
   daemonStdoutPath: (profile: string) => `/tmp/lark-channel-home/profiles/${profile}/logs/daemon/stdout.log`,
   daemonStderrPath: (profile: string) => `/tmp/lark-channel-home/profiles/${profile}/logs/daemon/stderr.log`,
   SUPERVISOR_SERVICE_ID: 'supervisor',

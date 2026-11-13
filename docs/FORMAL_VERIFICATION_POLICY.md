@@ -28,6 +28,7 @@ prove semantic impact or exhaustively identify callers.
 
 | Protocol | Obligation and boundary |
 | --- | --- |
+| Windows daemon host | Health failure never kills a child or replays work; acknowledged notifications retain their incident until recovery delivery. One host, boolean child ownership, two starts and two failed observations. OS process death, named-pipe exclusion, shutdown and network delivery are environmental assumptions checked separately in implementation tests; no liveness claim. |
 | Codex resume | No submission after failed/stopped preparation, at most one submission per modeled run, exclusive scope ownership, bounded diagnostics and conditional settlement. Two runs and two connection generations; payload cost and native engine behavior are abstracted. |
 | Pool handoff | Transfer a reserved permit to the waiter. Fixed-cap model; real regressions additionally cover cap changes and idempotent release. |
 | Mailbox handoff/consumers | Known rejection preserves mail; competing consumers cannot both own a body. Storage claims are assumed exclusive. |

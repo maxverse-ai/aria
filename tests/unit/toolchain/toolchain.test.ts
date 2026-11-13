@@ -20,6 +20,7 @@ const requiredFiles = [
   "README.zh.md",
   "bin/aria.mjs",
   "dist/cli.js",
+  "dist/daemon.js",
   "dist/installer.js",
   "dist/updater.js",
   "dist/index.d.ts",

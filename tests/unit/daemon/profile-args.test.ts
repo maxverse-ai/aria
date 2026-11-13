@@ -12,6 +12,15 @@ import { buildLauncherCmd } from '../../../src/daemon/schtasks';
 import { buildUnit } from '../../../src/daemon/systemd';
 
 describe('profile-scoped daemon paths and arguments', () => {
+  it('launches the packaged host without dropping profile arguments or merging child and host logs', () => {
+    const script = buildLauncherCmd({runtimePath: 'C:\\runtime\\node.exe', bridgeEntryPath: 'C:\\aria\\bin\\aria.mjs',
+      hostEntryPath: 'C:\\aria\\dist\\daemon.js', envPath: 'C:\\tools', profile: 'codex',
+      runArgs: ['run', '--profile', 'codex'], channelHome: 'C:\\aria-state'});
+    expect(script).toContain('"C:\\aria\\dist\\daemon.js" "codex"');
+    expect(script).toContain('"C:\\runtime\\node.exe" "C:\\aria\\bin\\aria.mjs" run --profile codex');
+    expect(script).toContain('host-stderr.log');
+    expect(script).not.toContain('2>> "' + daemonStderrPath('codex') + '"');
+  });
   it('sanitizes service ids and gives each profile distinct service names and logs', () => {
     // ASCII-safe names pass through unchanged (stable existing labels).
     expect(serviceProfileId('codex_dev')).toBe('codex_dev');

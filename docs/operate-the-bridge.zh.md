@@ -175,5 +175,31 @@ aria completion bash   # 或 zsh / fish——打印待安装的补全脚本
 
 ## 故障排查
 
+### Windows 后台健康检查与告警
+
+新建或刷新的 Node/Bun 脚本服务启动器使用随包分发的独立守护进程。
+它只拥有一个桥接子进程，子进程退出后按 15 秒至 5 分钟退避重试，
+每 30 秒检查子进程的认证运行控制端点。健康检查失败只告警，不强杀
+无响应进程，不重放失败任务，也不绕过重启安全检查。没有
+`dist/daemon.js` 的编译或旧版分发保持原有行为。现有启动器需要显式
+执行 `aria start` 刷新并安全重启服务才生效，安装不会中断正在运行的 bot。
+
+profile 目录下的 `logs/daemon/health.json` 保存就绪状态、子进程 PID、
+最近退出和故障状态。连续两次失败才告警，每 30 分钟提醒一次，恢复后
+通知一次；通知失败会重试。告警始终写入 `logs/daemon/alerts.jsonl`，
+并尝试写入 Windows Application 事件 4100。守护进程输出单独保存在
+`host-stdout.log` 和 `host-stderr.log`。
+
+远程通知需主动配置：在同目录创建 `logs/daemon/alerts.json`，内容为
+`{"webhookUrl":"https://open.feishu.cn/open-apis/bot/v2/hook/REPLACE"}`。
+使用运维人员管理的飞书自定义机器人 webhook，并将文件权限限制到服务
+账号；URL 属于凭据。通知由守护进程直接发送，不经过桥接或编码 Agent，
+不会从聊天历史推断收件人，也不会复制聊天凭据。重定向、非 HTTPS 和
+平台拒绝均视为发送失败。不创建该文件则只记录本地告警。配置后应先在
+非生产 profile 验证通知，再依赖它值守。
+
+这些检查代表进程和控制端点就绪，不代表模型请求或聊天往返成功。
+守护进程自身、整机或网络不可用时无法保证通知，需要外部心跳监控覆盖。
+
 bot 无响应、运行卡死、`aria` 命令过期和日志位置见
 [故障排查指南](troubleshooting.zh.md)。

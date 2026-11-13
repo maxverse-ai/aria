@@ -9,6 +9,7 @@ export default defineConfig([
     entry: {
       cli: 'src/cli/index.ts',
       updater: 'src/updater/index.ts',
+      daemon: 'src/daemon/index.ts',
     },
     outDir: 'dist',
     define: buildIdentity,

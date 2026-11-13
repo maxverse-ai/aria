@@ -1,7 +1,7 @@
 import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { mkdir, rm, writeFile } from 'node:fs/promises';
-import { dirname } from 'node:path';
+import { dirname, join } from 'node:path';
 import {
   daemonLogDir,
   daemonStderrPath,
@@ -32,6 +32,8 @@ export interface LauncherInputs {
   runArgs: string[];
   /** Root directory for config/profile state. */
   channelHome: string;
+  /** Packaged independent host; omitted for compiled/legacy distributions. */
+  hostEntryPath?: string;
 }
 
 /**
@@ -53,7 +55,9 @@ export function buildLauncherCmd(inputs: LauncherInputs): string {
     '@echo off',
     `set "LARK_CHANNEL_HOME=${inputs.channelHome}"`,
     `set "PATH=${inputs.envPath}"`,
-    `"${inputs.runtimePath}"${inputs.bridgeEntryPath ? ` "${inputs.bridgeEntryPath}"` : ''} ${runArgs} >> "${daemonStdoutPath(inputs.profile)}" 2>> "${daemonStderrPath(inputs.profile)}"`,
+    inputs.hostEntryPath
+      ? `"${inputs.runtimePath}" "${inputs.hostEntryPath}" "${inputs.profile}" "${daemonLogDir(inputs.profile)}" "${inputs.runtimePath}" "${inputs.bridgeEntryPath ?? '-'}" ${runArgs} >> "${daemonLogDir(inputs.profile)}\\host-stdout.log" 2>> "${daemonLogDir(inputs.profile)}\\host-stderr.log"`
+      : `"${inputs.runtimePath}"${inputs.bridgeEntryPath ? ` "${inputs.bridgeEntryPath}"` : ''} ${runArgs} >> "${daemonStdoutPath(inputs.profile)}" 2>> "${daemonStderrPath(inputs.profile)}"`,
     '',
   ].join('\r\n');
 }
@@ -74,6 +78,11 @@ async function writeLauncherCmd(
     profile,
     runArgs,
     channelHome: paths.rootDir,
+    ...(bridgeEntryPath && existsSync(join(dirname(bridgeEntryPath), '..', 'dist', 'daemon.js'))
+      ? {hostEntryPath: join(dirname(bridgeEntryPath), '..', 'dist', 'daemon.js')}
+      : bridgeEntryPath && existsSync(join(dirname(bridgeEntryPath), 'daemon.js'))
+        ? {hostEntryPath: join(dirname(bridgeEntryPath), 'daemon.js')}
+        : {}),
   });
   const cmdPath = windowsLauncherCmdPath(profile);
   await mkdir(dirname(cmdPath), { recursive: true });
