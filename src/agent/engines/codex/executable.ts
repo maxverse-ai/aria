@@ -2,11 +2,13 @@ import { constants } from 'node:fs';
 import { access, readdir, realpath, stat } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { resolveExecutablePath } from '../../../platform/executable';
+import { checkAgentAvailability } from '../../preflight';
 
 interface DiscoveryOptions {
   platform?: NodeJS.Platform;
   localAppData?: string;
   resolveCommand?: (command: string) => Promise<string>;
+  probe?: (binary: string) => Promise<boolean>;
 }
 
 /** Explicit binaries stay pinned. Only the known Windows desktop installation
@@ -40,7 +42,15 @@ export async function resolveCodexExecutable(command: string, options: Discovery
       } catch { /* Incomplete/removed update candidate. */ }
     }
     candidates.sort((a, b) => b.modified - a.modified || a.binary.localeCompare(b.binary));
-    if (!candidates[0]) throw error;
-    return candidates[0].binary;
+    for (const candidate of candidates.slice(0, 8)) {
+      const valid = options.probe ? await options.probe(candidate.binary) : await probeDesktopCodex(candidate.binary);
+      if (valid) return candidate.binary;
+    }
+    throw error;
   }
+}
+
+async function probeDesktopCodex(binary: string): Promise<boolean> {
+  const result = await checkAgentAvailability({agentId: 'codex', agentName: 'Codex CLI', command: binary, binaryPath: binary, timeoutMs: 3000});
+  return result.ok && /^codex(?:-cli)?\s+\d+\.\d+\.\d+/i.test(result.version ?? '');
 }

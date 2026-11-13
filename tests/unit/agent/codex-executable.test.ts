@@ -17,7 +17,7 @@ describe('Codex executable discovery', () => {
     const replacement = join(root, '2222222222222222', 'codex.exe');
     await mkdir(join(root, '2222222222222222')); await writeFile(replacement, '', {mode: 0o700});
     const resolveCommand = vi.fn().mockRejectedValue(Object.assign(Error('missing'), {code: 'ENOENT'}));
-    expect(await resolveCodexExecutable(join(root, '1111111111111111', 'codex.exe'), {platform: 'win32', localAppData, resolveCommand})).toBe(replacement);
+    expect(await resolveCodexExecutable(join(root, '1111111111111111', 'codex.exe'), {platform: 'win32', localAppData, resolveCommand, probe: async () => true})).toBe(replacement);
   });
   it('does not switch an explicit independent binary to the desktop install', async () => {
     const {localAppData, root} = await fixture();
@@ -32,12 +32,15 @@ describe('Codex executable discovery', () => {
   });
   it('rediscovers after an update without caching a retired version', async () => {
     const {localAppData, root} = await fixture();
-    const options = {platform: 'win32' as const, localAppData, resolveCommand: vi.fn().mockRejectedValue(Error('stale PATH'))};
+    const options = {platform: 'win32' as const, localAppData, resolveCommand: vi.fn().mockRejectedValue(Error('stale PATH')), probe: async () => true};
     const first = join(root, '1111111111111111', 'codex.exe'); await mkdir(join(root, '1111111111111111')); await writeFile(first, '', {mode: 0o700});
     await utimes(first, 1, 1);
     expect(await resolveCodexExecutable('codex', options)).toBe(first);
     const second = join(root, '2222222222222222', 'codex.exe'); await mkdir(join(root, '2222222222222222')); await writeFile(second, '', {mode: 0o700});
     expect(await resolveCodexExecutable('codex', options)).toBe(second);
+    const rejectNew = vi.fn(async (binary: string) => binary !== second);
+    expect(await resolveCodexExecutable('codex', {...options, probe: rejectNew})).toBe(first);
+    expect(rejectNew).toHaveBeenCalledTimes(2);
     await expect(resolveCodexExecutable('codex', {...options, platform: 'linux'})).rejects.toThrow('stale PATH');
   });
 });

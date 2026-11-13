@@ -304,7 +304,7 @@ describe('profile runtime resolver', () => {
 
       expect(runtime.profile).toBe('codex');
       expect(runtime.profileConfig.agentKind).toBe('codex');
-      expect(runtime.profileConfig.codex?.binaryPath).toBe(codex);
+        expect(runtime.profileConfig.codex?.binaryPath).toBe('codex');
     } finally {
       process.env.PATH = oldPath;
       if (oldClaude === undefined) {

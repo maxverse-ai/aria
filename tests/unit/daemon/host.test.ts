@@ -18,12 +18,16 @@ describe('Windows daemon child ownership', () => {
   it('does not kill or replace a live child when readiness fails and sends one deduplicated alert', async () => {
     const processChild = child(123); mocks.spawn.mockReturnValue(processChild); mocks.health.mockRejectedValue(Error('busy/unreachable'));
     let tick = 0;
-    mocks.delay.mockImplementation(async () => {vi.setSystemTime(++tick * 30000); if(tick === 4) process.emit('SIGTERM');});
+    mocks.delay.mockImplementation(async () => {
+      vi.setSystemTime(++tick * 30000);
+      expect(processChild.kill).not.toHaveBeenCalled();
+      if(tick === 4) process.emit('SIGTERM');
+    });
     await runDaemonHost(options);
     expect(mocks.spawn).toHaveBeenCalledTimes(1);
     expect(mocks.alert).toHaveBeenCalledTimes(1);
     // Only explicit shutdown kills; failed readiness never does.
-    expect(processChild.kill).toHaveBeenCalledTimes(2);
+    expect(processChild.kill).toHaveBeenCalled();
     expect(mocks.close).toHaveBeenCalledOnce();
     const states = mocks.persist.mock.calls.map(call => JSON.parse(call[1]));
     expect(states.filter(s => s.status === 'unavailable').every(s => s.childPid === 123)).toBe(true);

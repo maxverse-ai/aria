@@ -36,6 +36,9 @@ new App Server launch resolves it again. On Windows only, a missing command or
 retired hash path in the current user's `LOCALAPPDATA/OpenAI/Codex/bin` may
 rediscover a regular executable in that same installation. Explicit independent
 paths remain pinned; Aria never silently replaces them with another installation.
+Discovery probes up to eight recent regular candidates for a valid Codex version;
+permission failures on a pinned desktop binary are not bypassed. App Server
+initialization still validates the selected executable's protocol before use.
 Existing connected App Servers and active requests are not restarted by discovery.
 For unattended operation, prefer a separately maintained CLI at a stable path.
 
